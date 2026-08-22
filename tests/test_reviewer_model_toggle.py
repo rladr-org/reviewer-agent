@@ -336,6 +336,65 @@ def test_a_timeout_above_the_shipped_hook_ceiling_is_refused(tmp_path):
     assert not any(monkey_home.rglob("*commit_timeout*")), "the rejected value was written anyway"
 
 
+def test_the_ceiling_is_found_in_the_shipped_manifest_without_any_user_settings(
+    tmp_path, monkeypatch
+):
+    """CAUGHT BY CI, 2026-08-22, on the first run against the public repository.
+
+    `test_a_timeout_above_the_shipped_hook_ceiling_is_refused` passed on the author's machine and
+    failed on every CI platform, which is the signature of a test resting on personal state: the
+    ceiling was being found in `~/.claude/settings.json`, whose legacy entry spells the hook as a
+    single command STRING. The shipped manifest spells it in EXEC form -- `"command": "python3"`
+    with the script in `args` -- so the resolver, which searched only `command`, found nothing
+    there and returned "no ceiling".
+
+    That is a product defect, not a test defect. On any plugin install (no legacy settings entry)
+    the ceiling check silently did nothing, so `/reviewerModel timeout 100000` was accepted --
+    and a budget above the hook's own timeout means Claude Code cancels the gate, which is a
+    NON-BLOCKING error, so the commit it was gating proceeds UNREVIEWED. The guard against
+    turning the fail-closed gate fail-open was itself inoperative.
+
+    This test pins the manifest path specifically, with HOME pointed at an empty directory so no
+    user settings can rescue it.
+    """
+    fake_home = tmp_path / "empty-home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    state = str(tmp_path / "rh")
+
+    p = run_toggle(["timeout", "100000"], state, {"HOME": str(fake_home)})
+
+    assert p.returncode != 0, (
+        "with no user settings the shipped manifest must still supply a ceiling:\n"
+        + p.stdout + p.stderr)
+    combined = (p.stdout + p.stderr).lower()
+    assert "hook" in combined
+    assert "3600" in combined, "the refusal should quote the manifest's own hook timeout"
+
+
+def test_the_ceiling_reads_the_exec_form_the_manifest_actually_uses(tmp_path, monkeypatch):
+    """The resolver must look where the script name IS, not where it used to be.
+
+    Both spellings are real: `hooks.json` ships exec form, and an older standalone install wires
+    a single command string in settings.json. Reading only one of them is how this went unnoticed
+    -- the author had the other."""
+    import reviewer_model_toggle as t
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "python3",
+             "args": ["/somewhere/commit_hook.py"], "timeout": 1234}]}]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(t.Path, "home", classmethod(lambda _cls: fake_home))
+
+    ceiling, where = t._hook_timeout_ceiling()
+
+    assert ceiling == 1234, "the exec-form hook was not recognised at all"
+    assert "settings.json" in where
+
+
 def test_timeout_below_the_floor_is_rejected(tmp_path, monkeypatch):
     # A too-small value would turn the fail-closed gate into "every commit blocked".
     home = str(tmp_path / "rh")

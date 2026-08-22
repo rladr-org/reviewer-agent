@@ -167,7 +167,16 @@ def _hook_timeout_ceiling():
 
     Read from the user settings the hooks actually run from, falling back to this plugin's own
     manifest. Only Bash hooks that carry the review are considered -- an unrelated Bash hook
-    being cancelled says nothing about the gate."""
+    being cancelled says nothing about the gate.
+
+    BOTH spellings of a hook are searched, and that is not defensive coding. `hooks.json` ships
+    the EXEC form -- `"command": "python3"` with the script in `args` -- while an older
+    standalone install wires a single command STRING in settings.json. Searching only `command`
+    matched nothing in the shipped manifest, so on an install with no legacy settings entry this
+    returned "no ceiling" and the refusal below never fired: a budget at or above the hook's own
+    timeout was accepted, when the whole point of the check is to refuse it. It went unnoticed
+    because the author's machine still carries the legacy string form and satisfied the lookup;
+    CI, which has no `~/.claude` at all, failed on every platform the first time it ran."""
     candidates = []
     settings = Path.home() / ".claude" / "settings.json"
     manifest = Path(__file__).resolve().parent / "hooks" / "hooks.json"
@@ -181,7 +190,11 @@ def _hook_timeout_ceiling():
             if not isinstance(entry, dict) or entry.get("matcher") != "Bash":
                 continue
             for hook in entry.get("hooks") or []:
-                command = str((hook or {}).get("command") or "")
+                args = (hook or {}).get("args")
+                command = " ".join(
+                    [str((hook or {}).get("command") or "")]
+                    + ([str(a) for a in args] if isinstance(args, (list, tuple)) else [])
+                )
                 if "commit_hook.py" not in command and "bash_gate.py" not in command:
                     continue
                 value = hook.get("timeout")
