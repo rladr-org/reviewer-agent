@@ -170,14 +170,13 @@ ADDITIONAL CHARGES, SUSPENSION, TERMINATION, OR LOSS OF ACCESS, WHETHER OR NOT T
 PERMITTED UNDER THE APPLICABLE PROVIDER TERMS. THE SAME APPLIES TO EVERY OTHER PROVIDER THIS
 SOFTWARE CAN DRIVE.
 
-## Limits on these terms
+## Maximum lawful limitation
 
-Some jurisdictions do not allow the exclusion of implied warranties or the limitation of certain
-damages, so parts of the exclusions above may not apply to you. **Nothing here excludes or limits
-liability that cannot lawfully be excluded or limited**, including, where applicable, liability
-for death or personal injury caused by negligence, or for fraud or fraudulent misrepresentation.
-In such cases liability is limited to the minimum extent permitted by applicable law. If any
-provision of this notice is held unenforceable, the remainder stays in force.
+Every disclaimer, exclusion, and limitation in this notice applies to the fullest extent permitted
+by applicable law. If applicable law requires any provision to be limited, that provision is
+limited only to the minimum extent required, and all remaining provisions continue in effect.
+Nothing in this notice creates or acknowledges any warranty, duty, liability, remedy, or cause of
+action.
 
 ## No professional relationship or support
 
