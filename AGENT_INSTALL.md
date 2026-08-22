@@ -49,17 +49,18 @@ Shell commands below carry an explicit `cd`, so no step depends on where the pre
 
 **Slash commands are different, and this is the trap.** `/reviewerAgent`, `/stopContinue` and the
 rest act on the directory **the Claude Code session is running in**. A `cd` inside a Bash step
-changes a subprocess, not the session, so it cannot move them. If you run `/reviewerAgent on` from
-a session opened in `<PLUGIN_DIR>`, you enable the gate on the plugin checkout and the target
-repository stays ungated — with no error, because that is a legitimate thing to ask for.
+changes a subprocess, not the session, so it cannot move them. If you run the accepting
+`/reviewerAgent on acceptRisk` invocation from a session opened in `<PLUGIN_DIR>`, you enable the
+gate on the plugin checkout and the target repository stays ungated — with no error, because that
+is a legitimate thing to ask for.
 
 So: **steps 4 to 7 must be run from a Claude Code session whose working directory is
 `<TARGET_REPO>`.** If `<PLUGIN_DIR>` and `<TARGET_REPO>` are the same directory, you are already
 there. If they are not, and your session is in `<PLUGIN_DIR>`, finish step 3 there, then open a
 session in `<TARGET_REPO>` and continue from step 4. Do not try to work around this from the shell.
 
-There is no status subcommand to check this with beforehand — `/reviewerAgent` takes `on` or `off`
-and nothing else. What you get instead is the path in its own success line:
+There is no status subcommand to check this with beforehand. What you get instead is the path in
+its own success line:
 
 ```
 reviewerAgent: ON for <root> - the reviewer is briefed on first use, ...
@@ -287,9 +288,10 @@ checkout; use the published `rladr-org/reviewer-agent` marketplace when installi
 the commands `/reviewerAgent`, `/reviewerDirective`, `/reviewerModel`, `/reviewerSession` and
 `/stopContinue` are offered.
 
-Hooks are snapshotted per session at start. An installing agent may finish steps 5 and 6 with the
-source scripts below, but the human must then restart Claude Code before step 7. A session that was
-already running keeps the old hook snapshot, so the gate can appear installed and do nothing.
+Hooks are snapshotted per session at start. An installing agent may finish step 5, but it must not
+accept risk or enable either feature for the operator. The human must restart Claude Code before
+step 6. A session that was already running keeps the old hook snapshot, so the gate can appear
+installed and do nothing.
 
 ## Step 5 — write the brief
 
@@ -316,26 +318,33 @@ tool is worth having.
 
 **Check:** `<TARGET_REPO>/reviewerAgent.md` exists and describes that repository specifically.
 
-## Step 6 — enable it, per repository
+## Step 6 — human acceptance and enablement, per repository
 
-**From a Claude Code session whose working directory is `<TARGET_REPO>`** — see *Two paths* above.
-The flags are keyed by the repository root, so running these from `<PLUGIN_DIR>` silently gates
-the wrong repository.
+This step is operator-only. The installing agent must stop here, point the operator to
+[`DISCLAIMER.md`](DISCLAIMER.md), and wait for the operator to restart Claude Code in
+`<TARGET_REPO>`. The agent must not run either source toggle or add `acceptRisk` on the operator's
+behalf.
+
+**From the restarted Claude Code session whose working directory is `<TARGET_REPO>`** — see *Two
+paths* above — the operator first invokes:
 
 ```
 /reviewerAgent on
-/stopContinue on          # optional, separate flag
 ```
 
-An installing agent can perform the same state changes before the restart, from
-`<TARGET_REPO>`, without asking the human to type slash commands:
+It must refuse without enabling and display:
 
-```bash
-python3 <PLUGIN_DIR>/toggle.py on
-python3 <PLUGIN_DIR>/stopcontinue_toggle.py on  # only when the operator selected it
+```text
+Before enabling reviewerAgent you must accept the risk as described in DISCLAIMER.md by invoking:
+/reviewerAgent on acceptRisk
 ```
 
-**Check first — the path in the output.** `/reviewerAgent on` replies
+After reading the disclaimer, the operator may invoke that exact command. If the operator selected
+stop supervision, `/stopContinue on` may then be invoked normally because one current receipt is
+shared by both features. If stopContinue is the first feature enabled instead, its plain `on`
+invocation requires `/stopContinue on acceptRisk`.
+
+**Check first — the path in the output.** `/reviewerAgent on acceptRisk` replies
 `reviewerAgent: ON for <root> ...`. If `<root>` is not `<TARGET_REPO>`, the session is in the wrong
 directory: `/reviewerAgent off`, then re-run from a session in `<TARGET_REPO>`. Do not continue
 until the reported root is correct — everything after this point would be verifying the wrong
@@ -345,7 +354,7 @@ If instead it prints `reviewerAgent: ERROR - brief not found at <path>`, nothing
 step 5 did not run, or the session is in a directory other than the one you wrote the brief in.
 Compare the path it names against step 5's file before doing anything else.
 
-**Check:** `/reviewerAgent on` reports that it armed `askUserQuestionTimeout`, or warns that it
+**Check:** the accepting invocation reports that it armed `askUserQuestionTimeout`, or warns that it
 could not write `~/.claude/settings.json`. A warning is not fatal for the commit gate, but question
 answering will never fire until it is resolved — report it rather than ignoring it.
 
@@ -366,10 +375,10 @@ Do not declare success on configuration alone. Make a trivial commit in the targ
 confirm a reviewer verdict appears — an approval or a rejection both prove the hook fired.
 
 For an agent-assisted installation, do not manufacture a commit in the operator's repository. The
-agent should finish configuration before the human-only restart, report that live gate verification
-is pending, and identify the first real commit after restart as the end-to-end check. If the operator
-explicitly requests an immediate proof, resume after restart and agree on a harmless test commit
-before changing Git history.
+agent should finish installation before the human-only restart and acceptance step, report that
+enablement and live gate verification are pending, and identify the first real commit after
+enablement as the end-to-end check. If the operator explicitly requests an immediate proof, resume
+after restart and agree on a harmless test commit before changing Git history.
 
 **Check:** the commit is either audited and allowed, or blocked with reasons. If it completes with
 no reviewer output at all, the hook did not run: return to step 4 and restart the session.

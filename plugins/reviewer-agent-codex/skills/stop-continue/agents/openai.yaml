@@ -2,4 +2,4 @@
 interface:
   display_name: "Stop Continue"
   short_description: "Toggle autonomous stop supervision"
-  default_prompt: "Use $reviewer-agent-codex:stop-continue to keep Codex working until the task is complete."
+  default_prompt: "Use $reviewer-agent-codex:stop-continue to toggle stop supervision. First enablement requires my exact on acceptRisk prompt after I read DISCLAIMER.md."

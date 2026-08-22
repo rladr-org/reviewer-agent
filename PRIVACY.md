@@ -37,7 +37,9 @@ Under `~/.claude/reviewer-agent/` (override with `REVIEWER_STATE_DIR`), and
 `~/.codex/reviewer-agent-codex/` for the Codex package (`REVIEWER_CODEX_STATE_DIR`):
 
 - **`state/`** — per-project flags, backend selection, directives, reviewer session ids,
-  watermarks, counters.
+  watermarks, counters, and risk-acceptance receipts. A receipt contains the repository identity,
+  disclaimer SHA-256 hash, acceptance source, and local Unix timestamp; it is shared by both
+  features within that host and repository.
 - **`reviews/`** — the latest verdict per project and session, plus a bounded history. **Verdicts
   quote the diffs they judged**, so this directory contains excerpts of your source code.
 - **`logs/reviewer.log`** — one line per gated action, including bounded tails of the verdict and
@@ -67,6 +69,10 @@ rm -rf ~/.codex/reviewer-agent-codex      # Codex package
 
 Reviewer conversations held by the provider are separate and live wherever that provider keeps
 them; this project stores only the thread identifiers needed to resume them.
+
+Disabling either feature leaves its risk-acceptance receipt in place. Deleting the applicable
+state directory removes the receipt along with all other local state, and a later enablement then
+requires a new explicit acceptance.
 
 ## Telemetry
 

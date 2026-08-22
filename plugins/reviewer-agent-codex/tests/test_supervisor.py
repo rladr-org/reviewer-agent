@@ -19,16 +19,17 @@ def test_disabled_stop_supervisor_is_inert(git_repo, isolated_state):
     assert supervisor.supervise(_payload(git_repo)) is None
 
 
-def test_cli_enable_without_turn_id_does_not_skip_a_later_stop(
+def test_cli_cannot_record_operator_risk_acceptance(
     git_repo, isolated_state, monkeypatch, capsys
 ):
     monkeypatch.chdir(git_repo)
-    assert cli.main(["stop", "on"]) == 0
-    capsys.readouterr()
-    output = supervisor.supervise(_payload(git_repo))
+    assert cli.main(["stop", "on"]) != 0
+    output = capsys.readouterr()
+    assert "acceptRisk" in output.err
+    assert not state.feature_enabled(git_repo, "stop")
 
-    assert output["decision"] == "block"
-    assert "stop_continue" in output["reason"]
+    assert cli.main(["stop", "on", "acceptRisk"]) == 2
+    assert not state.feature_enabled(git_repo, "stop")
 
 
 def test_first_stop_with_shell_marker_routes_to_minimal_supervisor(

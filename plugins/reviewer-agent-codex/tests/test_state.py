@@ -17,6 +17,15 @@ def test_features_are_independent_and_default_off(git_repo, isolated_state):
     assert state.feature_enabled(git_repo, "stop")
 
 
+def test_risk_acceptance_is_bound_to_the_current_disclaimer_hash(
+    git_repo, isolated_state
+):
+    state.record_risk_acceptance(git_repo, "first-hash", "trusted-user-prompt")
+
+    assert state.risk_accepted(git_repo, "first-hash")
+    assert not state.risk_accepted(git_repo, "changed-hash")
+
+
 def test_prompt_ledger_is_session_scoped(git_repo, isolated_state):
     state.record_prompt(git_repo, "session-a", "first")
     state.record_prompt(git_repo, "session-a", "second")

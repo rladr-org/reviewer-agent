@@ -6,7 +6,12 @@ from pathlib import Path
 from . import state
 
 
-def apply_feature_action(path, feature, action, turn_id=None):
+DISCLAIMER_PATH = Path(__file__).resolve().parent.parent / "DISCLAIMER.md"
+
+
+def apply_feature_action(
+    path, feature, action, turn_id=None, accept_risk=False, acceptance_source=None
+):
     root = state.project_root(path)
     label = "reviewerAgent" if feature == "reviewer" else "stopContinue"
     if not root:
@@ -15,6 +20,21 @@ def apply_feature_action(path, feature, action, turn_id=None):
         if feature == "reviewer" and not (Path(root) / "reviewerAgent.md").is_file():
             return 1, "reviewerAgent: ERROR - brief not found at {}".format(
                 Path(root) / "reviewerAgent.md"
+            )
+        disclaimer_hash = state.disclaimer_sha256(DISCLAIMER_PATH)
+        if not state.risk_accepted(root, disclaimer_hash):
+            if not accept_risk:
+                command = (
+                    "$reviewer-agent-codex:reviewer-agent on acceptRisk"
+                    if feature == "reviewer"
+                    else "$reviewer-agent-codex:stop-continue on acceptRisk"
+                )
+                return 1, (
+                    "Before enabling {} you must accept the risk as described in "
+                    "DISCLAIMER.md by invoking:\n{}"
+                ).format(label, command)
+            state.record_risk_acceptance(
+                root, disclaimer_hash, acceptance_source or "trusted-user-prompt"
             )
         state.set_feature(root, feature)
         if feature == "stop":

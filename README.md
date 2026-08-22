@@ -316,18 +316,29 @@ In each repository to protect:
    /reviewerAgent on
    ```
 
+   The first invocation does not enable anything. Read [`DISCLAIMER.md`](DISCLAIMER.md), then
+   accept its risks explicitly and enable:
+
+   ```text
+   /reviewerAgent on acceptRisk
+   ```
+
 4. Optionally enable stop supervision:
 
    ```text
    /stopContinue on
    ```
 
+   The acceptance receipt is shared by both features in this repository. If stopContinue is the
+   first one enabled, its plain `on` invocation gives the corresponding
+   `/stopContinue on acceptRisk` instruction.
+
 The flags are stored by canonical repository root, apply to linked worktrees, and persist across
 Claude Code restarts. `/reviewerAgent off` and `/stopContinue off` disable them independently.
 
-`/reviewerAgent on` also adds `askUserQuestionTimeout: 60s` to the user’s
-`~/.claude/settings.json` when the setting is absent. It never replaces an existing value. The
-setting takes effect in a new Claude Code session.
+The successful reviewerAgent enabling invocation also adds `askUserQuestionTimeout: 60s` to the
+user’s `~/.claude/settings.json` when the setting is absent. It never replaces an existing value.
+The setting takes effect in a new Claude Code session.
 
 For agent-assisted installation, start with [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md). The
 Claude-specific unattended procedure it invokes is [`AGENT_INSTALL.md`](AGENT_INSTALL.md).
@@ -353,8 +364,18 @@ After installation:
 
    ```text
    $reviewer-agent-codex:reviewer-agent on
+   ```
+
+   The first invocation refuses to enable anything. Read the plugin's `DISCLAIMER.md`, then use:
+
+   ```text
+   $reviewer-agent-codex:reviewer-agent on acceptRisk
    $reviewer-agent-codex:stop-continue on
    ```
+
+   One current receipt covers both features in that repository. If stopContinue is enabled first,
+   its plain `on` invocation instead requires
+   `$reviewer-agent-codex:stop-continue on acceptRisk`.
 
 Those settings persist across Codex restarts. They do not need to be re-enabled in each thread.
 A new thread is required after installing or updating the plugin so Codex loads its current tools,
@@ -567,8 +588,8 @@ is chosen explicitly or not at all.
 
 | Command | Purpose |
 |---|---|
-| `/reviewerAgent on\|off` | Enable or disable commit review and timed-out question answering. |
-| `/stopContinue on\|off` | Enable or disable stop supervision independently. |
+| `/reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
+| `/stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
 | `/reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
 | `/reviewerModel <model>` | Set the model for the selected backend. |
@@ -734,7 +755,8 @@ occurs, disable the reviewer and report it; do not rely on the isolation claim a
 
 **`AskUserQuestion` is never answered for you.** That path only fires when Claude Code
 auto-closes an *unanswered* question, which it only does when `askUserQuestionTimeout` is set in
-`~/.claude/settings.json`. `/reviewerAgent on` arms it; if that step warned, the key is missing.
+`~/.claude/settings.json`. A successful reviewerAgent enable arms it; if that step warned, the key
+is missing.
 
 Where to look when it is none of those: `~/.claude/reviewer-agent/logs/reviewer.log` has one
 line per gated action, with the exit code, the verdict tail and the stderr tail. The Codex
@@ -783,7 +805,7 @@ The question and stop paths each use a separate 300-second limit and fail open.
 
 These are the oldest versions this release was actually *exercised* on, not a minimum anyone
 undertakes to support, and not the oldest that can work. Older hosts are a caveat rather than a
-refusal: `/reviewerAgent on` and the Codex installer both detect the host version and print a
+refusal: a successful `/reviewerAgent on` and the Codex installer both detect the host version and print a
 warning below these floors, then continue. Newer versions are equally untested — a host that
 changes underneath this project can break it at any time, and nothing here promises otherwise.
 

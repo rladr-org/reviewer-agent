@@ -56,6 +56,7 @@ REQUIRED_PATHS = (
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
     "plugins/reviewer-agent-codex/LICENSE",
+    "plugins/reviewer-agent-codex/DISCLAIMER.md",
     "plugins/reviewer-agent-codex/.codex-plugin/plugin.json",
 )
 

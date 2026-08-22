@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from reviewer_base import (
@@ -460,6 +461,51 @@ def flag_file(proj):
     # Keyed by the CANONICAL project root so the toggle set from the main checkout, a
     # linked worktree, or a subdirectory all resolve to the same flag (the worktree fix).
     return reviewer_home() / "state" / (_project_control_stem(proj) + ".active")
+
+
+# --------------------------------------------------------------------------
+# explicit risk acceptance: one receipt per host/repository, shared by both
+# reviewerAgent and stopContinue and invalidated whenever DISCLAIMER.md changes.
+# --------------------------------------------------------------------------
+def disclaimer_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def risk_acceptance_file(proj):
+    return reviewer_home() / "state" / (
+        _project_control_stem(proj) + ".risk.accepted.json"
+    )
+
+
+def risk_accepted(proj, disclaimer_hash):
+    try:
+        record = json.loads(risk_acceptance_file(proj).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(
+        isinstance(record, dict)
+        and record.get("project") == canonical_project_key(proj)
+        and record.get("disclaimer_sha256") == str(disclaimer_hash)
+    )
+
+
+def record_risk_acceptance(proj, disclaimer_hash, source):
+    root = canonical_project_key(proj)
+    target = risk_acceptance_file(root)
+    _atomic_write_text(
+        target,
+        json.dumps(
+            {
+                "accepted_at_unix": int(time.time()),
+                "disclaimer_sha256": str(disclaimer_hash),
+                "project": root,
+                "source": str(source),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    return target
 
 
 # --------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 ---
-description: Toggle stopContinue completion supervision for this project. It may direct the agent to continue unfinished work already authorized by the operator. Separate from /reviewerAgent. Usage: /stopContinue on|off
+description: Toggle stopContinue completion supervision for this project. It may direct the agent to continue unfinished work already authorized by the operator. Separate from /reviewerAgent. Usage: /stopContinue on [acceptRisk]|off
 allowed-tools: Bash(python3:*)
 disable-model-invocation: true
 ---
@@ -12,3 +12,7 @@ Relay that result to the user in one short line, quoting the state verbatim from
 `stopContinue: ON ...`, `stopContinue: OFF ...`, or `stopContinue: ERROR ...` (surface any error
 text exactly). If the output carries a second `stopContinue: WARNING ...` line, relay that warning
 verbatim. Add no other commentary and take no further action.
+
+On first use, plain `on` instead instructs the operator to read `DISCLAIMER.md` and invoke
+`/stopContinue on acceptRisk`. Relay that instruction verbatim. Never add `acceptRisk` for the
+operator or invoke the source script yourself.

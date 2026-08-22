@@ -13,7 +13,7 @@ from reviewer_codex.supervisor import CONTINUATION_PREFIX
 
 _CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:(reviewer-agent|stop-continue)\s+"
-    r"(on|off|status)\s*$"
+    r"(on|off|status)(?:\s+(acceptRisk))?\s*$"
 )
 _SESSION_CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:reviewer-session\s+"
@@ -30,18 +30,27 @@ def _control_output(data, prompt):
     session_match = _SESSION_CONTROL_RE.fullmatch(prompt)
     history_match = _HISTORY_CONTROL_RE.fullmatch(prompt)
     if match:
-        skill, action = match.groups()
+        skill, action, acceptance = match.groups()
         feature = "reviewer" if skill == "reviewer-agent" else "stop"
         label = "reviewerAgent" if feature == "reviewer" else "stopContinue"
-        try:
-            code, message = controls.apply_feature_action(
-                data.get("cwd") or ".", feature, action, turn_id=data.get("turn_id")
-            )
-        except (OSError, ValueError) as error:
+        if acceptance and action != "on":
             code = 1
-            message = "{}: ERROR - could not update plugin state: {}".format(
-                label, error
-            )
+            message = "{}: ERROR - acceptRisk is valid only with on".format(label)
+        else:
+            try:
+                code, message = controls.apply_feature_action(
+                    data.get("cwd") or ".",
+                    feature,
+                    action,
+                    turn_id=data.get("turn_id"),
+                    accept_risk=bool(acceptance),
+                    acceptance_source="trusted-user-prompt",
+                )
+            except (OSError, ValueError) as error:
+                code = 1
+                message = "{}: ERROR - could not update plugin state: {}".format(
+                    label, error
+                )
     elif session_match:
         try:
             code, message = controls.apply_reviewer_session_action(

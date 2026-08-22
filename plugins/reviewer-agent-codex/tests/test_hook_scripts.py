@@ -166,7 +166,9 @@ def test_hook_continuation_does_not_clear_cancelled_stop_bypass(
     )
 
 
-def test_prompt_hook_applies_reviewer_toggle_without_shell(git_repo, isolated_state):
+def test_prompt_hook_requires_explicit_risk_acceptance_before_enabling(
+    git_repo, isolated_state
+):
     (git_repo / "reviewerAgent.md").write_text("Review the staged index.\n", encoding="utf-8")
     payload = {
         "session_id": "root",
@@ -178,13 +180,98 @@ def test_prompt_hook_applies_reviewer_toggle_without_shell(git_repo, isolated_st
     result = _run("hook_prompt.py", payload, isolated_state)
 
     assert result.returncode == 0
-    assert state.feature_enabled(git_repo, "reviewer")
+    assert not state.feature_enabled(git_repo, "reviewer")
     output = json.loads(result.stdout)
-    assert output["systemMessage"] == "reviewerAgent: ON for {}".format(git_repo)
+    assert (
+        "Before enabling reviewerAgent you must accept the risk as described in "
+        "DISCLAIMER.md by invoking:" in output["systemMessage"]
+    )
+    assert (
+        "$reviewer-agent-codex:reviewer-agent on acceptRisk"
+        in output["systemMessage"]
+    )
     assert output["continue"] is False
     assert output["stopReason"] == output["systemMessage"]
     assert "hookSpecificOutput" not in output
     assert state.recent_prompts(git_repo, "root") == []
+
+
+def test_prompt_hook_accepts_risk_and_enables_reviewer_in_one_turn(
+    git_repo, isolated_state
+):
+    (git_repo / "reviewerAgent.md").write_text("Review the staged index.\n", encoding="utf-8")
+    payload = {
+        "session_id": "root",
+        "cwd": str(git_repo),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "$reviewer-agent-codex:reviewer-agent on acceptRisk",
+    }
+
+    result = _run("hook_prompt.py", payload, isolated_state)
+
+    assert result.returncode == 0
+    assert state.feature_enabled(git_repo, "reviewer")
+    output = json.loads(result.stdout)
+    assert output["systemMessage"] == "reviewerAgent: ON for {}".format(git_repo)
+    assert output["continue"] is False
+
+
+def test_prompt_hook_requires_explicit_risk_acceptance_before_enabling_stop(
+    git_repo, isolated_state
+):
+    payload = {
+        "session_id": "root",
+        "cwd": str(git_repo),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "$reviewer-agent-codex:stop-continue on",
+    }
+
+    result = _run("hook_prompt.py", payload, isolated_state)
+
+    assert result.returncode == 0
+    assert not state.feature_enabled(git_repo, "stop")
+    output = json.loads(result.stdout)
+    assert (
+        "Before enabling stopContinue you must accept the risk as described in "
+        "DISCLAIMER.md by invoking:" in output["systemMessage"]
+    )
+    assert (
+        "$reviewer-agent-codex:stop-continue on acceptRisk"
+        in output["systemMessage"]
+    )
+    assert output["continue"] is False
+
+
+def test_reviewer_acceptance_is_shared_with_stopcontinue(git_repo, isolated_state):
+    (git_repo / "reviewerAgent.md").write_text(
+        "Review the staged index.\n", encoding="utf-8"
+    )
+    base = {
+        "session_id": "root",
+        "cwd": str(git_repo),
+        "hook_event_name": "UserPromptSubmit",
+    }
+    accepted = _run(
+        "hook_prompt.py",
+        dict(
+            base,
+            prompt="$reviewer-agent-codex:reviewer-agent on acceptRisk",
+        ),
+        isolated_state,
+    )
+    assert accepted.returncode == 0
+
+    enabled = _run(
+        "hook_prompt.py",
+        dict(base, prompt="$reviewer-agent-codex:stop-continue on"),
+        isolated_state,
+    )
+
+    assert enabled.returncode == 0
+    assert state.feature_enabled(git_repo, "stop")
+    assert json.loads(enabled.stdout)["systemMessage"] == (
+        "stopContinue: ON for {}".format(git_repo)
+    )
 
 
 def test_prompt_hook_rotates_only_the_current_commit_reviewer_session(
@@ -265,7 +352,7 @@ def test_prompt_hook_reports_state_write_failure(git_repo, tmp_path):
         "session_id": "root",
         "cwd": str(git_repo),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "$reviewer-agent-codex:stop-continue on",
+        "prompt": "$reviewer-agent-codex:stop-continue on acceptRisk",
     }
     env = dict(
         os.environ,
@@ -297,7 +384,7 @@ def test_prompt_hook_arms_stop_after_the_enabling_turn(
         "turn_id": "enable-turn",
         "cwd": str(git_repo),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "$reviewer-agent-codex:stop-continue on",
+        "prompt": "$reviewer-agent-codex:stop-continue on acceptRisk",
     }
     result = _run("hook_prompt.py", payload, isolated_state)
     assert result.returncode == 0
@@ -322,7 +409,7 @@ def test_stop_activation_marker_does_not_skip_a_later_turn(
         "turn_id": "enable-turn",
         "cwd": str(git_repo),
         "hook_event_name": "UserPromptSubmit",
-        "prompt": "$reviewer-agent-codex:stop-continue on",
+        "prompt": "$reviewer-agent-codex:stop-continue on acceptRisk",
     }
     assert _run("hook_prompt.py", enable_payload, isolated_state).returncode == 0
     later_stop = {

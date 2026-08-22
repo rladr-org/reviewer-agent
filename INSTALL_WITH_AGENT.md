@@ -5,8 +5,8 @@
 
 This is the single handoff file for agent-assisted installation of either the Claude Code plugin
 or the Codex plugin. It minimizes manual setup without pretending that an agent can authenticate
-accounts, approve its own elevated writes, restart its host, or trust lifecycle hooks on a human's
-behalf.
+accounts, approve its own elevated writes, restart its host, trust lifecycle hooks, or accept the
+software's risks on a human's behalf.
 
 ## What the human must do
 
@@ -34,7 +34,8 @@ human-only checkpoint, restart the developer host. For Codex, also run `/hooks` 
 
 ## Procedure for the installing agent
 
-Read this entire file before acting. Do not ask the human to run a command that the agent can run.
+Read this entire file before acting. Do not ask the human to run a command that the agent can run,
+except that only the human may make the exact `acceptRisk` invocation described below.
 Use the host's normal approval mechanism for external writes, and stop on a failed verification
 rather than declaring a partial fail-closed gate installed.
 
@@ -93,22 +94,10 @@ Refuse to overwrite `<TARGET_REPO>/reviewerAgent.md`. If it is absent, copy
 real fitness criteria, commands, and known defect classes. Configure the selected backend exactly
 as `AGENT_INSTALL.md` specifies.
 
-From `<TARGET_REPO>`, enable the commit reviewer directly so setup can finish before the host
-restart:
-
-```bash
-python3 <INSTALLER_REPO>/toggle.py on
-```
-
-If and only if the operator selected stop supervision, also run:
-
-```bash
-python3 <INSTALLER_REPO>/stopcontinue_toggle.py on
-```
-
-Verify the reported canonical root equals `<TARGET_REPO>`, the selected backend reads back
-correctly, the reviewer flag is on, and `askUserQuestionTimeout` is armed or its warning is
-reported. Do not make a demo commit in the target repository unless the operator explicitly asks.
+Verify that the selected backend reads back correctly. Do not run either toggle script: the
+operator must read `DISCLAIMER.md` and personally invoke the exact `acceptRisk` command after the
+host restart. Do not make a demo commit in the target repository unless the operator explicitly
+asks.
 
 ### 4B. Codex installation
 
@@ -120,23 +109,10 @@ python3 plugins/reviewer-agent-codex/scripts/install_local.py
 
 Refuse to overwrite `<TARGET_REPO>/reviewerAgent.md`. If it is absent, copy
 `<INSTALLER_REPO>/plugins/reviewer-agent-codex/reviewerAgent.md.template` there and edit it for the
-target repository. Then, from `<TARGET_REPO>`, enable and verify the requested features with the
-source checkout's deterministic CLI:
-
-```bash
-python3 <INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/toggle.py reviewer on
-python3 <INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/toggle.py reviewer status
-```
-
-If and only if the operator selected stop supervision, run:
-
-```bash
-python3 <INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/toggle.py stop on
-python3 <INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/toggle.py stop status
-```
-
-Verify every reported root equals `<TARGET_REPO>`. Do not substitute `codex plugin add`: the local
-installer also configures the blocking reviewer MCP namespace as a direct-only tool.
+target repository. Do not run the source checkout's toggle CLI: it cannot record operator risk
+acceptance. The operator must read the plugin's `DISCLAIMER.md` and personally invoke the exact
+`acceptRisk` command from a new, trusted Codex thread. Do not substitute `codex plugin add`: the
+local installer also configures the blocking reviewer MCP namespace as a direct-only tool.
 
 ### 5. Human-only checkpoint and final report
 
@@ -146,8 +122,24 @@ After all agent-executable checks pass, tell the human exactly what remains:
 - Codex: start a new Codex thread in `<TARGET_REPO>`, run `/hooks`, inspect the
   `reviewer-agent-codex` entries, and trust them.
 
-Report the host, selected backend where applicable, enabled features, canonical target root,
+Then tell the human to invoke plain `on` first. It must refuse without enabling and display the
+exact accepting form. After reading `DISCLAIMER.md`, the human may type that exact form:
+
+```text
+/reviewerAgent on
+/reviewerAgent on acceptRisk
+
+$reviewer-agent-codex:reviewer-agent on
+$reviewer-agent-codex:reviewer-agent on acceptRisk
+```
+
+Show only the pair for the installed host. One current repository receipt covers both features, so
+the human may then use plain `/stopContinue on` or
+`$reviewer-agent-codex:stop-continue on` if stop supervision was selected. If stopContinue is
+enabled first, its plain `on` response supplies its own `on acceptRisk` form.
+
+Report the host, selected backend where applicable, requested features, canonical target root,
 installed version, test results, every external path changed, and any warning. State that the first
-real commit after restart is the end-to-end gate verification. Say plainly: live gate verification is pending
-until then. Do not claim hooks ran in the old thread: both hosts load newly installed plugin
-components at a new-session boundary.
+real commit after operator acceptance is the end-to-end gate verification. Say plainly: enablement
+and live gate verification are pending until then. Do not claim hooks ran in the old thread: both
+hosts load newly installed plugin components at a new-session boundary.

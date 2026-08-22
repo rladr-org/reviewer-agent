@@ -11,7 +11,7 @@ those materials. Third-party software and other material remain governed by thei
 terms.
 
 This notice supplements — and does not modify, limit or replace — the terms of the
-[Mozilla Public License 2.0](LICENSE) under which this software is distributed, in particular its
+[Mozilla Public License 2.0](https://github.com/rladr-org/reviewer-agent/blob/main/LICENSE) under which this software is distributed, in particular its
 Section 6 (Disclaimer of Warranty) and Section 7 (Limitation of Liability). Where this notice and
 the licence differ, the licence governs.
 
@@ -69,6 +69,25 @@ ANY CONTRIBUTOR — ARE SOLELY RESPONSIBLE FOR EVERYTHING THE SOFTWARE AND THE A
 DO IN YOUR ENVIRONMENT, FOR ALL CODE COMMITTED WITH ITS INVOLVEMENT, AND FOR ALL CONSEQUENCES OF
 ITS USE.
 
+## Explicit acceptance before enablement
+
+The software does not enable `reviewerAgent` or `stopContinue` for a repository until the operator
+expressly invokes the applicable `on acceptRisk` command. By doing so, the operator acknowledges
+that they have read and agree to this notice, including its assumption of risk, warranty
+disclaimers, and limitations of liability. The currently supported accepting forms are:
+
+```text
+/reviewerAgent on acceptRisk
+/stopContinue on acceptRisk
+$reviewer-agent-codex:reviewer-agent on acceptRisk
+$reviewer-agent-codex:stop-continue on acceptRisk
+```
+
+The software records that acceptance locally for the repository and the exact version of this
+notice. One current receipt covers both features within the same host and repository. If this
+notice changes, the old receipt no longer enables either feature and the operator must accept the
+changed notice explicitly. Removing or disabling a feature does not require acceptance.
+
 ---
 
 ## What this software actually does, in plain terms
@@ -82,7 +101,7 @@ You are not installing a linter. Understand these before you enable it:
    resources, and reach the network. A repository you do not trust becomes a code-execution
    vector against your machine.
 3. **It sends your code to a third-party AI provider** under your own credentials, subject to
-   that provider's terms and data handling. See [`PRIVACY.md`](PRIVACY.md).
+   that provider's terms and data handling. See [`PRIVACY.md`](https://github.com/rladr-org/reviewer-agent/blob/main/PRIVACY.md).
 4. **Its verdicts are model output, and can be wrong in both directions** — approving a change
    with defects, security flaws, or licence problems, and rejecting a correct one.
 5. **It can be manipulated by the content it reads.** A crafted diff, dependency, or file is a
@@ -132,8 +151,10 @@ Users are responsible for:
 
 ## Documentation is informational only
 
-`README.md`, [`SECURITY.md`](SECURITY.md), [`PRIVACY.md`](PRIVACY.md),
-[`CONTRIBUTING.md`](CONTRIBUTING.md), [`CHANGELOG.md`](CHANGELOG.md), and every other document,
+`README.md`, [`SECURITY.md`](https://github.com/rladr-org/reviewer-agent/blob/main/SECURITY.md),
+[`PRIVACY.md`](https://github.com/rladr-org/reviewer-agent/blob/main/PRIVACY.md),
+[`CONTRIBUTING.md`](https://github.com/rladr-org/reviewer-agent/blob/main/CONTRIBUTING.md),
+[`CHANGELOG.md`](https://github.com/rladr-org/reviewer-agent/blob/main/CHANGELOG.md), and every other document,
 comment, prompt, and message in this project are provided **for information only**. They describe
 intent, not guaranteed behaviour. They may be incomplete, inaccurate, or out of date, and the
 software may behave differently from any description of it. **Nothing in them is a warranty,

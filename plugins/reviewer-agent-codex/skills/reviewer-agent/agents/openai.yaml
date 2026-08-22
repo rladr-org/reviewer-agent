@@ -2,4 +2,4 @@
 interface:
   display_name: "Reviewer Agent"
   short_description: "Toggle the autonomous commit reviewer"
-  default_prompt: "Use $reviewer-agent-codex:reviewer-agent to enable autonomous commit review in this repository."
+  default_prompt: "Use $reviewer-agent-codex:reviewer-agent to toggle autonomous commit review. First enablement requires my exact on acceptRisk prompt after I read DISCLAIMER.md."

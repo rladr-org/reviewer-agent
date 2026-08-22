@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""`/reviewerAgent on|off` implementation.
+"""`/reviewerAgent on [acceptRisk]|off` implementation.
 
 on:  verify cwd is a git repo -> verify ./reviewerAgent.md exists -> create the
      per-project active flag. Validation is local, so this is INSTANT: backend briefing
@@ -16,7 +16,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
 
 
-def _on(proj):
+_DISCLAIMER = Path(__file__).resolve().parent / "DISCLAIMER.md"
+
+
+def _acceptance_required():
+    print(
+        "Before enabling reviewerAgent you must accept the risk as described in "
+        "DISCLAIMER.md by invoking:\n/reviewerAgent on acceptRisk",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _on(proj, accept_risk=False):
     # Key + brief at the CANONICAL project root so `on` works from the main checkout, a
     # subdirectory, or a worktree (where reviewerAgent.md may not be checked out), and the
     # flag is keyed identically to how the hooks resolve it.
@@ -33,6 +45,20 @@ def _on(proj):
         print(
             "reviewerAgent: ERROR - brief not found at {}. Create reviewerAgent.md "
             "first.".format(brief),
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        disclaimer_hash = rl.disclaimer_sha256(_DISCLAIMER)
+        if not rl.risk_accepted(root, disclaimer_hash):
+            if not accept_risk:
+                return _acceptance_required()
+            rl.record_risk_acceptance(
+                root, disclaimer_hash, "/reviewerAgent on acceptRisk"
+            )
+    except OSError as error:
+        print(
+            "reviewerAgent: ERROR - could not record risk acceptance: {}".format(error),
             file=sys.stderr,
         )
         return 1
@@ -65,14 +91,9 @@ _RISK_NOTICE = (
 
 
 def _state_the_risk(root):
-    """Print the risk notice, naming the DISCLAIMER shipped alongside this file.
-
-    Never fatal, and deliberately not a prompt: `/reviewerAgent on` is a slash command whose
-    output the operator reads, with no way to answer a question, so blocking on acknowledgement
-    would wedge the command rather than inform anyone."""
+    """Print the risk notice after explicit acceptance and successful enablement."""
     try:
-        disclaimer = Path(__file__).resolve().parent / "DISCLAIMER.md"
-        print(_RISK_NOTICE.format(disclaimer))
+        print(_RISK_NOTICE.format(_DISCLAIMER))
         rl.log("[on] risk notice shown root={}".format(root))
     except Exception:  # a notice must never be the reason enabling fails
         pass
@@ -127,14 +148,17 @@ def _arm_question_answering():
 def main(argv):
     action = argv[1].strip().lower() if len(argv) > 1 else ""
     proj = rl.project_dir()
-    if action == "on":
-        return _on(proj)
-    if action == "off":
+    if action == "on" and len(argv) in (2, 3):
+        if len(argv) == 3 and argv[2] != "acceptRisk":
+            print("usage: toggle.py on [acceptRisk]|off", file=sys.stderr)
+            return 2
+        return _on(proj, accept_risk=len(argv) == 3)
+    if action == "off" and len(argv) == 2:
         root = rl.canonical_project_key(proj)
         rl.clear_active(root)
         print("reviewerAgent: OFF for {}".format(root))
         return 0
-    print("usage: toggle.py on|off", file=sys.stderr)
+    print("usage: toggle.py on [acceptRisk]|off", file=sys.stderr)
     return 2
 
 

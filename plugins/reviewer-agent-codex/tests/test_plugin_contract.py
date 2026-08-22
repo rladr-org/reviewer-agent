@@ -203,6 +203,12 @@ def test_reviewer_brief_template_uses_namespaced_skill_invocation():
     assert "`$reviewer-agent on`" not in template
 
 
+def test_plugin_packages_the_same_disclaimer_as_the_repository_root():
+    plugin_notice = (ROOT / "DISCLAIMER.md").read_bytes()
+    repository_notice = (ROOT.parent.parent / "DISCLAIMER.md").read_bytes()
+    assert plugin_notice == repository_notice
+
+
 def test_toggle_skills_use_prompt_hook_without_shell_write():
     for name in ("reviewer-agent", "stop-continue"):
         instructions = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")

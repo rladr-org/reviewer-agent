@@ -1,6 +1,6 @@
 ---
 name: reviewerAgent
-description: Toggle the reviewer agent on/off for the current project (it gates git commits and answers unanswered AskUserQuestion prompts, via the configured backend - codex by default, or pi or claude). Invoke as /reviewerAgent on or /reviewerAgent off.
+description: Toggle the reviewer agent for the current project (it gates git commits and answers unanswered AskUserQuestion prompts, via the configured backend - codex by default, or pi or claude). First enablement requires the operator's exact /reviewerAgent on acceptRisk invocation after reading DISCLAIMER.md.
 argument-hint: on | off
 disable-model-invocation: true
 allowed-tools: Bash(python3:*)

@@ -20,8 +20,9 @@ def run_toggle(action, proj, home, codex_env=None):
     env["REVIEWER_CODEX_BIN"] = FAKE
     if codex_env:
         env.update(codex_env)
+    args = [action] if isinstance(action, str) else list(action)
     return subprocess.run(
-        [sys.executable, TOGGLE, action], capture_output=True, text=True, env=env
+        [sys.executable, TOGGLE, *args], capture_output=True, text=True, env=env
     )
 
 
@@ -39,10 +40,33 @@ def flag_exists(home, proj, monkeypatch):
     return rl.is_active(proj)
 
 
-def test_on_creates_flag_in_git_repo_with_brief(tmp_path, monkeypatch):
+def test_first_on_requires_explicit_risk_acceptance_without_mutating_state(
+    tmp_path, monkeypatch
+):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
-    p = run_toggle("on", proj, home, {"FAKE_CODEX_STDOUT": "ack", "FAKE_CODEX_EXIT": "0"})
+    settings = tmp_path / "user_settings.json"
+    p = run_toggle("on", proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)})
+
+    assert p.returncode != 0
+    assert not flag_exists(home, proj, monkeypatch)
+    assert not settings.exists()
+    assert (
+        "Before enabling reviewerAgent you must accept the risk as described in "
+        "DISCLAIMER.md by invoking:" in (p.stdout + p.stderr)
+    )
+    assert "/reviewerAgent on acceptRisk" in (p.stdout + p.stderr)
+
+
+def test_on_accept_risk_creates_flag_in_git_repo_with_brief(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    proj = make_repo(tmp_path)
+    p = run_toggle(
+        ["on", "acceptRisk"],
+        proj,
+        home,
+        {"FAKE_CODEX_STDOUT": "ack", "FAKE_CODEX_EXIT": "0"},
+    )
     assert p.returncode == 0, p.stderr
     assert flag_exists(home, proj, monkeypatch)
     assert "ON" in p.stdout
@@ -53,7 +77,7 @@ def test_on_creates_flag_in_git_repo_with_brief(tmp_path, monkeypatch):
 def test_off_removes_flag(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
-    run_toggle("on", proj, home, {"FAKE_CODEX_STDOUT": "ack"})
+    run_toggle(["on", "acceptRisk"], proj, home, {"FAKE_CODEX_STDOUT": "ack"})
     assert flag_exists(home, proj, monkeypatch)
     p = run_toggle("off", proj, home)
     assert p.returncode == 0
@@ -93,7 +117,7 @@ def test_on_does_not_run_the_codex_brief(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     p = run_toggle(
-        "on",
+        ["on", "acceptRisk"],
         proj,
         home,
         {
@@ -113,7 +137,7 @@ def test_on_tells_the_operator_briefing_is_lazy(tmp_path):
     # (commit / question / stop) is expected to take a moment.
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
-    p = run_toggle("on", proj, home, {"FAKE_CODEX_STDOUT": "ack"})
+    p = run_toggle(["on", "acceptRisk"], proj, home, {"FAKE_CODEX_STDOUT": "ack"})
     assert p.returncode == 0, p.stderr
     assert "first" in p.stdout.lower()
 
@@ -130,7 +154,9 @@ def test_on_arms_the_askuserquestion_timeout(tmp_path):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     settings = tmp_path / "user_settings.json"
-    p = run_toggle("on", proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)})
+    p = run_toggle(
+        ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
+    )
     assert p.returncode == 0, p.stderr
     assert json.loads(settings.read_text())["askUserQuestionTimeout"] == "60s"
     assert "askUserQuestionTimeout" in p.stdout
@@ -141,7 +167,9 @@ def test_on_never_overrides_a_timeout_the_operator_chose(tmp_path):
     proj = make_repo(tmp_path)
     settings = tmp_path / "user_settings.json"
     settings.write_text(json.dumps({"askUserQuestionTimeout": "10m", "model": "opus"}))
-    p = run_toggle("on", proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)})
+    p = run_toggle(
+        ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
+    )
     assert p.returncode == 0, p.stderr
     data = json.loads(settings.read_text())
     assert data["askUserQuestionTimeout"] == "10m"  # the operator's choice stands
@@ -155,7 +183,9 @@ def test_on_surfaces_a_timeout_failure_without_blocking_enable(tmp_path, monkeyp
     proj = make_repo(tmp_path)
     settings = tmp_path / "user_settings.json"
     settings.write_text('{"model": "opus",}')
-    p = run_toggle("on", proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)})
+    p = run_toggle(
+        ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
+    )
     assert p.returncode == 0, p.stderr
     assert flag_exists(home, proj, monkeypatch)  # enabling still succeeded
     out = p.stdout + p.stderr
@@ -171,7 +201,8 @@ def test_on_does_not_persist_a_session_id(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     run_toggle(
-        "on", proj, home, {"FAKE_CODEX_STDOUT": "ack", "FAKE_CODEX_SESSION_ID": "codex-X"}
+        ["on", "acceptRisk"], proj, home,
+        {"FAKE_CODEX_STDOUT": "ack", "FAKE_CODEX_SESSION_ID": "codex-X"}
     )
     monkeypatch.setenv("REVIEWER_HOME", home)
     state = Path(home) / "state"

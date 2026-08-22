@@ -1,9 +1,9 @@
 # reviewer-agent-codex
 
 
-> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has been run in one person's private installation on macOS Tahoe and nowhere else. Use it entirely at your own risk: see [`DISCLAIMER.md`](../../DISCLAIMER.md).
+> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has been run in one person's private installation on macOS Tahoe and nowhere else. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
 
-> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](../../DISCLAIMER.md) and [`LICENSE`](../../LICENSE).
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
 
 A Codex-native autonomous reviewer with two independent, per-repository capabilities:
 
@@ -287,16 +287,28 @@ invoke the bundled skills:
 
 ```text
 $reviewer-agent-codex:reviewer-agent on
+```
+
+The first invocation does not enable anything. Read [`DISCLAIMER.md`](DISCLAIMER.md), then invoke:
+
+```text
+$reviewer-agent-codex:reviewer-agent on acceptRisk
 $reviewer-agent-codex:stop-continue on
 ```
+
+One current receipt covers both features for this repository. If stopContinue is the first feature
+enabled, its plain `on` response instead requires
+`$reviewer-agent-codex:stop-continue on acceptRisk`. A changed disclaimer invalidates the old
+receipt and requires a new explicit acceptance.
 
 Use `off` or `status` with either skill to change or inspect its state. State defaults to
 `~/.codex/reviewer-agent-codex`; override it with `REVIEWER_CODEX_STATE_DIR`.
 
 Exact namespaced toggle invocations are applied by the trusted `UserPromptSubmit` hook before the
 model runs. The hook ends the toggle turn without making a model request, launching a shell command,
-or requiring a separate filesystem approval. Enabling stopContinue exempts only that enabling turn
-from stop supervision; subsequent turns are supervised.
+or requiring a separate filesystem approval. Only that trusted exact prompt can record
+`acceptRisk`; the fallback CLI cannot. Enabling stopContinue exempts only that enabling turn from
+stop supervision; subsequent turns are supervised.
 
 ## Reviewer model
 

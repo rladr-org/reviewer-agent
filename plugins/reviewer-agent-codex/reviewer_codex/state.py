@@ -297,6 +297,55 @@ def _flag(path, feature):
     return state_home() / "projects" / (stem + "." + feature + ".json") if stem else None
 
 
+def disclaimer_sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def risk_acceptance_file(path):
+    stem = _project_stem(path)
+    return (
+        state_home() / "projects" / (stem + ".risk.accepted.json")
+        if stem
+        else None
+    )
+
+
+def risk_accepted(path, disclaimer_hash):
+    target = risk_acceptance_file(path)
+    if target is None:
+        return False
+    try:
+        record = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(
+        isinstance(record, dict)
+        and record.get("project") == project_key(path)
+        and record.get("disclaimer_sha256") == str(disclaimer_hash)
+    )
+
+
+def record_risk_acceptance(path, disclaimer_hash, source):
+    root = project_root(path)
+    target = risk_acceptance_file(path)
+    if not root or target is None:
+        raise ValueError("not a git repository")
+    _atomic_write(
+        target,
+        json.dumps(
+            {
+                "accepted_at_unix": int(time.time()),
+                "disclaimer_sha256": str(disclaimer_hash),
+                "project": project_key(path),
+                "source": str(source),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    return target
+
+
 def _deferred_stop_file(path):
     stem = _project_stem(path)
     return state_home() / "projects" / (stem + ".stop.defer.json") if stem else None

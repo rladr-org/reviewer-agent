@@ -101,7 +101,7 @@ def test_reviewer_agent_on_warns_about_an_old_host_but_still_enables(tmp_path, m
     fake_claude.chmod(0o755)
 
     result = subprocess.run(
-        [sys.executable, str(ROOT / "toggle.py"), "on"],
+        [sys.executable, str(ROOT / "toggle.py"), "on", "acceptRisk"],
         capture_output=True, text=True, cwd=str(repo),
         env={
             "PATH": "/usr/bin:/bin",
@@ -129,7 +129,7 @@ def test_reviewer_agent_on_is_quiet_when_the_host_is_current(tmp_path):
     fake_claude.chmod(0o755)
 
     result = subprocess.run(
-        [sys.executable, str(ROOT / "toggle.py"), "on"],
+        [sys.executable, str(ROOT / "toggle.py"), "on", "acceptRisk"],
         capture_output=True, text=True, cwd=str(repo),
         env={
             "PATH": "/usr/bin:/bin",
@@ -153,7 +153,7 @@ def test_an_absent_host_binary_does_not_break_the_toggle(tmp_path):
     (repo / "reviewerAgent.md").write_text("be strict\n", encoding="utf-8")
 
     result = subprocess.run(
-        [sys.executable, str(ROOT / "toggle.py"), "on"],
+        [sys.executable, str(ROOT / "toggle.py"), "on", "acceptRisk"],
         capture_output=True, text=True, cwd=str(repo),
         env={
             "PATH": "/usr/bin:/bin",
