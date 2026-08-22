@@ -29,15 +29,11 @@ to weigh in on whether the required fixes are valid or not, it overwhelmingly ag
 
 ## Don't stop - Continue! 
 
-Another issue is that even the best coding agents will work for a while (sometimes a long while) and the stop. 
+Another issue is that even the best coding agents will work for a while (sometimes a long while) and then stop. 
 Sometimes they say "this is a good stopping point" (NO! There is no good stopping point!), sometimes they ask the 
-user a question, or for permission to continue (even if permission was already given to complete an entire set of tasks), 
-and sometimes they just... stop.
+user a question, or for permission to continue, even if permission was already given to complete an entire set of tasks, or the question was already decided upon in an established plan. And sometimes they just... stop.
 
-Various methods have been used to prevent this, including Claude Code's /goal, but there are some advantages to having
-another agent evaluate each stop, consider the project's plans, consider the task list, consider what the user said in the 
-session, and then decide if a stop is allowed, or if not tell the agent what it is supposed to do next (which may include 
-answering a question or giving permission on behalf of the user). 
+Various methods have been used to prevent this, including Ralph Loops and Claude Code's /goal, but there are some advantages to having another agent evaluate each stop, consider the project's plans, consider the task list, consider what the user said in the  session, and then decide if a stop is allowed, or if not tell the agent what it is supposed to do next (which may include having the supervisor agent answer a question or give permission on behalf of the user). 
 
 So one separately controllable feature of this package is stop-continue which does exactly that, using the same model 
 as reviewer-agent but a separate session. 
@@ -51,19 +47,20 @@ It's easy to install and easy to remove, so give it a spin and please report any
 ## A note about suggested workflow (not enforced by this tool)
 
 If you want to gain the most benefit from using an automated reviewer agent, what I've found to work well is
-the following process, which would be placed in CLAUDE.md or AGENTS.md so that the coding agent follows it: 
+the following process, which would be specified in CLAUDE.md or AGENTS.md so that the coding agent follows it: 
 
 - Create a plan 
-- Commit the plan and address any reviewer found issues
+- Commit the plan and address any reviewer-found issues
 - Create the tests (TDD - Test Driven Development)
 - Commit the tests and address any reviewer found issues
 - Create the code to pass the tests
 - Commit the code and address any reviewer found issues
-- Run the code
+- Run the code and fix any bugs
+- Commit the code 
   
 Along with this, I find it useful to let the coding agents have four .MD files:
 - PLAN.md - the overall development plan
-- HANDOVER.md - very regularly updated file that is kept under 400 lines or so that only contains status and context sufficient for the agent to continue after compaction or if re-started after /clear
+- HANDOVER.md - very regularly updated file that is kept under 400 lines or so, that only contains status and context sufficient for the agent to continue after compaction or if re-started after /clear
 - CODING_LOG.md - lets the agent keep track of coding decisions (if this is not included the agents tend to clutter up HANDOVER.md with this)
 - FINDINGS.md - results of tests or other information the agent wants to keep track of that should not clutter up HANDOVER.md
 
@@ -72,8 +69,8 @@ Along with this, I find it useful to let the coding agents have four .MD files:
 > **USE AT YOUR OWN RISK — NO WARRANTY OF ANY KIND.**
 >
 > This software runs an autonomous AI agent inside your development environment. It reads your
-> source code, sends it to a third-party AI provider, and **on the Codex backend it executes
-> commands in your repository**. It can consume paid quota. It can approve defective or insecure
+> source code, sends it to a third-party AI provider (of your choosing), and **on the Codex backend it executes
+> commands in your repository**. It can consume paid quota. It may approve defective or insecure
 > code, and it can miss vulnerabilities entirely. Its output may be treated as an instruction or
 > permission by another AI agent and may cause destructive, costly, irreversible or externally
 > visible actions without another human confirmation.
@@ -96,7 +93,7 @@ Along with this, I find it useful to let the coding agents have four .MD files:
 > Every document in this repository, including [`SECURITY.md`](SECURITY.md) and
 > [`PRIVACY.md`](PRIVACY.md), is informational only and must not be relied upon.
 
-**The intended execution boundary, up front.** In the current implementation, a Codex commit
+**The intended execution boundary** In the current implementation, a Codex commit
 reviewer is configured to run commands in a `workspace-write` sandbox with approvals disabled and
 `.git` read-only. The Pi and Claude reviewer configurations are intended to provide repository-read
 tools without a shell or edit tool. These are implementation descriptions, not security guarantees;
@@ -160,7 +157,7 @@ fallback when nothing is configured.
 Nothing has been installed or used on any platform other than macOS Tahoe. Linux is exercised by
 CI unit tests only (Ubuntu, Python 3.9/3.12/3.14), with no installation behind it; WSL2 has had
 neither; other macOS versions have not been tried. **Even the top two rows are not guaranteed to
-work** — they worked on one machine, which is evidence, not assurance.
+work** — they worked on my machine but may not work on yours.
 
 **No maintenance or response is promised.** This is a personal project published as-is. Nothing
 here undertakes that it is maintained or monitored, that an issue, pull request or security report
