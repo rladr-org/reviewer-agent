@@ -1,0 +1,34 @@
+{
+  "name": "reviewer-agent-codex",
+  "version": "1.2.0-beta.1+codex.20260821063724",
+  "description": "Codex-native autonomous commit reviewer and stop supervisor.",
+  "author": {
+    "name": "RLADR"
+  },
+  "license": "MPL-2.0",
+  "keywords": [
+    "reviewer",
+    "hooks",
+    "git",
+    "code-review",
+    "autonomy"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Reviewer Agent Codex",
+    "shortDescription": "Autonomous commit review and stop supervision",
+    "longDescription": "Gate staged git commits through an independent Codex reviewer and keep Codex working when it attempts to stop before the task is complete.",
+    "developerName": "RLADR",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Hooks",
+      "Code Review",
+      "Automation"
+    ],
+    "defaultPrompt": [
+      "Enable reviewer-agent for this repository.",
+      "Enable stop-continue for this repository."
+    ]
+  }
+}

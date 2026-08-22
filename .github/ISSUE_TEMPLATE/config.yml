@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/rladr-org/reviewer-agent/security/advisories/new
+    about: >
+      Report privately. This project runs inside your shell and, on the Codex backend, executes
+      commands in your repository — do not disclose those publicly first. See SECURITY.md.

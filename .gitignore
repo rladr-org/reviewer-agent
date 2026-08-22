@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime state must never be committed (it lives in $REVIEWER_STATE_DIR at runtime;
+# these guard against accidental writes into a dev checkout).
+state/
+logs/
+reviews/
+config.json
+.DS_Store
+
+# LEGACY design documents only. These are excluded because they reference an unrelated private
+# project, not because plans are meant to be private -- current plans live in `docs/plans/` and ARE
+# tracked, so the commit gate reviews a plan before it reviews the code implementing it. Code
+# comments that cite a `*_PLAN.md` by name point at this legacy set; see the README's Layout section.
+docs/internal/
+
+# The pi extension's dependency tree is ~131 MB. Ship the lockfile, not the tree:
+# `cd pi-extensions/git-read-only && npm ci`.
+pi-extensions/*/node_modules/
+
+# Local-only privacy deny list for tools/scan_release.py (see CONTRIBUTING.md).
+tools/private_terms.txt

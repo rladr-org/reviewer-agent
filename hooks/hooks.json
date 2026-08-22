@@ -1,0 +1,55 @@
+{
+  "description": "reviewerAgent: the selected codex, pi or claude backend reviews commits, answers timed-out AskUserQuestion prompts, and supervises stops. All paths resolve under ${CLAUDE_PLUGIN_ROOT}.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/commit_hook.py"],
+            "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/askq_answer_hook.py"],
+            "timeout": 330
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/session_start_hook.py"],
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/stop_hook.py"],
+            "timeout": 330
+          }
+        ]
+      }
+    ]
+  }
+}

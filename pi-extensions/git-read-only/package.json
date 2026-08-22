@@ -1,0 +1,14 @@
+{
+  "name": "git-read-only",
+  "version": "0.1.0",
+  "license": "MPL-2.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "typebox": "^1.1.38",
+    "@earendil-works/pi-ai": "^0.80.6"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

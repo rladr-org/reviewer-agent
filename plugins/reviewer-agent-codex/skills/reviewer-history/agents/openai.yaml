@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+interface:
+  display_name: "Reviewer History"
+  short_description: "Show or purge retained commit-review verdicts"
+  default_prompt: "Use $reviewer-agent-codex:reviewer-history to report or purge this repository's retained review record."

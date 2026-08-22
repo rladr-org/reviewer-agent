@@ -1,0 +1,32 @@
+name: Documentation problem
+description: Something documented is wrong, missing, or led you astray.
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: File and heading, or the command whose output was wrong.
+      placeholder: "README.md, 'Selecting and verifying a backend'"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What it says, and what is actually true
+      description: >
+        Documentation that is merely unclear is worth reporting too — say what you expected to
+        find and where you looked for it.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Factually wrong
+        - Out of date
+        - Missing entirely
+        - Unclear or hard to find
+    validations:
+      required: true

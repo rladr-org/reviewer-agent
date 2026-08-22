@@ -1,0 +1,11 @@
+# Development-only dependencies. The end-user runtime is standard-library-only on both
+# hosts; nothing installed from this file is imported by hook, MCP-server, or skill code.
+#
+# Upper bound: the suites are exercised from Python 3.9 (the macOS system interpreter) up,
+# and a pytest major release is the realistic way collection breaks under that floor.
+# Raise the bound deliberately after running both canonical suites against the new major.
+pytest>=7.4,<9.0
+
+# Validates the GitHub issue-template YAML in tests/test_public_documents.py. Not imported
+# by any runtime path; the suite skips that check when it is absent.
+pyyaml>=6.0,<7.0

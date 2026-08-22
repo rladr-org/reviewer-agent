@@ -1,0 +1,20 @@
+{
+  "name": "reviewer-agent",
+  "version": "1.2.0-beta.1",
+  "description": "Autonomous reviewer for Claude Code: the selected codex, pi or claude backend gates commits, answers timed-out AskUserQuestion prompts, and supervises stops through stopContinue.",
+  "author": {
+    "name": "RLADR"
+  },
+  "license": "MPL-2.0",
+  "keywords": [
+    "reviewer",
+    "codex",
+    "pi",
+    "claude",
+    "hooks",
+    "git",
+    "code-review",
+    "stopcontinue",
+    "supervisor"
+  ]
+}

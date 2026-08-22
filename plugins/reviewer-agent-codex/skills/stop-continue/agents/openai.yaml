@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+interface:
+  display_name: "Stop Continue"
+  short_description: "Toggle autonomous stop supervision"
+  default_prompt: "Use $reviewer-agent-codex:stop-continue to keep Codex working until the task is complete."

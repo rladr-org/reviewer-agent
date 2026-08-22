@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MPL-2.0
+version: 2
+
+updates:
+  # Development dependencies only -- the installed runtime is standard-library-only, and that
+  # is a contract the suites check rather than a coincidence.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+    labels: ["dependencies"]
+
+  # The Pi extension's SDK. The lockfile is the installation authority (`npm ci`), so an update
+  # here is exactly the deliberate, reviewable bump the pinned range exists to require.
+  - package-ecosystem: npm
+    directory: "/pi-extensions/git-read-only"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+    labels: ["dependencies"]
+
+  # Workflow actions are pinned to commit SHAs; Dependabot understands that pinning and
+  # proposes the next SHA with its release note, which is the only sane way to keep pinned
+  # actions current.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore"
+    labels: ["dependencies"]

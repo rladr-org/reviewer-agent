@@ -1,0 +1,96 @@
+{
+  "description": "Codex-native reviewerAgent commit gate, liveness tracking, and stopContinue supervisor.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_prompt.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\"",
+            "timeout": 10,
+            "statusMessage": "Routing reviewer-agent request"
+          }
+        ]
+      },
+      {
+        "matcher": "^update_plan$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_post_tool.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_stop.py\"",
+            "timeout": 10,
+            "statusMessage": "Routing stopContinue request"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_session_end.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

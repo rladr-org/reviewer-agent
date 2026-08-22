@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Pi extension
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  git-read-only:
+    name: git-read-only extension (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.19 is the floor Pi itself requires and the one package.json declares; the current
+        # LTS catches anything that only breaks on a newer runtime.
+        node: ["22.19", "22"]
+    defaults:
+      run:
+        working-directory: pi-extensions/git-read-only
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install from the lockfile
+        # `npm ci`, never `npm install`: the lockfile is the installation authority, and this
+        # job exists partly to prove the lockfile alone is enough.
+        run: npm ci
+      - name: Unit tests
+        run: node test/run.mjs
+      - name: Git identity for the live tests
+        # The live suite builds real repositories and commits into them, which git refuses to
+        # do without an identity. A writable temporary repository is created by the suite
+        # itself; only the identity has to come from the environment.
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - name: Live Git tests
+        env:
+          PI_GIT_READ_LIVE: "1"
+        run: node test/live.mjs
+      - name: The lockfile and manifest still agree
+        run: |
+          npm ls --depth=0 > /dev/null
+          node -e "const p=require('./package.json'); if(p.dependencies['@earendil-works/pi-ai']==='*'){throw new Error('the Pi SDK must be pinned to a range, not *')}"

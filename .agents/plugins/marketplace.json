@@ -1,0 +1,20 @@
+{
+  "name": "reviewer-agent",
+  "interface": {
+    "displayName": "Reviewer Agent"
+  },
+  "plugins": [
+    {
+      "name": "reviewer-agent-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/reviewer-agent-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

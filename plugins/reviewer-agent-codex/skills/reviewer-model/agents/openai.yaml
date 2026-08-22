@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+interface:
+  display_name: "Reviewer Model"
+  short_description: "Configure nested reviewer model and reasoning"
+  default_prompt: "Use $reviewer-agent-codex:reviewer-model to show or change the nested reviewer model and reasoning effort."

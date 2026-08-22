@@ -1,0 +1,925 @@
+# What is it? 
+
+This package provides two major functions: 
+- Reviewer Agent - does automated plan and code reviews, gating each commit until issues that it finds are resolved
+- Stop Continue - examines the project plan, task list, and whether there are background tasks running that the agent is waiting for, and decides if the agent is allowed to stop or if not, what it should do next
+
+Works with Claude Code and Codex, and uses Codex, Pi (with any model), or Claude Code itself as the reviewer and stop continue agent (with some limitations listed below).
+
+# Inspiration and Justification (which you may disagree with)
+
+I have been using LLMs to do coding since it was possible to do so, and have tried to use every major model. 
+I've also had each major model do plan reviews and code reviews on every other model. I've found that it's very beneficial to let different models review each other's plans because they tend to find serious problems that would have wasted a lot of time. 
+
+As of the Opus 4.6 era my conclusions were that Opus 4.6 was excellent at coding and very good at plan
+and code review. GPT 5.4 was generally not as good at coding but probably better at plan and code review. And 
+Gemini 3.1 pro was not as good at either coding or plan or code review (and tended to miss many issues the 
+other models both found). 
+
+(I am sure many or most people will disagree with these particular opinions about specific models but they are not actually relevant to this project, 
+they are just the inspiration for it.)
+
+# What is true
+
+## Plan and Code Review gates:
+
+- A model that does not do the coding but only reviews plans or code can find problems that the coding agent has missed
+- Different models have different strengths and using more than one model can produce better plans and code with less bugs
+
+So this project sets up a commit gate which does not allow a commit to proceed until a separate agent (that you can choose) 
+completes a plan or code review. If the review agent specifies issues to fix, they must be fixed by the coding agent before 
+the commit will be allowed to proceed. 
+
+An interesting finding is that a small, inexpensive model like gpt-5.6-luna (which I run on xhigh and fast mode) when used as 
+a reviewer agent, finds numerous serious issues, omissions, and errors even when the coding agent is Fable 5, Opus 5, or 
+gpt-5.6-sol, all on xhigh mode. *Note that you can use any model as a reviewer!* 
+
+It can often take 3 to 9 commit attempts for Fable to get rid of all the bugs found by gpt-5.6-luna, and if you ask it
+to weigh in on whether the required fixes are valid or not, it overwhelmingly agrees that they are real issues. 
+
+## Don't stop - Continue! 
+
+Another issue is that even the best coding agents will work for a while (sometimes a long while) and the stop. 
+Sometimes they say "this is a good stopping point" (NO! There is no good stopping point!), sometimes they ask the 
+user a question, or for permission to continue (even if permission was already given to complete an entire set of tasks), 
+and sometimes they just... stop.
+
+Various methods have been used to prevent this, including Claude Code's /goal, but there are some advantages to having
+another agent evaluate each stop, consider the project's plans, consider the task list, consider what the user said in the 
+session, and then decide if a stop is allowed, or if not tell the agent what it is supposed to do next (which may include 
+answering a question or giving permission on behalf of the user). 
+
+So one separately controllable feature of this package is stop-continue which does exactly that, using the same model 
+as reviewer-agent but a separate session. 
+
+# Project state
+
+These are tools I have been using, debugging, and improving for several weeks, and they generally work well for me. 
+Many bugs have been fixed, and many edge cases addressed, but undoubtedly more will be found. 
+It's easy to install and easy to remove, so give it a spin and please report any issues you run into. 
+
+## A note about suggested workflow (not enforced by this tool)
+
+If you want to gain the most benefit from using an automated reviewer agent, what I've found to work well is
+the following process, which would be placed in CLAUDE.md or AGENTS.md so that the coding agent follows it: 
+
+- Create a plan 
+- Commit the plan and address any reviewer found issues
+- Create the tests (TDD - Test Driven Development)
+- Commit the tests and address any reviewer found issues
+- Create the code to pass the tests
+- Commit the code and address any reviewer found issues
+- Run the code
+  
+Along with this, I find it useful to let the coding agents have four .MD files:
+- PLAN.md - the overall development plan
+- HANDOVER.md - very regularly updated file that is kept under 400 lines or so that only contains status and context sufficient for the agent to continue after compaction or if re-started after /clear
+- CODING_LOG.md - lets the agent keep track of coding decisions (if this is not included the agents tend to clutter up HANDOVER.md with this)
+- FINDINGS.md - results of tests or other information the agent wants to keep track of that should not clutter up HANDOVER.md
+
+## Before you install: what a reviewer is allowed to do
+
+**The safety boundary, up front.** A Codex reviewer runs commands in your repository: commit
+audits run in a `workspace-write` sandbox with approvals disabled, deliberately, so the reviewer
+can run your tests before ruling. `.git` stays read-only, so it cannot commit. A Pi reviewer has
+no shell, no write tool and no edit tool — it reads the staged patch through a read-only git
+wrapper and nothing else. A Claude reviewer likewise has no shell: it is a `claude` child process
+restricted to `Read`, `Grep` and `Glob`, with every other tool denied. Choosing Pi or Claude never
+installs or invokes Codex. Read [`SECURITY.md`](SECURITY.md) before pointing any of them at a
+repository you do not trust, and [`PRIVACY.md`](PRIVACY.md) for exactly what is sent where and
+what is kept locally.
+
+### What the reviewer actually does
+
+When you run `git commit`, the commit is held and a **separate agent** is handed your staged
+diff. What that agent can then do depends on which backend you chose:
+
+**Codex** — an agentic review. It reads the staged patch, and then explores: opening the files
+the diff touches and the code they depend on, reading tests, and, during a commit audit,
+**running commands in your repository** — typically your test suite, because the most useful
+way to judge a change is to see whether it still passes. It works in a `workspace-write`
+sandbox: the working tree and a temporary directory are writable, `.git` is not, so it can run
+and even scratch-edit files but structurally cannot create the commit. It then returns exactly
+one of two answers: `APPROVED` (optionally with non-blocking `SUGGESTIONS:`), or `REJECTED:`
+followed by a numbered list of required fixes with `file:line` evidence. Your host performs the
+commit only on approval. Briefing, question answering and stop supervision run read-only.
+
+**Pi** — a static review. No shell, no write tool, no edit tool: it reads the staged patch
+through a read-only git wrapper, reads repository files for context, and rules on the patch as
+written. It cannot run your tests, and it is never a fallback to Codex.
+
+**Claude** — a static review by a second Claude Code process, for people who would rather not
+install a second vendor's CLI. It is **opt-in and never the default**: you select it explicitly,
+and two things about it differ from the other backends. First, it spends **your own Claude
+subscription quota** — the reviewer is a `claude` child that authenticates itself exactly as your
+own CLI does, and its tokens come out of the same allowance as your coding session, so a busy
+review day can exhaust it and every commit then blocks until it resets. Second, like Pi it
+**cannot run your tests**: it is given `Read`, `Grep` and `Glob` and nothing else, so it reads the
+staged patch, reads the files around it, and rules on the patch as written. It runs with
+`--safe-mode`, so your own hooks, plugins, MCP servers and `CLAUDE.md` do not load into it — the
+reviewer stays a reviewer rather than becoming a second copy of your setup.
+
+Either way the reviewer is a **different session from your coding agent**. One reviewer
+conversation is kept per project, developer session and role, briefed with that project's
+`reviewerAgent.md` when it is created; it persists across commit attempts, so when you fix its
+findings and commit again it remembers what it asked for. It is not permanent: a new developer
+session gets a new reviewer, and `/reviewerSession rotate` retires the current one deliberately
+(the next gated action briefs a fresh reviewer with the current brief).
+
+**Status: public beta.** macOS is manually validated end to end. Linux is exercised by CI unit
+tests only, with no clean-host validation. WSL2 is unverified. Native Windows and WSL1 are not
+supported. Bug reports are wanted — see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`CHANGELOG.md`](CHANGELOG.md).
+
+**Two combinations are fully tested**, in the sense that they have been used daily against real
+repositories as well as passing the release matrix:
+
+| Developer host | Reviewer backend | Status |
+|---|---|---|
+| Claude Code | `codex` | fully tested |
+| Codex | Codex child session | fully tested |
+| Claude Code | `pi` | beta — feedback wanted |
+| Claude Code | `claude` | beta — feedback wanted |
+
+The other two backends ship in this release and pass the same automated live matrix — commit
+audits, rejections and approvals, stop supervision, cancellation, process cleanup — but they have
+not had the same daily use, and no one has yet run them for weeks against their own work. Treat
+them as beta and please report what you find. Nothing selects them for you: `codex` is the
+fallback when nothing is configured.
+
+### installation 
+Automated agent-assisted installation is [available](https://github.com/rladr-org/reviewer-agent/tree/main#agent-assisted-installation)
+
+# reviewer-agent
+
+Reference documentation for both packages: what each host supports, how to install and remove
+it, and how the reviewer behaves.
+
+The two host packages share review standards, retry context and project briefs, but use
+different hooks and runtime interfaces, and are installed independently.
+
+## Host and backend support
+
+| Developer host | Capability | Reviewer backend | Status |
+|---|---|---|---|
+| Claude Code | staged commit audit | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
+| Claude Code | timed-out `AskUserQuestion` answer | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
+| Claude Code | `stopContinue` supervision | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
+| Codex | staged commit audit | Codex child session | supported; fully tested |
+| Codex | stop supervision | separate Codex child session | supported; fully tested |
+| Codex | `AskUserQuestion` | — | not implemented by the Codex host |
+
+"Supported" and "fully tested" are different claims, and the difference is deliberate. Every row
+marked supported is implemented and covered by the unit suites. The automated live matrix, which
+drives the real reviewer CLIs, additionally covers commit audits and stop supervision on every
+backend — the timed-out `AskUserQuestion` path is not in it, because the timeout is produced by
+the host rather than by anything this harness can trigger, so that path is covered by unit tests
+and verified by hand. The `pi` and `claude` backends are beta: they pass the matrix, they have
+not had months of daily use, and feedback on them is wanted.
+
+Selecting `pi` in Claude Code routes commit audits, timed-out `AskUserQuestion` answers, and `stopContinue` through Pi.
+Selecting `pi` does not require or launch Codex. The same is true of `claude`.
+
+The three backends differ in what a review is *allowed to do*, and that is the difference to
+understand before choosing one:
+
+| Reviewer backend | Execution boundary |
+|---|---|
+| `codex` | Commit audits run in a `workspace-write` sandbox with `approval_policy="never"`, so the reviewer can run your tests before ruling. `.git` is not writable, so it cannot commit. Briefing, question answering and stop supervision run read-only. |
+| `pi` | No shell, no write tool, no edit tool. The `-t` allowlist is read/search built-ins plus `git_read`, a read-only git wrapper, so a Pi review is a static audit of the staged patch. |
+| `claude` | A `claude` child run with `--safe-mode` (no hooks, plugins, MCP servers or `CLAUDE.md`) and `--permission-mode dontAsk`, which denies every tool that is not explicitly allowed. The allowlist is `Read`, `Grep` and `Glob`; `Bash`, `Write`, `Edit`, `NotebookEdit`, `WebFetch` and `WebSearch` are additionally denied by name. It has no git access at all, so the staged patch is included in the prompt rather than fetched, and a patch too large to include blocks the commit instead of being truncated. |
+
+Selecting `pi` or `claude` therefore does not grant command execution, and there is no hidden Codex
+fallback: if the read-only Pi extension is missing, the review fails loudly instead.
+[`SECURITY.md`](SECURITY.md) states what bounds each path -- timeout, cancellation,
+process-tree cleanup, sandboxing and permissions.
+
+The Codex package currently supports no `pi` backend. The Codex package does not implement `AskUserQuestion`.
+Its commit reviewer and stop supervisor both use isolated Codex child sessions.
+
+The packages are installed independently:
+
+- The repository root is the Claude Code plugin.
+- [`plugins/reviewer-agent-codex`](plugins/reviewer-agent-codex) is the Codex plugin.
+
+## Capabilities and failure behavior
+
+The Claude Code plugin provides three per-repository capabilities:
+
+1. **Commit gate.** A `git commit` is intercepted and the staged set is audited first. Approval
+   permits the command; rejection or an operational review failure blocks it. The gate is
+   fail-closed.
+2. **Timed-out question answering.** Claude Code displays `AskUserQuestion` normally. If the
+   operator answers, the reviewer is not involved. If the native away-from-keyboard timeout
+   expires with no answer, the selected reviewer answers and the developer agent continues. This
+   path is fail-open if the reviewer fails.
+3. **`stopContinue` supervision.** When enabled separately, the selected reviewer checks each
+   proposed stop. It returns `STOP_OK` when the task is complete or gives a continuation directive
+   when work remains. This path is fail-open and has a per-turn nudge cap.
+
+The Codex package provides the commit gate and stop supervisor. Its blocking MCP calls suspend the
+developer agent until the independent reviewer returns or the call is cancelled.
+
+## Agent-assisted installation
+
+The shortest installation route delegates every executable step to the current coding agent. The
+human only supplies credentials and choices, approves external writes, and performs the final
+restart and hook-trust actions that an agent cannot perform for them.
+
+1. Install and authenticate Claude Code or Codex. For Claude Code, also install and authenticate
+   the chosen reviewer backend (`codex` or `pi`); the `claude` backend needs nothing beyond the
+   authenticated Claude Code you are already running.
+2. Give Git read access to this private repository.
+3. Start the developer host in the repository you want to protect.
+4. Paste this prompt:
+
+   ```text
+   Clone https://github.com/rladr-org/reviewer-agent.git into a new user-owned directory outside this target repository if needed, then read `INSTALL_WITH_AGENT.md` completely and follow it to install reviewer-agent for this repository. Use the current developer host. Ask me for any required backend or feature choice, but otherwise perform and verify every step you are authorized to do.
+   ```
+
+5. Approve the requested writes outside the repository. When the agent finishes, follow its one
+   restart instruction; for Codex, also run `/hooks` and trust the displayed reviewer hooks.
+
+The installing agent's complete procedure is [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md).
+It covers both host packages, prevents the installer checkout from being mistaken for the target,
+and leaves only the unavoidable human-only checkpoint.
+
+## Claude Code installation
+
+Prerequisites:
+
+- macOS (tested), or native Linux/WSL2 (untested beta), with Claude Code plugin support;
+- `python3` 3.9 or newer on `PATH`; the runtime is standard-library-only;
+- one authenticated reviewer backend: `codex`, `pi`, or the `claude` CLI you already have.
+
+Install from the marketplace:
+
+```text
+/plugin marketplace add rladr-org/reviewer-agent
+/plugin install reviewer-agent@reviewer-agent
+```
+
+Restart Claude Code after installation. Claude Code snapshots hooks when a session starts; an
+existing session may otherwise keep the previous hook set.
+
+### Upgrading from the standalone Claude Code install
+
+Do not keep legacy standalone hooks and plugin hooks enabled together. Claude Code runs additive
+hook registrations, so both copies will handle every matching event.
+In particular, older standalone `SessionStart` hooks always launch Codex and therefore defeat a Pi-only configuration.
+
+Before enabling the plugin, inspect `~/.claude/settings.json` for commands pointing to
+`~/.claude/reviewerAgent/` or `~/.claude/hooks/bash_gate.py`:
+
+```bash
+rg 'reviewerAgent|bash_gate\.py' ~/.claude/settings.json
+```
+
+Remove the standalone reviewer entries before restarting Claude Code. Inspect `bash_gate.py`
+before replacing it: older installations may chain a separate preflight hook through that wrapper,
+which should be preserved as its own hook if it is still wanted. Keep a settings-file backup and
+verify `/hooks` after the restart.
+
+In each repository to protect:
+
+1. Copy `reviewerAgent.md.template` to `reviewerAgent.md` at the repository root and edit it for
+   that project. `/reviewerAgent on` refuses to enable a repository without this brief.
+2. Select and verify the backend as described in [Claude Code backends](#claude-code-backends).
+3. Enable the commit gate and timed-out question answering:
+
+   ```text
+   /reviewerAgent on
+   ```
+
+4. Optionally enable stop supervision:
+
+   ```text
+   /stopContinue on
+   ```
+
+The flags are stored by canonical repository root, apply to linked worktrees, and persist across
+Claude Code restarts. `/reviewerAgent off` and `/stopContinue off` disable them independently.
+
+`/reviewerAgent on` also adds `askUserQuestionTimeout: 60s` to the user’s
+`~/.claude/settings.json` when the setting is absent. It never replaces an existing value. The
+setting takes effect in a new Claude Code session.
+
+For agent-assisted installation, start with [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md). The
+Claude-specific unattended procedure it invokes is [`AGENT_INSTALL.md`](AGENT_INSTALL.md).
+
+## Codex installation
+
+The Codex package has a separate operating guide at
+[`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md). The supported
+installer registers both the plugin and its blocking MCP server:
+
+```bash
+git clone https://github.com/rladr-org/reviewer-agent.git
+cd reviewer-agent
+python3 plugins/reviewer-agent-codex/scripts/install_local.py
+```
+
+For a private repository, grant the installer’s user access to this repository before cloning.
+After installation:
+
+1. Start a new Codex thread.
+2. Run `/hooks`, inspect the `reviewer-agent-codex` hooks, and trust them.
+3. From the repository to protect, enable the desired features:
+
+   ```text
+   $reviewer-agent-codex:reviewer-agent on
+   $reviewer-agent-codex:stop-continue on
+   ```
+
+Those settings persist across Codex restarts. They do not need to be re-enabled in each thread.
+A new thread is required after installing or updating the plugin so Codex loads its current tools,
+skills, and hooks.
+
+The repository also contains a Codex marketplace manifest for discovery:
+
+```text
+codex plugin marketplace add rladr-org/reviewer-agent
+```
+
+Use the checkout installer above for the complete local install and update flow.
+For the minimal-human delegated route, use
+[`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md) instead of running these commands manually.
+
+## Update, disable and uninstall (Claude Code)
+
+**Update**:
+
+```bash
+claude plugin update reviewer-agent
+```
+
+Restart Claude Code afterwards so the reloaded hooks take effect.
+
+**Disable per repository**, keeping everything installed — this is the usual thing to want:
+
+```text
+/reviewerAgent off
+/stopContinue off
+```
+
+**Disable the plugin entirely** without removing it:
+
+```bash
+claude plugin disable reviewer-agent
+```
+
+**Uninstall**, in the order that leaves nothing dangling:
+
+```bash
+claude plugin uninstall reviewer-agent
+claude plugin marketplace remove reviewer-agent      # optional: only if nothing else uses it
+```
+
+Then, optionally and in your own time:
+
+- **State.** `rm -rf ~/.claude/reviewer-agent` removes every project's flags, reviewer session
+  ids, retained verdicts and logs. To purge one project's review record instead, use
+  `/reviewerHistory clear` before uninstalling. Nothing outside that directory is written,
+  unless you set `REVIEWER_STATE_DIR` — in which case remove that path instead.
+- **The Pi extension**, if you installed it: `rm -rf ~/.pi/agent/extensions/git-read-only`.
+  Nothing else uses it.
+- **The question timeout.** Enabling the reviewer set `askUserQuestionTimeout` in
+  `~/.claude/settings.json`, because Claude Code only auto-closes an unanswered
+  `AskUserQuestion` when that key is present. Uninstalling does not remove it: it is a host
+  setting you may now want for other reasons. Delete the key by hand to restore the previous
+  behaviour.
+- **Legacy standalone hooks.** If you ever ran the pre-plugin install, its hook entries are
+  still in `~/.claude/settings.json` and will keep firing after the plugin is gone. Remove the
+  `reviewerAgent/` entries there and delete `~/.claude/reviewerAgent/`.
+
+## Claude Code backends
+
+The Claude Code plugin resolves one backend per repository, from three: `codex`, `pi` and
+`claude`. Whichever it resolves handles all three Claude Code capabilities — commit audits,
+timed-out question answering, and stop supervision. Nothing is selected for you beyond the
+`codex` fallback, and `claude` in particular is never selected implicitly: it spends your own
+subscription quota, so it is chosen explicitly or not at all.
+
+### Codex backend
+
+Install and authenticate `codex` with `codex login` or an API key.
+Briefing uses a read-only sandbox. Commit audits use `workspace-write` with `approval_policy="never"`
+so the reviewer can run tests without requesting additional permissions; the sandbox keeps Git
+metadata read-only, so it cannot create the commit. Timed-out question answers and stop supervision
+use the read-only sandbox.
+
+Set a nonstandard binary with `REVIEWER_CODEX_BIN`.
+
+### Pi backend
+
+Pi is model-agnostic. The plugin passes the configured model to `pi --model` and does not invoke
+Codex as a fallback. Install and authenticate Pi against the desired provider before enabling the
+reviewer.
+
+The commit reviewer intentionally receives no shell. It can inspect Git only through the bundled
+read-only `git_read` extension, which uses fixed validated arguments and `shell:false`. This keeps
+the reviewer read-only but means it cannot run a test suite during an audit. Question answering
+and stop supervision do not require a staged read, but `/reviewerAgent on` also enables the commit
+gate, so a functional Pi installation must include the extension.
+
+Pi prerequisites:
+
+1. `pi` installed and authenticated;
+2. Node 22.19 or newer;
+3. `pi-extensions/git-read-only` installed under `~/.pi/agent/extensions/git-read-only/` with its
+   dependencies installed by `npm ci`.
+
+If Pi is installed through `nvm`, persist its absolute path as `piBin` in
+`~/.claude/reviewer-agent/config.json`. Hook processes may not inherit the interactive shell’s
+`PATH`. `REVIEWER_PI_BIN` has higher precedence but is also subject to environment inheritance.
+
+Verify the installation:
+
+```bash
+command -v pi
+
+node -e 'const [a,b]=process.versions.node.split(".").map(Number);
+if (a<22 || (a===22 && b<19)) { console.error("Node 22.19+ required"); process.exit(1) }
+console.log("node ok "+process.versions.node)'
+
+node -e 'const fs=require("fs");
+const p=process.env.HOME+"/.pi/agent/extensions/git-read-only/node_modules/";
+const missing=["typebox","@earendil-works/pi-ai"].filter(m=>!fs.existsSync(p+m+"/package.json"));
+if (missing.length) { console.error("missing: "+missing.join(", ")+" -- run npm ci"); process.exit(1) }
+console.log("extension deps ok")'
+
+node ~/.pi/agent/extensions/git-read-only/test/run.mjs
+```
+
+The commit gate checks for a successful staged `git_read` event. A missing extension, a tool
+error, or a truncated staged diff overrides any model approval with a fail-closed rejection.
+
+### Claude backend
+
+The reviewer is a second `claude` process, so this backend installs nothing: it uses the CLI and
+the authentication you already have. It is **opt-in and never the default**, for one reason worth
+stating plainly -- the review is billed to **your own Claude subscription quota**, the same
+allowance your coding session spends. When that allowance runs out, the commit gate is fail-closed
+and every commit blocks until it resets; the block says so, and names switching backend or
+`/reviewerAgent off` as the way to keep working meanwhile. Do not run two reviewers concurrently
+against the same allowance.
+
+Set a nonstandard binary with `REVIEWER_CLAUDE_BIN`. Choose the reviewing model with
+`/reviewerModel <model>` and the depth with `/reviewerModel effort <level>`; levels are `low`,
+`medium`, `high`, `xhigh` and `max`, defaulting to `medium`.
+
+Three properties of the child process are deliberate, and each was established by running the CLI
+rather than by reading its documentation:
+
+1. **`--safe-mode` is mandatory.** Without it the child loads the operator's own hooks. In one
+   measured run a child fired them 19 times: the `SessionStart` hook briefed a reviewer, the `Stop`
+   hook then looped the child to its nudge cap, and the review returned empty. Safe mode disables
+   hooks, plugins, MCP servers and `CLAUDE.md`, and unlike `--bare` it keeps subscription
+   authentication working.
+2. **`--permission-mode dontAsk`, not `auto`.** Under `auto` an allowlist is not exclusive:
+   anything unnamed goes to the permission classifier, which was measured approving a file write,
+   and the model located writers at runtime through `ToolSearch` and attempted to delegate through
+   subagents. `dontAsk` denies everything not explicitly allowed, including tools nobody
+   enumerated and tools a later CLI version introduces.
+3. **No git access, by design.** Claude's `Read` returns the working tree, not the index, and
+   granting a shell to reach the index would reintroduce the `diff.external` execution hole the Pi
+   extension had to close. The staged patch is inlined into the prompt instead. A patch that
+   exceeds the prompt budget (`REVIEWER_STAGED_PATCH_MAX`, 400000 bytes) blocks the commit rather
+   than being truncated: a reviewer that saw half a diff must not be able to approve the whole of
+   it.
+
+Verify the installation:
+
+```bash
+command -v claude
+claude --version
+```
+
+### Selecting and verifying a backend
+
+Resolution order, highest precedence first:
+
+1. `REVIEWER_BACKEND` environment variable;
+2. per-project state override;
+3. global state default;
+4. `backend` in `config.json`;
+5. `codex` fallback.
+
+Set the global default through the plugin library so `REVIEWER_STATE_DIR` is honored:
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '<PLUGIN_DIR>'); import reviewer_lib as rl; rl.set_default_backend('<codex-pi-or-claude>'); print(rl.backend_default_file())"
+```
+
+For one repository, use:
+
+```python
+rl.set_project_backend("<TARGET_REPO>", "pi")
+```
+
+Verify the resolved value rather than inspecting one configuration file, because a higher-priority
+source may override it:
+
+```bash
+python3 -c "import sys; sys.path.insert(0, '<PLUGIN_DIR>'); import reviewer_lib as rl; print(rl.reviewer_backend('<TARGET_REPO>'))"
+```
+
+Valid values are `codex`, `pi` and `claude`. An invalid value is skipped and resolution continues
+to the next source. Nothing selects `claude` for you: it spends your own subscription quota, so it
+is chosen explicitly or not at all.
+
+## Claude Code commands
+
+| Command | Purpose |
+|---|---|
+| `/reviewerAgent on\|off` | Enable or disable commit review and timed-out question answering. |
+| `/stopContinue on\|off` | Enable or disable stop supervision independently. |
+| `/reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
+| `/reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
+| `/reviewerModel <model>` | Set the model for the selected backend. |
+| `/reviewerModel effort <level>` | Set reasoning effort for the selected backend. |
+| `/reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
+| `/reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
+| `/reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
+| `/reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
+| `/reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
+
+Codex reasoning levels are `none` through `ultra`. Pi levels are `off`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, and `max`. Claude levels are `low`, `medium`, `high`, `xhigh` and
+`max`. Pi and Claude default to `medium`. The stop supervisor uses its separate
+`REVIEWER_STOPCONTINUE_EFFORT` setting, defaulting to `low`.
+
+## Prompt and session behavior
+
+### Project brief and capsule
+
+`reviewerAgent.md` is composed with a plugin-owned standing brief. The standing brief defines the
+staged-set boundary, retry handling, required finding dispositions, and review output contract.
+The project brief adds repository-specific requirements and takes precedence when more specific.
+
+The full brief is sent once when each role session is created. A compact capsule containing the
+non-negotiable rules, project-brief path, directives, and current context is sent on every commit,
+question, and stop call. Changes to the capsule apply on the next call. Changes to the full brief
+require `/reviewerSession rotate`.
+
+### Role isolation
+
+Within one Claude Code session, every backend keeps separate role sessions:
+
+- the reviewer session handles commit audits and timed-out questions;
+- the stop session handles `stopContinue` only.
+
+For Codex these are stored as `sess_<claude-session>.reviewer.codex` and
+`sess_<claude-session>.stop.codex`. For Pi they are `sess_<claude-session>.pi` and
+`sess_<claude-session>.stop.pi`. For Claude they are `sess_<claude-session>.claude` and
+`sess_<claude-session>.stop.claude`.
+
+The split prevents frequent stop-supervision turns from contaminating later commit audits. A stop
+supervisor’s directive does not pre-approve a later commit; the commit reviewer is an independent
+role session.
+
+Codex reviewer sessions are normally created at Claude Code `SessionStart`. Pi and Claude sessions
+are created lazily on the first call for each role. Selecting either causes `SessionStart` to skip
+Codex entirely.
+
+The Claude backend differs in one detail: it does not learn its session identifier from the
+child's output, it assigns one. The hook mints a UUID, passes it as `--session-id`, records it
+only after a turn the CLI actually accepted, and resumes it by name thereafter.
+
+Session identifiers are captured and resumed explicitly. The implementation never uses
+`codex resume --last`, which could attach to another Claude Code session or a manual Codex run.
+
+### Re-attempted commits
+
+After a rejection, the next audit receives a staged-path table marking each path `CHANGED`,
+`ADDED`, `UNCHANGED`, or `REMOVED` relative to the exact bytes previously reviewed. Diffs for
+changed paths are inlined from the Git index, so unstaged edits cannot be cited as part of the
+commit.
+
+Inlining is bounded by `deltaInlineMax` (48,000 bytes per path) and `deltaInlineTotalMax` (96,000
+bytes total). Either may be set to `0` to disable inlining. Withheld content is explicitly marked.
+
+### Verdict retention
+
+Both host packages keep two copies of commit-review results outside the reviewed repository: a
+stable latest-verdict file used for retry context and a chronological per-project history whose
+entries are never overwritten. The history spans developer sessions and records approvals and
+rejections.
+
+It also records the outcomes that carry no verdict -- a reviewer timeout, a cancelled review, an
+operational failure, an empty response -- as labelled `OUTCOME:` entries, because each of those
+blocked a commit and is a real event an operator later asks about. None of them touches the
+latest-verdict file: that file is shown to the next reviewer as its own previous findings, so a
+timeout must never overwrite the last real ruling.
+
+The newest 100 history ENTRIES per project are retained by default, with oldest-first pruning.
+Verdicts and `OUTCOME:` records share one history and one cap, so a run of timeouts prunes older
+verdicts exactly as further verdicts would. Both packages accept `reviewHistoryKeep` in their
+persistent `config.json`. The Claude Code package uses `REVIEWER_REVIEW_HISTORY_KEEP` as its
+environment override; the Codex package uses `REVIEWER_CODEX_REVIEW_HISTORY_KEEP`. Each setting is
+read when an entry is written, so changing it does not require reinstalling the plugin.
+
+Retained verdicts quote the staged diffs they judged, so the history is a plaintext record of
+reviewed code as well as of reviews. `/reviewerHistory` reports what is retained for the current
+project and `/reviewerHistory clear` deletes it -- retained reviews and saved rulings, for that
+project only -- without uninstalling anything. The Codex package exposes the same two actions as
+`$reviewer-agent-codex:reviewer-history status|clear`.
+
+### Background work and stop supervision
+
+The stop hook allows a turn to end without a supervisor call when the transcript shows a live
+harness-managed background shell, subagent, or monitor. The host is expected to resume the session
+when that work completes. Staleness windows prevent abandoned markers from suppressing supervision
+indefinitely.
+
+Every stop-hook invocation writes a `[stop] ENTER` record to
+`~/.claude/reviewer-agent/logs/reviewer.log`. If an expected stop was not supervised:
+
+```bash
+grep "\[stop\] ENTER" ~/.claude/reviewer-agent/logs/reviewer.log
+grep "\[stop\] EXCEPTION" ~/.claude/reviewer-agent/logs/reviewer.log
+```
+
+No matching `ENTER` usually means the Claude Code session has a stale hook snapshot; restart or
+refresh the session. An `ENTER` line records the flag, final-text length, nudge state, and detected
+background wait.
+
+## Expected failure modes and troubleshooting
+
+Most first-run problems are one of these six.
+
+The remedies differ by host, because the two packages have separate controls. Claude Code
+commands are slash commands; the Codex package is driven by namespaced invocations.
+
+**Every commit is blocked and the reviewer never seems to run.** The configured model or
+reasoning effort is not reachable on your account. The gate is fail-closed, so this presents as
+a permanent block rather than an error. Since 1.2.0-beta.1 the message names the selection, its
+source and the control that changes it. An environment variable beats the stored setting, and
+the diagnostic says so when one is in play.
+
+| | Show the selection | Change it |
+|---|---|---|
+| Claude Code | `/reviewerModel` | `/reviewerModel <model>`, `/reviewerModel effort <level>` |
+| Codex | `$reviewer-agent-codex:reviewer-model` | `$reviewer-agent-codex:reviewer-model <model> [<effort>]` |
+
+**A commit is blocked with "TIMED OUT".** A timeout carries no verdict, so it cannot approve.
+Retry the identical commit first; if the diff is genuinely too large for the budget, raise it.
+The two hosts recover differently:
+
+- **Claude Code** resumes the reviewer session by id, so a retry keeps what the reviewer already
+  read and often lands second time. Raise the budget with `/reviewerModel timeout <seconds>`
+  (default 900s).
+- **Codex** *retires* the timed-out reviewer automatically and says so in the tool result: the
+  retry starts a fresh reviewer, and rotating by hand afterwards is unnecessary. Raise the budget
+  with `REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS`, or `commitReviewTimeoutSeconds` in
+  `~/.codex/reviewer-agent-codex/config.json`. Accepted values are whole seconds from 60 to
+  7200; anything outside that range, or not an integer, is *skipped* rather than clamped, and
+  resolution falls through to the next source and finally to the 3600s default. So a typo does
+  not silently give you a one-second budget -- but it also does not give you the number you
+  typed, and the only sign is that the timeout is still the default.
+
+**Every commit is blocked and the message says a usage limit was reached.** Only the `claude`
+backend can produce this: it runs on your own Claude subscription quota, and the commit gate is
+fail-closed, so an exhausted allowance blocks commits until it resets. Changing the model does not
+help. Wait and retry the identical commit -- the reviewer session resumes by id, so it keeps what
+it had already read -- or, to keep working meanwhile, switch this repository to another backend
+(`REVIEWER_BACKEND`, or `backend` in `config.json`) or run `/reviewerAgent off`.
+
+**A commit is blocked with "EMPTY verdict".** The reviewer session is wedged; retiring it makes
+the next gated action brief a fresh one, at the cost of one cold start. In Claude Code that is
+`/reviewerSession rotate`; in Codex it is `$reviewer-agent-codex:reviewer-session rotate`.
+
+**The reviewer answers as if it were reviewing a different repository.** It no longer can:
+reviewer state is keyed by project as well as by session. If you see this on an older
+installation, update; the fix landed in 1.2.0-beta.1.
+
+**`AskUserQuestion` is never answered for you.** That path only fires when Claude Code
+auto-closes an *unanswered* question, which it only does when `askUserQuestionTimeout` is set in
+`~/.claude/settings.json`. `/reviewerAgent on` arms it; if that step warned, the key is missing.
+
+Where to look when it is none of those: `~/.claude/reviewer-agent/logs/reviewer.log` has one
+line per gated action, with the exit code, the verdict tail and the stderr tail. The Codex
+package writes no log; its `review_commit` result carries the same detail, and
+`$reviewer-agent-codex:reviewer-history status` finds the retained verdicts. Please report what
+you find -- see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Claude Code configuration
+
+These settings apply to the repository-root Claude Code plugin, not the Codex package.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REVIEWER_STATE_DIR` | `~/.claude/reviewer-agent` | Flags, session IDs, logs, reviews, and configuration. |
+| `REVIEWER_HOME` | — | Legacy alias for `REVIEWER_STATE_DIR`. |
+| `REVIEWER_BACKEND` | `codex` fallback | One-call/process override: `codex`, `pi` or `claude`. |
+| `REVIEWER_CODEX_BIN` | `~/.local/bin/codex` | Codex executable override. |
+| `REVIEWER_PI_BIN` | `pi` on `PATH` | Pi executable override; `piBin` in `config.json` is more reliable for hooks. |
+| `REVIEWER_PI_MODEL` | Pi default | Value passed to `pi --model`. |
+| `REVIEWER_PI_EFFORT` | `medium` | Value passed to `pi --thinking`. |
+| `REVIEWER_CLAUDE_BIN` | `claude` on `PATH` | Claude executable override. |
+| `REVIEWER_CLAUDE_MODEL` | CLI default | Value passed to `claude --model`. |
+| `REVIEWER_CLAUDE_EFFORT` | `medium` | Value passed to `claude --effort`. |
+| `REVIEWER_STAGED_PATCH_MAX` | `400000` | Bytes of staged patch the `claude` backend will inline into a prompt. A larger patch blocks the commit rather than being truncated. |
+| `REVIEWER_DELTA_INLINE_MAX` | `48000` | Re-attempt diff bytes inlined per path; `0` disables. |
+| `REVIEWER_DELTA_INLINE_TOTAL_MAX` | `96000` | Re-attempt diff bytes inlined in total; `0` disables. |
+| `REVIEWER_STOPCONTINUE_EFFORT` | `low` | Stop-supervisor reasoning effort. |
+| `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `10` | Maximum forced continuations per user turn. |
+| `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |
+| `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |
+| `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
+| `REVIEWER_MONITOR_STALE_SECS` | `3600` | Live monitor marker window. |
+| `REVIEWER_COMMIT_TIMEOUT_SECS` | `900` | Commit-audit timeout. |
+
+The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
+The question and stop paths each use a separate 300-second limit and fail open.
+
+## Supported host versions
+
+| Component | Minimum | Why this number |
+|---|---|---|
+| Claude Code | 2.1.238 | The oldest version the 1.2.0-beta.1 release matrix was run against. |
+| Codex CLI | 0.147.0 | The oldest version the 1.2.0-beta.1 release matrix was run against. |
+| Node | 22.19 | Required by Pi itself; only needed for the optional Pi backend. |
+| Python | 3.9 | The macOS system interpreter at `/usr/bin/python3`. |
+
+These are the oldest versions this release was actually *exercised* on, not the oldest that can
+work. Older hosts are therefore a caveat rather than a refusal: `/reviewerAgent on` and the Codex
+installer both detect the host version and print a warning below these floors, then continue.
+If the reviewer misbehaves on an older host, update the host before filing a bug.
+
+Python 3.9 is past upstream end of life and is kept deliberately. macOS ships `/usr/bin/python3`
+at 3.9, and this package is standard-library-only at runtime precisely so it installs against the
+system interpreter without anyone having to install Python first. Development dependencies
+(`requirements-dev.txt`) are a separate matter and are only needed to run the test suites.
+
+## Platform support
+
+macOS is **manually validated end to end**: the release matrix -- install, reject, approve,
+cancel, stop, uninstall -- is run there by hand on a clean host. Linux is **exercised by CI unit
+tests only** (Ubuntu, Python 3.9/3.12/3.14) with no clean-host validation, so it has automated
+coverage but no evidence that a real installation works. WSL2 is **unverified**: no CI, no manual
+run. Both are expected to work, because the runtime and process control use POSIX interfaces --
+expected is not the same as validated, and this section exists to keep those apart. The host's own
+platform support does not imply that this plugin has been verified there.
+
+Native Windows and WSL1 are not supported. The reasons differ. The Claude Code package's
+Bash-oriented commands and both packages' POSIX process control have not been ported to native
+Windows. Claude Code can run in WSL1, although its sandbox is unavailable there, but current Codex
+cannot: starting with [Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl), its Linux sandbox
+uses `bubblewrap` and WSL1 is no longer supported. A Claude Code plus Pi installation might work in
+WSL1, but this project has not tested or documented that combination. WSL2 is therefore the one
+common Windows beta path covered here.
+
+### Native Linux (untested beta)
+
+These directions apply to both hosts. Install Git, `curl`, and Python 3.9 or newer with the Linux
+distribution's package manager, and confirm that the interpreter is named `python3`:
+
+```bash
+git --version
+curl --version
+python3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.version)'
+```
+
+Install only the developer host you intend to use. The
+[Claude Code installation guide](https://code.claude.com/docs/en/installation) and
+[OpenAI Codex WSL guide](https://learn.chatgpt.com/docs/windows/wsl) provide these Linux installers:
+
+```bash
+# Claude Code host
+curl -fsSL https://claude.ai/install.sh | bash
+
+# Codex host
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+Authenticate and verify the selected host with `claude --version` or `codex --version`. Then follow
+[Claude Code installation](#claude-code-installation) for the Claude Code plugin or
+[Codex installation](#codex-installation) for the Codex plugin. A Claude Code installation using
+the Pi backend does not need Codex; install and authenticate Pi as described under
+[Pi backend](#pi-backend).
+
+### Windows through WSL2 (untested beta)
+
+First install WSL2 from an elevated PowerShell window, then restart Windows if prompted. See the
+[OpenAI WSL guide](https://learn.chatgpt.com/docs/windows/wsl) for host setup and troubleshooting:
+
+```powershell
+wsl --install
+wsl --list --verbose
+```
+
+In the listing, the selected distribution's `VERSION` column must show `2`. If it shows `1`, back
+up important distribution data and convert that distribution before continuing (replace the
+placeholder with the name shown by the listing):
+
+```powershell
+wsl --set-version <distribution-name> 2
+```
+
+Open the verified WSL2 distribution. Run every remaining command—including the Claude Code or
+Codex host, this repository's installer, and the protected project—inside that WSL2 terminal, not
+in PowerShell or CMD. Confirm both the environment and its WSL generation, then verify Python:
+
+```bash
+echo "$WSL_DISTRO_NAME"
+uname -r | grep -qi 'WSL2' || { echo 'WSL2 not detected'; exit 1; }
+python3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.version)'
+```
+
+Keep the plugin checkout and protected repositories in the WSL Linux filesystem, such as
+`~/code`, rather than under a mounted Windows path such as `/mnt/c`. OpenAI recommends the Linux
+filesystem for better performance and more reliable permissions and symbolic links:
+
+```bash
+mkdir -p ~/code
+cd ~/code
+git clone https://github.com/rladr-org/reviewer-agent.git
+```
+
+Install the selected host inside WSL2 with the corresponding Linux command in the previous section,
+then follow its normal plugin instructions in this README. Do not install a Windows-hosted copy and
+invoke it across the WSL boundary.
+
+### Report Linux and WSL2 bugs
+
+Please report failures at [GitHub Issues](https://github.com/rladr-org/reviewer-agent/issues). A
+useful report names the distribution and version, native Linux or WSL2, Claude Code or Codex and its
+version, Python version, reviewer backend, the failed command or hook, and the complete error after
+removing credentials or private repository content. Linux and WSL2 reports will be used to turn
+these beta paths into tested platforms.
+
+The Codex and Pi backends are external dependencies and neither is bundled; the Claude backend runs the `claude` CLI you already have, on your own subscription quota.
+
+## Repository layout
+
+```text
+.agents/plugins/marketplace.json       Codex marketplace entry
+.claude-plugin/                        Claude Code plugin metadata
+plugins/reviewer-agent-codex/          self-contained Codex plugin and guide
+hooks/hooks.json                       Claude Code hook registration
+commands/                              Claude Code slash commands
+reviewer_*.py                          Claude Code runtime layers
+commit_hook.py                         Claude Code commit gate
+askq_answer_hook.py                    Claude Code timed-out question handler
+stop_hook.py                           Claude Code stop supervisor
+session_start_hook.py                  Claude Code Codex-session bootstrap
+reviewerAgent.md.template              project brief template
+REVIEWER_PROMPT_SPEC.md                prompt-layer contract
+pi-extensions/git-read-only/           required read-only Pi Git extension
+tests/                                 Claude Code and distribution tests
+```
+
+## Tests
+
+The two suites are independent and each has one canonical command. Run each from its own
+package root; the root `pytest.ini` keeps a bare root run out of the nested Codex suite,
+whose modules import `reviewer_codex` relative to the plugin directory.
+
+```bash
+python3 -m pytest -p no:cacheprovider                     # from the repository root
+cd plugins/reviewer-agent-codex && python3 -m pytest -p no:cacheprovider
+```
+
+Development dependencies live in `requirements-dev.txt` (`pip install -r
+requirements-dev.txt`). The installed runtime itself is standard-library-only.
+
+Run structural checks for the Claude Code module split:
+
+```bash
+python3 tools/check_split_layering.py
+python3 tools/gen_facade_contract.py
+```
+
+Run the Pi extension tests:
+
+```bash
+node pi-extensions/git-read-only/test/run.mjs
+PI_GIT_READ_LIVE=1 node pi-extensions/git-read-only/test/live.mjs
+```
+
+`PI_GIT_READ_LIVE=1` is required; without it the live test file skips its checks.
+
+## Backlog
+
+- Add Linux and WSL2 CI plus live-host coverage before declaring either platform supported; treat
+  native Windows process control as a separate portability project.
+- Add an explicit opt-in Pi shell mode if Pi gains a permission model that can prevent writes and
+  shell redirection. Pi remains shell-free by default.
+- Persist a nonstandard Codex path in `config.json` as `codexBin`, parallel to `piBin`.
+- Add a Pi backend to the Codex package. This requires a Codex-hosted blocking interface that does
+  not assume the Pi user has installed or authenticated Codex.
+
+## License
+
+Mozilla Public License 2.0 — see [`LICENSE`](LICENSE). The Codex plugin carries its own copy at
+[`plugins/reviewer-agent-codex/LICENSE`](plugins/reviewer-agent-codex/LICENSE).
+
+Source files carry `SPDX-License-Identifier: MPL-2.0` rather than a repeated Exhibit A block.
+MPL 2.0 Exhibit A permits the notice to live "in a location (such as a LICENSE file in a
+relevant directory) where a recipient would be likely to look for such a notice" when putting it
+in a particular file is not desirable; the two `LICENSE` files above are that location, and they
+carry the unmodified license text. JSON, Markdown, lockfiles and generated files carry no header
+and rely on the same `LICENSE`.
+
+Copyright (c) 2026 RLADR.

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+interface:
+  display_name: "Reviewer Agent"
+  short_description: "Toggle the autonomous commit reviewer"
+  default_prompt: "Use $reviewer-agent-codex:reviewer-agent to enable autonomous commit review in this repository."

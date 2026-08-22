@@ -1,0 +1,496 @@
+# SPDX-License-Identifier: MPL-2.0
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import reviewer_lib as rl
+
+_BASE = Path(__file__).resolve().parent.parent
+ROOT = _BASE / "scripts" if (_BASE / "scripts").is_dir() else _BASE
+STOP = str(ROOT / "stop_hook.py")
+FAKE = str(Path(__file__).resolve().parent / "fake_codex.py")
+
+
+def _init_repo(path):
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+
+
+def make_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    return str(repo)
+
+
+def _transcript(tmp_path, final_text):
+    p = tmp_path / "transcript.jsonl"
+    line = json.dumps(
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": final_text}]}}
+    )
+    p.write_text(line + "\n")
+    return str(p)
+
+
+def _tool_only_transcript(tmp_path):
+    p = tmp_path / "transcript.jsonl"
+    line = json.dumps(
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
+    )
+    p.write_text(line + "\n")
+    return str(p)
+
+
+def _input(cwd, transcript_path, stop_hook_active=False, session_id="claude-stop"):
+    return {
+        "cwd": cwd,
+        "session_id": session_id,
+        "transcript_path": transcript_path,
+        "hook_event_name": "Stop",
+        "stop_hook_active": stop_hook_active,
+    }
+
+
+def run_hook(stdin_obj, env_extra):
+    env = dict(os.environ)
+    env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, STOP],
+        input=json.dumps(stdin_obj),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test_inactive_produces_no_output(tmp_path):
+    home = str(tmp_path / "rh")
+    repo = make_repo(tmp_path)
+    tr = _transcript(tmp_path, "This is a reasonable stopping point.")
+    p = run_hook(_input(repo, tr), {"REVIEWER_HOME": home})
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""
+
+
+def test_tool_only_final_turn_allows_stop_without_calling_codex(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    tr = _tool_only_transcript(tmp_path)
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN"},
+    )
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout
+
+
+def test_premature_stop_non_question_is_continued(tmp_path, monkeypatch):
+    # The key new behavior: a NON-question "reasonable stopping point" is forwarded, and a
+    # keep-going directive blocks the stop.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "This is a reasonable stopping point; let me know if you want more.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Continue: wire the remaining seams and run the tests.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    assert "wire the remaining seams" in out["reason"]
+    # 2026-07-24: a blocked stop NO LONGER hides the agent's final message -- the operator
+    # sees what the agent wrote before the stop was blocked. The old directive told the agent
+    # its message "may NEVER be shown" and to RESTATE it, which now just produces redundant
+    # repetition at the top of every continued turn. It must be gone.
+    low = out["reason"].lower()
+    assert "restate" not in low
+    assert "never be shown" not in low
+    # the forced-continuation budget was consumed
+    rl_home = home
+    monkeypatch.setenv("REVIEWER_HOME", rl_home)
+    assert rl.read_nudge_count(repo, "claude-stop") == 1
+
+
+def test_pi_backend_supervises_stop_without_starting_codex(tmp_path, monkeypatch, capsys):
+    import stop_hook as h
+
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    monkeypatch.setenv("REVIEWER_BACKEND", "pi")
+    repo = make_repo(tmp_path)
+    (Path(repo) / "reviewerAgent.md").write_text("strict\n")
+    rl.set_stopcontinue_active(repo)
+    tr = _transcript(tmp_path, "This is a reasonable stopping point.")
+    calls = []
+
+    def fake_pi(cwd, claude_sid, prompt, **kwargs):
+        calls.append((cwd, claude_sid, prompt, kwargs))
+        return 0, "Continue: finish the Pi-backed stop path.", ""
+
+    monkeypatch.setattr(h.rl, "run_pi_review", fake_pi)
+    monkeypatch.setattr(
+        h.rl,
+        "ensure_session",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Codex session started")),
+    )
+    monkeypatch.setattr(
+        h.rl,
+        "run_codex_resume_by_id",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("Codex reviewer ran")),
+    )
+
+    assert h._main(_input(repo, tr, session_id="claude-pi-stop")) == 0
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block"
+    assert "Pi-backed stop path" in out["reason"]
+    assert len(calls) == 1
+    cwd, claude_sid, prompt, kwargs = calls[0]
+    assert cwd == repo
+    assert claude_sid == "claude-pi-stop"
+    assert "reasonable stopping point" in prompt
+    assert kwargs["role"] == rl.ROLE_STOP
+    assert kwargs["require_staged_read"] is False
+    assert kwargs["thinking"] == "low"
+
+
+def test_operational_decision_is_continued_not_deferred(tmp_path, monkeypatch):
+    # The user is AFK: a "should I shut down the GPU?" stop must be DECIDED and continued,
+    # never deferred back to the user (which would leave the instance idling).
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "The run finished. Should I shut down the GPU instance now?")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Shut down the GPU instance now; the run is complete.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    assert "Shut down the GPU instance" in out["reason"]
+
+
+def test_a_blocked_stop_is_attributed_to_the_supervisor_not_the_commit_reviewer(
+    tmp_path, monkeypatch
+):
+    """REGRESSION, operator-reported 2026-08-02.
+
+    The blocked-stop text read "[reviewerAgent] stopContinue -> the reviewer says keep going"
+    and "reviewerAgent reviewed your stop". Both name the COMMIT REVIEWER, but the stop
+    supervisor is a different codex session (`role=ROLE_STOP`) with a different history -- the
+    very split `reviewer_state.py` documents after a 2026-07-31 cross-contamination blocked a
+    good commit.
+
+    The damage is not cosmetic. When a supervisor says "make these changes, then commit", an
+    agent reading that as the reviewer's word believes the gate has pre-agreed to the commit.
+    It has not: the audit is a separate session that has never seen this exchange, and being
+    fail-closed it is the direction that rejects. So the attribution must name the supervisor,
+    and must not assert that "the reviewer" said anything.
+    """
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "The run finished. Should I shut down the GPU instance now?")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Trim the script, then commit all five deliverables.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+
+    both = out["systemMessage"] + "\n" + out["reason"]
+    # Names the actual speaker.
+    assert "stopContinue supervisor" in both
+    # Never claims the commit reviewer spoke, in either of the two original phrasings.
+    assert "the reviewer says" not in both
+    assert "reviewerAgent reviewed your stop" not in both
+    # The disclaimer that USED to follow -- "...is a separate reviewer session from the commit
+    # gate, and does not pre-approve any commit" -- was removed on operator instruction
+    # (2026-08-02). Naming the speaker was the fix; the extra sentence was paid on every blocked
+    # stop to pre-empt an inference the correct attribution already prevents. Asserted as ABSENT
+    # so it cannot drift back in: the wording, not just the behaviour, is what was rejected.
+    assert "does not pre-approve" not in out["reason"]
+    # The relayed directive itself must still survive intact -- removing the disclaimer must not
+    # take any of the supervisor's actual instruction with it.
+    assert "Trim the script" in out["reason"]
+
+
+def test_genuinely_done_stop_ok_allows_stop(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Done. All tests pass and the feature is shipped.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "STOP_OK -- the task is genuinely complete.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0
+    # Spec change (REVIEWER_OUTPUT_ECHO_PLAN.md): the stop is still ALLOWED (no block
+    # decision), but the reviewer's STOP_OK verdict is now echoed to the terminal.
+    out = json.loads(p.stdout)
+    assert "decision" not in out               # allowed to stop
+    assert "STOP_OK -- the task is genuinely complete." in out["systemMessage"]
+
+
+def test_the_preapproved_work_gate_keys_on_outstanding_work_not_on_a_list_existing():
+    """REGRESSION. The gate first read "If there is a current task list or other work that is
+    pre-approved in a plan file or was pre-approved by a human, do NOT return STOP_OK."
+
+    That keys on EXISTENCE. A finished run whose plan file or transcript still contains its
+    (completed) task list would be refused a stop and nudged back to work forever -- and a
+    plan file naturally outlives the work it describes, so this would fire on almost every
+    completed session. The intent is the opposite of a stall: don't stop while approved work
+    is left UNDONE.
+
+    Asserted on the prompt text rather than through the hook, deliberately. The gate is a
+    judgement the reviewer MODEL makes; the hook only relays whatever verdict comes back, so
+    a hook-level test with a fake reviewer would assert the fake's scripted answer and prove
+    nothing about this wording. `test_genuinely_done_stop_ok_allows_stop` already covers the
+    plumbing for a complete run.
+    """
+    text = rl.STOP_SUPERVISE_PROMPT
+    assert "OUTSTANDING" in text
+    assert "what is still UNDONE" in text
+    assert "is NOT grounds to keep the agent working" in text
+    # The existence-keyed phrasing must not come back.
+    assert "If there is a current task list" not in text
+
+
+def test_a_human_decision_stop_requires_the_decision_to_be_genuinely_open():
+    """The permissive failure the operator observed: an agent parks on a question and is let
+    go merely because it packaged the question well.
+
+    The old gate checked ONE thing -- that the final message PRESENTS the decision. So an
+    agent asking permission for something the plan file already authorises got to stop, and
+    the supervisor never looked for the existing answer even though it has repo access and
+    is explicitly told to make these calls on the user's behalf.
+
+    Three conditions now: already-decided -> answer it from the record; other approved work
+    outstanding -> do that first; genuinely open with nothing else to do -> the decision
+    package is still required.
+
+    Asserted on the prompt text for the same reason as the test above: this is a judgement
+    the reviewer MODEL makes, and a hook-level test with a fake reviewer would only assert
+    the fake's scripted verdict."""
+    text = rl.STOP_SUPERVISE_PROMPT
+    assert "FIRST establish that it is genuinely OPEN" in text
+    assert "already decided" in text
+    assert "quote the authorisation back" in text
+    assert "no approved work remains that the agent could progress without the answer" in text
+    # The presentation requirement is an ADDITIONAL condition, not a replaced one.
+    assert "PRESENTS that decision to the user as an explicit decision request" in text
+
+
+def test_codex_failure_fails_open_allows_stop(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Stopping here.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDERR": "boom", "FAKE_CODEX_EXIT": "3"},
+    )
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""
+
+
+def test_nudge_cap_reached_allows_stop_without_calling_codex(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    rl.bump_nudge_count(repo, "claude-stop")
+    rl.bump_nudge_count(repo, "claude-stop")  # used == 2 == cap
+    tr = _transcript(tmp_path, "Still more to do, but pausing.")
+    p = run_hook(
+        _input(repo, tr, stop_hook_active=True),  # mid-chain, so the budget is NOT reset
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "REVIEWER_STOPCONTINUE_MAX_NUDGES": "2",
+         "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN"},
+    )
+    assert p.returncode == 0
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout      # codex not called past the cap
+    out = json.loads(p.stdout) if p.stdout.strip() else {}
+    assert out.get("decision") != "block"              # allowed to stop
+
+
+def _log_text(home):
+    p = Path(home) / "logs" / "reviewer.log"
+    return p.read_text() if p.exists() else ""
+
+
+def test_enter_line_is_logged_even_when_inactive(tmp_path):
+    # Diagnostic: EVERY invocation must leave a trace so "hook not invoked" (no line at all)
+    # is distinguishable from "invoked but stopContinue is off" (an ENTER line, flag=off).
+    home = str(tmp_path / "rh")
+    repo = make_repo(tmp_path)
+    tr = _transcript(tmp_path, "This is a reasonable stopping point.")
+    p = run_hook(_input(repo, tr), {"REVIEWER_HOME": home})
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""            # unchanged: inactive still emits nothing to stdout
+    t = _log_text(home)
+    assert "[stop] ENTER" in t
+    assert "flag=off" in t
+
+
+def test_enter_line_is_logged_when_active_and_fires(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Reasonable place to pause.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Continue: finish the job.", "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    t = _log_text(home)
+    assert "[stop] ENTER" in t
+    assert "flag=on" in t
+    assert "text_len=" in t
+
+
+def test_uncaught_exception_is_logged_and_fails_open(tmp_path, monkeypatch):
+    # A hook error must NEVER wedge the agent: it fails open (return 0) AND leaves a visible
+    # EXCEPTION line instead of a silent crash that reads as "the hook never fired".
+    import io
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    tr = _transcript(tmp_path, "some final text")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(_input(repo, tr))))
+    import stop_hook
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom-sentinel")
+
+    monkeypatch.setattr(stop_hook.rl, "ensure_session", boom)
+    rc = stop_hook.main()
+    assert rc == 0                            # fail-open
+    t = _log_text(home)
+    assert "EXCEPTION" in t
+    assert "kaboom-sentinel" in t
+
+
+def test_fresh_user_turn_resets_the_nudge_budget(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    for _ in range(9):
+        rl.bump_nudge_count(repo, "claude-stop")            # near a default cap of 10
+    tr = _transcript(tmp_path, "Reasonable place to pause.")
+    p = run_hook(
+        _input(repo, tr, stop_hook_active=False),     # FRESH user turn -> budget resets to 0
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Continue: finish the migration.", "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"                  # reset -> budget available -> nudged
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.read_nudge_count(repo, "claude-stop") == 1     # reset then one bump
+
+
+# --------------------------------------------------------------------------
+# Background-wait handling (pure suppress): when the agent parked its turn on a
+# harness-tracked background task, allow the stop immediately with NO supervisor
+# call and NO nudge -- the harness auto-re-invokes the session on completion.
+# --------------------------------------------------------------------------
+def _bg_wait_transcript(tmp_path, final_text, completed=False):
+    events = [
+        {"type": "user", "message": {"role": "user", "content": "kick off the run"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Agent", "id": "toolu_BG",
+             "input": {"description": "d", "subagent_type": "Explore", "prompt": "p",
+                       "run_in_background": True}}]}},
+    ]
+    if completed:
+        events.append({"type": "user", "message": {"role": "user", "content":
+            "<task-notification>\n<task-id>t1</task-id>\n<tool-use-id>toolu_BG"
+            "</tool-use-id>\n<status>completed</status>\n</task-notification>"}})
+    events.append({"type": "assistant", "message": {"role": "assistant",
+        "content": [{"type": "text", "text": final_text}]}})
+    p = tmp_path / "bgwait.jsonl"
+    p.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    return str(p)
+
+
+def test_background_wait_pure_suppresses_without_supervisor(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _bg_wait_transcript(tmp_path, "Launched the run in the background; waiting on it.")
+    dump = str(tmp_path / "prompt.txt")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_PROMPT_DUMP": dump,
+         "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN", "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""                        # parked -> stop allowed
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout         # supervisor NOT invoked...
+    assert not Path(dump).exists()                        # ...the fake codex never ran
+    assert "background wait" in _log_text(home)           # suppression is logged
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.read_nudge_count(repo, "claude-stop") == 0        # budget untouched
+
+
+def test_after_harness_wake_scoping_restores_normal_supervision(tmp_path, monkeypatch):
+    # A completed background launch (task-notification) resets the turn scope: bg_wait is
+    # False, so the stop is supervised NORMALLY -- proving a long autonomous session is not
+    # muted after the harness wakes it on completion.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _bg_wait_transcript(tmp_path, "The run finished. Reasonable place to pause.",
+                             completed=True)
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "Run the frozen eval and commit the results.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"                    # normal supervision still active
+    assert "frozen eval" in out["reason"]
