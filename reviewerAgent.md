@@ -29,10 +29,12 @@ Library and commands:
 Docs that are SOURCE OF TRUTH, not commentary. A staged change that contradicts one of these is
 a finding:
 
-- `REVIEWER_PROMPT_SPEC.md` -- the verbatim prompt strings. `reviewer_lib.py` transcribes it;
-  they must be edited together.
-- `README.md` -- the published behaviour, defaults and support statements. A staged change that
-  alters any of them and leaves the README saying otherwise is a finding.
+- `reviewer_prompts.py` and `plugins/reviewer-agent-codex/reviewer_codex/prompts.py` -- the runtime
+  prompt strings. Keep shared stop-supervisor policy aligned across both host implementations.
+- `README.md` -- the published behaviour and defaults. A staged change that alters any of them
+  and leaves the README saying otherwise is a finding. Note that the README deliberately makes
+  NO support or warranty claims: a staged change that reintroduces one ("supported", "validated",
+  "guaranteed", "secure") is itself a finding.
 
 The design documents (`*_PLAN.md`) are **maintainer-local and not in this tree** -- they live in
 the untracked `docs/internal/`. Code comments still cite them by name as the rationale for a

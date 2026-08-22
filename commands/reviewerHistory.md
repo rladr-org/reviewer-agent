@@ -1,6 +1,7 @@
 ---
 description: "Show what review history this project has retained, or purge it. Usage: /reviewerHistory [clear]"
 allowed-tools: Bash(python3:*)
+disable-model-invocation: true
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_history_toggle.py" $ARGUMENTS`

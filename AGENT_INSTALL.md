@@ -1,5 +1,8 @@
 # Installing reviewer-agent unattended
 
+
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
+
 A procedure for an **agent** that has been pointed at this repository and told to install it. Every
 step has a command and a check that proves it worked. Do not proceed past a failed check.
 
@@ -39,8 +42,8 @@ refer to them by name; a command run from the wrong one fails confusingly or wri
 tree:
 
 - **`<PLUGIN_DIR>`** — this checkout, the one containing `AGENT_INSTALL.md` and `tests/`.
-- **`<TARGET_REPO>`** — the repository whose commits you are gating. It may be the same directory,
-  and often is not.
+- **`<TARGET_REPO>`** — the repository in which developer-agent commit attempts will be gated. It
+  may be the same directory, and often is not.
 
 Shell commands below carry an explicit `cd`, so no step depends on where the previous one left you.
 
@@ -134,16 +137,16 @@ command -v claude
 ```
 
 `claude` is present on every Claude Code host by definition, so its presence is not evidence that
-anyone wants it as the reviewer. **Never select it silently**, and always state its cost when you
-offer it: the review runs on the operator's own Claude subscription quota, the same allowance
-their coding session spends, and an exhausted allowance blocks every commit until it resets.
+anyone wants it as the reviewer. **Never select it silently.** State that the child uses the
+operator's provider account and that usage, quota, billing, availability and account consequences
+are controlled by Anthropic and the terms applicable to that account.
 
 Now branch on what you found. In every case the operator answers before you continue:
 
 - **More than one available** — **ask which one to use.** State the relevant trade-off: every
-  backend handles commit audits, timed-out questions, and stop supervision; *codex* can run the
-  test suite during an audit, *pi* is shell-free and runs whatever model pi is configured for, and
-  *claude* is shell-free, needs no extra install, and spends the operator's own Claude quota. Do
+  backend handles commit audits, timed-out questions, and stop supervision; the current *codex*
+  configuration can run tests during an audit; the current *pi* and *claude* configurations omit
+  shell tools; and *claude* uses the operator's provider account. Do
   not default to codex because it is listed first here.
 - **Only codex or only pi present** — **ask them to confirm that one**, naming it, and name
   `claude` alongside it as the no-extra-install alternative with its quota cost. This is a

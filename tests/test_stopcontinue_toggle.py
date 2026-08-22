@@ -39,6 +39,10 @@ def test_on_sets_stopcontinue_flag(tmp_path, monkeypatch):
     assert p.returncode == 0, p.stderr
     assert active(home, proj, monkeypatch)
     assert "ON" in p.stdout
+    assert "WARNING" in p.stdout
+    assert "already authorized" in p.stdout
+    assert "authorization judgment may be wrong" in p.stdout
+    assert "Full terms:" in p.stdout
 
 
 def test_off_clears_flag(tmp_path, monkeypatch):

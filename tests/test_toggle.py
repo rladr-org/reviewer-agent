@@ -46,6 +46,8 @@ def test_on_creates_flag_in_git_repo_with_brief(tmp_path, monkeypatch):
     assert p.returncode == 0, p.stderr
     assert flag_exists(home, proj, monkeypatch)
     assert "ON" in p.stdout
+    assert "USE AT YOUR OWN RISK" in p.stdout
+    assert "Full terms:" in p.stdout
 
 
 def test_off_removes_flag(tmp_path, monkeypatch):

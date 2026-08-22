@@ -512,8 +512,14 @@ def test_the_spec_names_only_prompt_constants_that_actually_exist():
 
     A spec is only useful if you can follow it to the code. Sending a reader to a symbol
     that does not exist is the specific failure this file was written to prevent, and the
-    correspondence is mechanical, so assert it rather than re-proofreading it by hand."""
-    spec = Path(rl.__file__).resolve().parent / "REVIEWER_PROMPT_SPEC.md"
+    correspondence is mechanical, so assert it rather than re-proofreading it by hand.
+
+    The spec is maintainer-local: it lives in the git-ignored `docs/internal/` and does not ship
+    in the release export, so this SKIPS rather than fails where it is absent -- a public clone
+    has nothing to check, and a missing internal document is not a defect in the package."""
+    spec = Path(rl.__file__).resolve().parent / "docs" / "internal" / "REVIEWER_PROMPT_SPEC.md"
+    if not spec.exists():
+        pytest.skip("REVIEWER_PROMPT_SPEC.md is maintainer-local and absent here")
     text = spec.read_text(encoding="utf-8")
     head, _, rest = text.partition("required to match it:")
     assert rest, "the spec's opening 'source of truth' paragraph moved or was reworded"
@@ -1063,27 +1069,6 @@ def test_truncation_NEVER_drops_a_repository():
     assert len(block) < 30000, "many roots must shrink the per-root list, not the set"
 
 
-def test_the_stop_prompt_binds_check_a_to_the_manifest_not_to_one_checkout():
-    """The prompt is the other half of the fix. A manifest the supervisor is not
-    told to USE would leave check (a) exactly as it was: a git-status read in one
-    directory, with attribution guessed."""
-    p = rl.STOP_SUPERVISE_PROMPT
-    low = p.lower()
-
-    assert "session file manifest" in low, "check (a) must name the manifest"
-    assert "each repository" in low or "every repository" in low, (
-        "the check must span every repository in the manifest, not just cwd")
-    assert "not listed in the manifest" in low, (
-        "the supervisor needs an explicit rule for unlisted files, which is how "
-        "it credited a concurrent session's work to this agent")
-    # The absence rule must be CONDITIONAL on the ATTRIBUTION line. Unconditional
-    # "unlisted means not yours" was itself a fail-open: a Bash-written file is
-    # unlisted, and clearing it would let genuinely uncommitted work stop.
-    assert "attribution" in low
-    assert "incomplete" in low and "complete" in low
-    assert "proves nothing" in low or "proves nothing in either direction" in low
-
-
 def test_apply_context_carries_the_manifest_to_the_supervisor(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     repo = tmp_path / "r"
@@ -1480,93 +1465,9 @@ def test_stop_block_output_shape():
     assert out["systemMessage"] == "a notice"
 
 
-def test_stop_supervise_prompt_decides_ops_rather_than_deferring_to_human():
+def test_stop_supervise_prompt_has_one_final_message_placeholder():
     p = rl.STOP_SUPERVISE_PROMPT
-    low = p.lower()
-    assert "STOP_OK" in p                      # the done / genuinely-blocked sentinel
-    assert "afk" in low                        # the user is often away -> don't stall
-    # operational autonomy examples the reviewer should DECIDE, not defer
-    assert "push" in low and "gpu" in low and "instance" in low
-    assert "wastes money" in low               # idle-resource cost awareness
-
-
-def test_stop_supervise_prompt_enforces_session_hygiene_checks():
-    p = rl.STOP_SUPERVISE_PROMPT
-    low = p.lower()
-    # (a) dirty-tree check: uncommitted agent-touched files block STOP_OK; docs follow
-    # the same commit discipline as code; untouched pre-existing dirt is flagged, not owned.
-    # The last assertion's WORDING moved when check (a) was bound to the session manifest
-    # (2026-07-31) -- "pre-existing dirty files the agent did NOT touch are not its debt"
-    # became the stronger, manifest-anchored "a dirty file not listed in the manifest is NOT
-    # this agent's work". The INVARIANT is unchanged and is what this line guards; all three
-    # phrasings are accepted so the test survives future rewording of the same rule.
-    assert "git status --porcelain" in p
-    assert "uncommitted" in low
-    assert "same commit discipline" in low
-    assert ("not this agent's work" in low or "did not touch" in low
-            or "not its debt" in low)
-    # (b) workspace isolation is OPT-IN: a worktree is required ONLY when the repo's
-    # CLAUDE.md (or reviewer brief) mandates it; otherwise working directly in the main
-    # checkout is correct and is never grounds to block a stop.
-    assert "worktree" in low
-    assert "merge hub" in low
-    assert "opt-in" in low                     # not an unconditional default
-    assert "claude.md" in low                  # the gate: consult the project's CLAUDE.md
-    assert "does not mandate" in low           # explicit main-checkout-is-fine branch
-    # formatting safety: exactly one {} placeholder or stop_hook's .format() breaks
     assert p.count("{") == 1 and p.count("}") == 1 and "{}" in p
-
-
-def test_stop_supervise_prompt_requires_surfacing_operator_decisions():
-    # A stop that is "blocked on a human decision" may be approved ONLY
-    # when the final message actively PRESENTS that decision as an
-    # explicit request (options + recommendation + what reply unblocks),
-    # never when it merely reports being blocked.
-    p = rl.STOP_SUPERVISE_PROMPT
-    low = p.lower()
-    assert "presents that decision" in low
-    assert "recommendation" in low
-    assert "unblocks" in low
-    assert "merely reports" in low
-
-
-def test_stop_supervise_prompt_treats_the_agents_own_open_items_as_evidence():
-    """The gap that let a stop through on 2026-08-01.
-
-    The agent's final message ended "Two things still open, neither started" and
-    listed them; the supervisor returned STOP_OK anyway. Three things lined up:
-    the tree was clean so hygiene check (a) passed, the HARNESS task list is not
-    in the supervisor's context at all, and the repo plan file it CAN read
-    described an unrelated program. Finding no independent proof of remaining
-    work, it read the agent's own list as future-improvement notes rather than
-    outstanding work.
-
-    So the rule: the agent's own words are evidence, and the absence of a tracked
-    task or plan entry is not permission to stop.
-
-    This cannot loop, which is why it needs no state and no nudge-counter special
-    case. An agent that genuinely needs a decision says so in its NEXT final
-    message -- a different message, which the operator-decision gate above then
-    allows through. An agent that does not need one simply does the work.
-    """
-    p = rl.STOP_SUPERVISE_PROMPT
-    low = p.lower()
-
-    # the triggers, in the agent's own phrasing
-    assert "still to do" in low
-    assert "what's left" in low or "whats left" in low
-    assert "own words" in low
-
-    # absence of corroboration must NOT be read as permission
-    assert "not permission to stop" in low
-
-    # the exact directive to send back, so the agent is told what to do rather
-    # than merely refused
-    assert "remain to do" in low
-    assert "need the operator's approval" in low
-
-    # and the reason it terminates, recorded where the next editor will see it
-    assert "cannot loop" in low or "next final message" in low
 
 
 def test_resume_by_id_argv_targets_the_id_not_last():

@@ -29,6 +29,14 @@ def _on(proj):
         "stopContinue: ON for {} (the reviewer keeps the agent working instead of stalling "
         "to ask).".format(root)
     )
+    disclaimer = Path(__file__).resolve().parent / "DISCLAIMER.md"
+    print(
+        "stopContinue: WARNING - the supervisor may direct the developer agent to continue "
+        "work or take operational actions without further confirmation when it concludes that "
+        "the operator already authorized them. Its authorization judgment may be wrong. The "
+        "developer agent acts with your tools, credentials, and permissions. Full terms: {}"
+        .format(disclaimer)
+    )
     return 0
 
 

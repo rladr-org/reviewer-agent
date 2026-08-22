@@ -48,6 +48,7 @@ EXCLUDED_PATTERNS = (
 REQUIRED_PATHS = (
     ".gitignore",
     "LICENSE",
+    "DISCLAIMER.md",
     "README.md",
     "CHANGELOG.md",
     "pytest.ini",

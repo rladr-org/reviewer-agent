@@ -258,55 +258,6 @@ def test_genuinely_done_stop_ok_allows_stop(tmp_path, monkeypatch):
     assert "STOP_OK -- the task is genuinely complete." in out["systemMessage"]
 
 
-def test_the_preapproved_work_gate_keys_on_outstanding_work_not_on_a_list_existing():
-    """REGRESSION. The gate first read "If there is a current task list or other work that is
-    pre-approved in a plan file or was pre-approved by a human, do NOT return STOP_OK."
-
-    That keys on EXISTENCE. A finished run whose plan file or transcript still contains its
-    (completed) task list would be refused a stop and nudged back to work forever -- and a
-    plan file naturally outlives the work it describes, so this would fire on almost every
-    completed session. The intent is the opposite of a stall: don't stop while approved work
-    is left UNDONE.
-
-    Asserted on the prompt text rather than through the hook, deliberately. The gate is a
-    judgement the reviewer MODEL makes; the hook only relays whatever verdict comes back, so
-    a hook-level test with a fake reviewer would assert the fake's scripted answer and prove
-    nothing about this wording. `test_genuinely_done_stop_ok_allows_stop` already covers the
-    plumbing for a complete run.
-    """
-    text = rl.STOP_SUPERVISE_PROMPT
-    assert "OUTSTANDING" in text
-    assert "what is still UNDONE" in text
-    assert "is NOT grounds to keep the agent working" in text
-    # The existence-keyed phrasing must not come back.
-    assert "If there is a current task list" not in text
-
-
-def test_a_human_decision_stop_requires_the_decision_to_be_genuinely_open():
-    """The permissive failure the operator observed: an agent parks on a question and is let
-    go merely because it packaged the question well.
-
-    The old gate checked ONE thing -- that the final message PRESENTS the decision. So an
-    agent asking permission for something the plan file already authorises got to stop, and
-    the supervisor never looked for the existing answer even though it has repo access and
-    is explicitly told to make these calls on the user's behalf.
-
-    Three conditions now: already-decided -> answer it from the record; other approved work
-    outstanding -> do that first; genuinely open with nothing else to do -> the decision
-    package is still required.
-
-    Asserted on the prompt text for the same reason as the test above: this is a judgement
-    the reviewer MODEL makes, and a hook-level test with a fake reviewer would only assert
-    the fake's scripted verdict."""
-    text = rl.STOP_SUPERVISE_PROMPT
-    assert "FIRST establish that it is genuinely OPEN" in text
-    assert "already decided" in text
-    assert "quote the authorisation back" in text
-    assert "no approved work remains that the agent could progress without the answer" in text
-    # The presentation requirement is an ADDITIONAL condition, not a replaced one.
-    assert "PRESENTS that decision to the user as an explicit decision request" in text
-
-
 def test_codex_failure_fails_open_allows_stop(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)

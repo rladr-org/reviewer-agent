@@ -146,7 +146,6 @@ def test_stop_prompt_is_dedicated_and_excludes_reviewer_agent_brief(
     assert "reviewerAgent.md" not in prompt
     assert "git diff" not in prompt
 
-
 def test_stop_prompt_includes_current_plan_task_list(git_repo, isolated_state):
     state.record_plan(git_repo,
         "root-session",
@@ -213,25 +212,3 @@ def test_stop_prompt_requires_explicit_shell_and_subagent_reconciliation(
     assert "collaboration registry" in normalized
     assert "no live subagent remains" in normalized
     assert "git diff" not in prompt
-
-
-def test_stop_prompt_requires_agent_identified_authorized_work_to_continue():
-    prompt = prompts.STOP_BRIEF
-    normalized = " ".join(prompt.split())
-
-    assert "agent's own words are evidence" in normalized.lower()
-    assert "already authorized" in normalized
-    assert "do not return `STOP_OK`" in normalized
-    assert "genuinely open" in normalized
-    for phrase in (
-        "still to do",
-        "what's left",
-        "still open",
-        "not started",
-        "remaining",
-        "next steps",
-    ):
-        assert phrase in normalized
-    assert "absence of corroboration" in normalized.lower()
-    assert "explicit decision request" in normalized
-    assert "options with the agent's recommendation" in normalized

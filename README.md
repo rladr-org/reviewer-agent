@@ -6,20 +6,10 @@ This package provides two major functions:
 
 Works with Claude Code and Codex, and uses Codex, Pi (with any model), or Claude Code itself as the reviewer and stop continue agent (with some limitations listed below).
 
-# Inspiration and Justification (which you may disagree with)
+# Inspiration and Justification
 
 I have been using LLMs to do coding since it was possible to do so, and have tried to use every major model. 
 I've also had each major model do plan reviews and code reviews on every other model. I've found that it's very beneficial to let different models review each other's plans because they tend to find serious problems that would have wasted a lot of time. 
-
-As of the Opus 4.6 era my conclusions were that Opus 4.6 was excellent at coding and very good at plan
-and code review. GPT 5.4 was generally not as good at coding but probably better at plan and code review. And 
-Gemini 3.1 pro was not as good at either coding or plan or code review (and tended to miss many issues the 
-other models both found). 
-
-(I am sure many or most people will disagree with these particular opinions about specific models but they are not actually relevant to this project, 
-they are just the inspiration for it.)
-
-# What is true
 
 ## Plan and Code Review gates:
 
@@ -54,7 +44,7 @@ as reviewer-agent but a separate session.
 
 # Project state
 
-These are tools I have been using, debugging, and improving for several weeks, and they generally work well for me. 
+These are tools I have been using, debugging, and improving for a couple of months, and they generally work well for me.
 Many bugs have been fixed, and many edge cases addressed, but undoubtedly more will be found. 
 It's easy to install and easy to remove, so give it a spin and please report any issues you run into. 
 
@@ -79,73 +69,107 @@ Along with this, I find it useful to let the coding agents have four .MD files:
 
 ## Before you install: what a reviewer is allowed to do
 
-**The safety boundary, up front.** A Codex reviewer runs commands in your repository: commit
-audits run in a `workspace-write` sandbox with approvals disabled, deliberately, so the reviewer
-can run your tests before ruling. `.git` stays read-only, so it cannot commit. A Pi reviewer has
-no shell, no write tool and no edit tool — it reads the staged patch through a read-only git
-wrapper and nothing else. A Claude reviewer likewise has no shell: it is a `claude` child process
-restricted to `Read`, `Grep` and `Glob`, with every other tool denied. Choosing Pi or Claude never
-installs or invokes Codex. Read [`SECURITY.md`](SECURITY.md) before pointing any of them at a
-repository you do not trust, and [`PRIVACY.md`](PRIVACY.md) for exactly what is sent where and
-what is kept locally.
+> **USE AT YOUR OWN RISK — NO WARRANTY OF ANY KIND.**
+>
+> This software runs an autonomous AI agent inside your development environment. It reads your
+> source code, sends it to a third-party AI provider, and **on the Codex backend it executes
+> commands in your repository**. It can consume paid quota. It can approve defective or insecure
+> code, and it can miss vulnerabilities entirely. Its output may be treated as an instruction or
+> permission by another AI agent and may cause destructive, costly, irreversible or externally
+> visible actions without another human confirmation.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+> BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF **MERCHANTABILITY**, **FITNESS FOR A PARTICULAR
+> PURPOSE**, AND **NON-INFRINGEMENT**. TO THE MAXIMUM EXTENT PERMITTED BY LAW THE AUTHOR AND
+> CONTRIBUTORS ACCEPT **NO LIABILITY** FOR ANY DAMAGE ARISING FROM ITS USE — INCLUDING LOST,
+> DELETED, OVERWRITTEN OR CORRUPTED CODE AND DATA; DEFECTS OR SECURITY VULNERABILITIES IT
+> INTRODUCED, APPROVED OR FAILED TO DETECT; ANYTHING EXECUTED BY OR AT ITS DIRECTION; ANY ACTION
+> TAKEN IN RELIANCE ON ITS VERDICTS, RECOMMENDATIONS, ANSWERS, PERMISSIONS OR DIRECTIONS; DISCLOSURE
+> OF YOUR CODE TO ANY PROVIDER; OR ANY EFFECT ON YOUR PROVIDER ACCOUNT, SUBSCRIPTION OR CHARGES.
+>
+> **YOU ARE SOLELY RESPONSIBLE FOR EVERYTHING THIS SOFTWARE AND THE AI AGENTS IT INVOKES DO IN
+> YOUR ENVIRONMENT, AND FOR ALL CODE COMMITTED WITH ITS INVOLVEMENT.** Keep independent backups.
+> Do not point it at repositories you do not trust. Do not rely on it where failure would cause
+> harm.
+>
+> Full terms: **[`DISCLAIMER.md`](DISCLAIMER.md)** and [`LICENSE`](LICENSE) (MPL-2.0, §6 and §7).
+> Every document in this repository, including [`SECURITY.md`](SECURITY.md) and
+> [`PRIVACY.md`](PRIVACY.md), is informational only and must not be relied upon.
+
+**The intended execution boundary, up front.** In the current implementation, a Codex commit
+reviewer is configured to run commands in a `workspace-write` sandbox with approvals disabled and
+`.git` read-only. The Pi and Claude reviewer configurations are intended to provide repository-read
+tools without a shell or edit tool. These are implementation descriptions, not security guarantees;
+verify the source and the behavior of the installed host versions before relying on them. Read
+[`SECURITY.md`](SECURITY.md) and [`PRIVACY.md`](PRIVACY.md) before enabling the software.
 
 ### What the reviewer actually does
 
-When you run `git commit`, the commit is held and a **separate agent** is handed your staged
+When the agent runs `git commit`, the commit is held and a **separate agent** is handed the staged
 diff. What that agent can then do depends on which backend you chose:
 
 **Codex** — an agentic review. It reads the staged patch, and then explores: opening the files
 the diff touches and the code they depend on, reading tests, and, during a commit audit,
-**running commands in your repository** — typically your test suite, because the most useful
-way to judge a change is to see whether it still passes. It works in a `workspace-write`
-sandbox: the working tree and a temporary directory are writable, `.git` is not, so it can run
-and even scratch-edit files but structurally cannot create the commit. It then returns exactly
+**running commands in the repository** — typically the repository's test suite, because the most
+useful way to judge a change is to see whether it still passes. The current invocation requests a
+`workspace-write` sandbox with the working tree and a temporary directory writable and `.git`
+read-only; that configuration is intended to prevent the reviewer from creating the commit. It returns
 one of two answers: `APPROVED` (optionally with non-blocking `SUGGESTIONS:`), or `REJECTED:`
-followed by a numbered list of required fixes with `file:line` evidence. Your host performs the
-commit only on approval. Briefing, question answering and stop supervision run read-only.
+followed by a numbered list of required fixes with `file:line` evidence. The developer host
+performs the commit only after an approval response. Briefing, question answering and stop
+supervision request read-only operation.
 
-**Pi** — a static review. No shell, no write tool, no edit tool: it reads the staged patch
-through a read-only git wrapper, reads repository files for context, and rules on the patch as
-written. It cannot run your tests, and it is never a fallback to Codex.
+**Pi** — intended as a static review. The current invocation omits shell, write, and edit tools;
+it supplies the staged patch through a constrained Git wrapper and allows repository reads for
+context. This configuration does not provide a test-running path and does not use Codex as a
+fallback.
 
 **Claude** — a static review by a second Claude Code process, for people who would rather not
-install a second vendor's CLI. It is **opt-in and never the default**: you select it explicitly,
-and two things about it differ from the other backends. First, it spends **your own Claude
-subscription quota** — the reviewer is a `claude` child that authenticates itself exactly as your
-own CLI does, and its tokens come out of the same allowance as your coding session, so a busy
-review day can exhaust it and every commit then blocks until it resets. Second, like Pi it
-**cannot run your tests**: it is given `Read`, `Grep` and `Glob` and nothing else, so it reads the
-staged patch, reads the files around it, and rules on the patch as written. It runs with
-`--safe-mode`, so your own hooks, plugins, MCP servers and `CLAUDE.md` do not load into it — the
-reviewer stays a reviewer rather than becoming a second copy of your setup.
+install a second vendor's CLI. It is **opt-in and never the default**. The child authenticates
+through the installed `claude` CLI, so usage, quota, billing and account consequences are governed
+by the provider and the user's plan. The current child-process configuration requests `Read`,
+`Grep` and `Glob`, denies other tools by name, and uses `--safe-mode`; treat those as configuration
+details to verify, not as a guarantee that a provider or later CLI version will behave identically.
 
-Either way the reviewer is a **different session from your coding agent**. One reviewer
+Either way the reviewer is a **different session from the developer agent**. One reviewer
 conversation is kept per project, developer session and role, briefed with that project's
-`reviewerAgent.md` when it is created; it persists across commit attempts, so when you fix its
-findings and commit again it remembers what it asked for. It is not permanent: a new developer
-session gets a new reviewer, and `/reviewerSession rotate` retires the current one deliberately
+`reviewerAgent.md` when it is created; it persists across commit attempts, so when the developer
+agent fixes its findings and attempts the commit again, it remembers what it asked for. It is not
+permanent: a new developer session gets a new reviewer, and `/reviewerSession rotate` retires it deliberately
 (the next gated action briefs a fresh reviewer with the current brief).
 
-**Status: public beta.** macOS is manually validated end to end. Linux is exercised by CI unit
-tests only, with no clean-host validation. WSL2 is unverified. Native Windows and WSL1 are not
-supported. Bug reports are wanted — see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-[`CHANGELOG.md`](CHANGELOG.md).
+**Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
+no supported configuration, no supported platform, and no supported host version — "supported"
+would imply an undertaking, and there is none.
 
-**Two combinations are fully tested**, in the sense that they have been used daily against real
-repositories as well as passing the release matrix:
+What can be said is how much use each combination has actually had, which is a fact about the
+past rather than a promise about your machine:
 
-| Developer host | Reviewer backend | Status |
+| Developer host | Reviewer backend | What was actually done |
 |---|---|---|
-| Claude Code | `codex` | fully tested |
-| Codex | Codex child session | fully tested |
-| Claude Code | `pi` | beta — feedback wanted |
-| Claude Code | `claude` | beta — feedback wanted |
+| Claude Code | `codex` | used daily in a private installation, macOS Tahoe |
+| Codex | Codex child session | used daily in a private installation, macOS Tahoe |
+| Claude Code | `pi` | automated release matrix on macOS; no sustained use |
+| Claude Code | `claude` | automated release matrix on macOS; no sustained use |
 
-The other two backends ship in this release and pass the same automated live matrix — commit
-audits, rejections and approvals, stop supervision, cancellation, process cleanup — but they have
-not had the same daily use, and no one has yet run them for weeks against their own work. Treat
-them as beta and please report what you find. Nothing selects them for you: `codex` is the
+The `pi` and `claude` backends pass the same automated live matrix as the other two — commit
+audits, rejections and approvals, stop supervision, cancellation, process cleanup — but a matrix
+run is not the same as living with something. Nothing selects them for you: `codex` is the
 fallback when nothing is configured.
+
+Nothing has been installed or used on any platform other than macOS Tahoe. Linux is exercised by
+CI unit tests only (Ubuntu, Python 3.9/3.12/3.14), with no installation behind it; WSL2 has had
+neither; other macOS versions have not been tried. **Even the top two rows are not guaranteed to
+work** — they worked on one machine, which is evidence, not assurance.
+
+**No maintenance or response is promised.** This is a personal project published as-is. Nothing
+here undertakes that it is maintained or monitored, that an issue, pull request or security report
+will be read, answered or acted upon, that any defect or vulnerability will ever be fixed, or that
+any further release will appear. Reports are welcome and may be ignored; the project may be
+archived at any time without notice. See [`DISCLAIMER.md`](DISCLAIMER.md).
+
+Reports are still worth filing — see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ### installation 
 Automated agent-assisted installation is [available](https://github.com/rladr-org/reviewer-agent/tree/main#agent-assisted-installation)
@@ -162,20 +186,19 @@ different hooks and runtime interfaces, and are installed independently.
 
 | Developer host | Capability | Reviewer backend | Status |
 |---|---|---|---|
-| Claude Code | staged commit audit | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
-| Claude Code | timed-out `AskUserQuestion` answer | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
-| Claude Code | `stopContinue` supervision | selected `codex`, `pi` or `claude` backend | supported; fully tested on `codex` |
-| Codex | staged commit audit | Codex child session | supported; fully tested |
-| Codex | stop supervision | separate Codex child session | supported; fully tested |
+| Claude Code | staged commit audit | selected `codex`, `pi` or `claude` backend | implemented |
+| Claude Code | timed-out `AskUserQuestion` answer | selected `codex`, `pi` or `claude` backend | implemented |
+| Claude Code | `stopContinue` supervision | selected `codex`, `pi` or `claude` backend | implemented |
+| Codex | staged commit audit | Codex child session | implemented |
+| Codex | stop supervision | separate Codex child session | implemented |
 | Codex | `AskUserQuestion` | — | not implemented by the Codex host |
 
-"Supported" and "fully tested" are different claims, and the difference is deliberate. Every row
-marked supported is implemented and covered by the unit suites. The automated live matrix, which
-drives the real reviewer CLIs, additionally covers commit audits and stop supervision on every
-backend — the timed-out `AskUserQuestion` path is not in it, because the timeout is produced by
-the host rather than by anything this harness can trigger, so that path is covered by unit tests
-and verified by hand. The `pi` and `claude` backends are beta: they pass the matrix, they have
-not had months of daily use, and feedback on them is wanted.
+**"Implemented" means the code exists and the tests pass. It is not a claim of support and not a
+promise that it works for you.** Every row above is covered by the unit suites. The automated live
+matrix, which drives the real reviewer CLIs, additionally covers commit audits and stop
+supervision on every backend — the timed-out `AskUserQuestion` path is not in it, because the
+timeout is produced by the host rather than by anything this harness can trigger, so that path has
+unit tests and hand checks only.
 
 Selecting `pi` in Claude Code routes commit audits, timed-out `AskUserQuestion` answers, and `stopContinue` through Pi.
 Selecting `pi` does not require or launch Codex. The same is true of `claude`.
@@ -185,12 +208,12 @@ understand before choosing one:
 
 | Reviewer backend | Execution boundary |
 |---|---|
-| `codex` | Commit audits run in a `workspace-write` sandbox with `approval_policy="never"`, so the reviewer can run your tests before ruling. `.git` is not writable, so it cannot commit. Briefing, question answering and stop supervision run read-only. |
-| `pi` | No shell, no write tool, no edit tool. The `-t` allowlist is read/search built-ins plus `git_read`, a read-only git wrapper, so a Pi review is a static audit of the staged patch. |
-| `claude` | A `claude` child run with `--safe-mode` (no hooks, plugins, MCP servers or `CLAUDE.md`) and `--permission-mode dontAsk`, which denies every tool that is not explicitly allowed. The allowlist is `Read`, `Grep` and `Glob`; `Bash`, `Write`, `Edit`, `NotebookEdit`, `WebFetch` and `WebSearch` are additionally denied by name. It has no git access at all, so the staged patch is included in the prompt rather than fetched, and a patch too large to include blocks the commit instead of being truncated. |
+| `codex` | The current commit-audit invocation requests `workspace-write` with `approval_policy="never"` and read-only Git metadata. Briefing, question answering, and stop supervision request read-only operation. |
+| `pi` | The current `-t` allowlist names read/search tools plus `git_read` and omits shell, write, and edit tools. The intended result is a static audit of the staged patch. |
+| `claude` | The current child invocation requests `--safe-mode`, `--permission-mode dontAsk`, and an allowlist of `Read`, `Grep`, and `Glob`, with common execution and mutation tools denied by name. The staged patch is supplied in the prompt. |
 
-Selecting `pi` or `claude` therefore does not grant command execution, and there is no hidden Codex
-fallback: if the read-only Pi extension is missing, the review fails loudly instead.
+The current `pi` and `claude` configurations are intended not to grant command execution and do not
+configure a hidden Codex fallback. A missing Pi extension is handled as a review failure.
 [`SECURITY.md`](SECURITY.md) states what bounds each path -- timeout, cancellation,
 process-tree cleanup, sandboxing and permissions.
 
@@ -229,7 +252,8 @@ restart and hook-trust actions that an agent cannot perform for them.
 1. Install and authenticate Claude Code or Codex. For Claude Code, also install and authenticate
    the chosen reviewer backend (`codex` or `pi`); the `claude` backend needs nothing beyond the
    authenticated Claude Code you are already running.
-2. Give Git read access to this private repository.
+2. Confirm that Git can read the reviewer-agent repository; authentication is needed only when
+   installing from a private fork or mirror.
 3. Start the developer host in the repository you want to protect.
 4. Paste this prompt:
 
@@ -248,7 +272,8 @@ and leaves only the unavoidable human-only checkpoint.
 
 Prerequisites:
 
-- macOS (tested), or native Linux/WSL2 (untested beta), with Claude Code plugin support;
+- macOS (where it has actually been run), or native Linux/WSL2 (never run there), with a
+  Claude Code that has plugin support;
 - `python3` 3.9 or newer on `PATH`; the runtime is standard-library-only;
 - one authenticated reviewer backend: `codex`, `pi`, or the `claude` CLI you already have.
 
@@ -310,8 +335,8 @@ Claude-specific unattended procedure it invokes is [`AGENT_INSTALL.md`](AGENT_IN
 ## Codex installation
 
 The Codex package has a separate operating guide at
-[`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md). The supported
-installer registers both the plugin and its blocking MCP server:
+[`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md). Its installer
+registers both the plugin and its blocking MCP server:
 
 ```bash
 git clone https://github.com/rladr-org/reviewer-agent.git
@@ -319,7 +344,7 @@ cd reviewer-agent
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-For a private repository, grant the installer’s user access to this repository before cloning.
+When installing from a private fork or mirror, grant the installer’s user access before cloning.
 After installation:
 
 1. Start a new Codex thread.
@@ -403,10 +428,10 @@ subscription quota, so it is chosen explicitly or not at all.
 ### Codex backend
 
 Install and authenticate `codex` with `codex login` or an API key.
-Briefing uses a read-only sandbox. Commit audits use `workspace-write` with `approval_policy="never"`
-so the reviewer can run tests without requesting additional permissions; the sandbox keeps Git
-metadata read-only, so it cannot create the commit. Timed-out question answers and stop supervision
-use the read-only sandbox.
+Briefing requests a read-only sandbox. Commit audits request `workspace-write` with
+`approval_policy="never"` so the reviewer can run tests; Git metadata is requested read-only to
+prevent the reviewer from creating the commit. Timed-out question answers and stop supervision
+request the read-only sandbox.
 
 Set a nonstandard binary with `REVIEWER_CODEX_BIN`.
 
@@ -416,9 +441,9 @@ Pi is model-agnostic. The plugin passes the configured model to `pi --model` and
 Codex as a fallback. Install and authenticate Pi against the desired provider before enabling the
 reviewer.
 
-The commit reviewer intentionally receives no shell. It can inspect Git only through the bundled
-read-only `git_read` extension, which uses fixed validated arguments and `shell:false`. This keeps
-the reviewer read-only but means it cannot run a test suite during an audit. Question answering
+The current commit-review invocation omits a shell and supplies Git access through the bundled
+`git_read` extension, which constructs fixed arguments with `shell:false`. This design is intended
+to keep the reviewer read-only and does not provide a way to run a test suite during an audit. Question answering
 and stop supervision do not require a staged read, but `/reviewerAgent on` also enables the commit
 gate, so a functional Pi installation must include the extension.
 
@@ -457,12 +482,22 @@ error, or a truncated staged diff overrides any model approval with a fail-close
 ### Claude backend
 
 The reviewer is a second `claude` process, so this backend installs nothing: it uses the CLI and
-the authentication you already have. It is **opt-in and never the default**, for one reason worth
-stating plainly -- the review is billed to **your own Claude subscription quota**, the same
-allowance your coding session spends. When that allowance runs out, the commit gate is fail-closed
-and every commit blocks until it resets; the block says so, and names switching backend or
-`/reviewerAgent off` as the way to keep working meanwhile. Do not run two reviewers concurrently
-against the same allowance.
+authentication already selected by the user. It is **opt-in and never the default**. Its usage,
+quota, billing, availability and account consequences are controlled by Anthropic and the terms
+applicable to the user's account, which may change.
+
+> This software invokes third-party tools and services using credentials selected and controlled by
+> the user. Provider terms, policies, availability, quotas, billing and enforcement are controlled
+> by the provider and may change. The author makes no representation that any particular use is
+> permitted under any provider plan. Users are responsible for reviewing the terms applicable to
+> their accounts and obtaining any required authorization:
+> [Usage Policy](https://www.anthropic.com/legal/aup) ·
+> [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) ·
+> [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance).
+>
+> To the maximum extent permitted by law, no responsibility is accepted for provider actions or
+> consequences, including charges, throttling, suspension, termination or loss of access. See
+> [`DISCLAIMER.md`](DISCLAIMER.md).
 
 Set a nonstandard binary with `REVIEWER_CLAUDE_BIN`. Choose the reviewing model with
 `/reviewerModel <model>` and the depth with `/reviewerModel effort <level>`; levels are `low`,
@@ -543,6 +578,10 @@ is chosen explicitly or not at all.
 | `/reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
 | `/reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
 | `/reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
+
+> These manual commands intentionally use Claude Code `!` shell preprocessing. Because command
+> arguments are processed by the shell, avoid shell syntax and do not paste untrusted text into
+> `/reviewerDirective`.
 
 Codex reasoning levels are `none` through `ultra`. Pi levels are `off`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, and `max`. Claude levels are `low`, `medium`, `high`, `xhigh` and
@@ -689,9 +728,9 @@ it had already read -- or, to keep working meanwhile, switch this repository to 
 the next gated action brief a fresh one, at the cost of one cold start. In Claude Code that is
 `/reviewerSession rotate`; in Codex it is `$reviewer-agent-codex:reviewer-session rotate`.
 
-**The reviewer answers as if it were reviewing a different repository.** It no longer can:
-reviewer state is keyed by project as well as by session. If you see this on an older
-installation, update; the fix landed in 1.2.0-beta.1.
+**The reviewer answers as if it were reviewing a different repository.** Current state files are
+keyed by project as well as by session to prevent the previously observed collision. If this
+occurs, disable the reviewer and report it; do not rely on the isolation claim alone.
 
 **`AskUserQuestion` is never answered for you.** That path only fires when Claude Code
 auto-closes an *unanswered* question, which it only does when `askUserQuestionTimeout` is set in
@@ -733,7 +772,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
 The question and stop paths each use a separate 300-second limit and fail open.
 
-## Supported host versions
+## Host versions it has been run against
 
 | Component | Minimum | Why this number |
 |---|---|---|
@@ -742,35 +781,42 @@ The question and stop paths each use a separate 300-second limit and fail open.
 | Node | 22.19 | Required by Pi itself; only needed for the optional Pi backend. |
 | Python | 3.9 | The macOS system interpreter at `/usr/bin/python3`. |
 
-These are the oldest versions this release was actually *exercised* on, not the oldest that can
-work. Older hosts are therefore a caveat rather than a refusal: `/reviewerAgent on` and the Codex
-installer both detect the host version and print a warning below these floors, then continue.
-If the reviewer misbehaves on an older host, update the host before filing a bug.
+These are the oldest versions this release was actually *exercised* on, not a minimum anyone
+undertakes to support, and not the oldest that can work. Older hosts are a caveat rather than a
+refusal: `/reviewerAgent on` and the Codex installer both detect the host version and print a
+warning below these floors, then continue. Newer versions are equally untested — a host that
+changes underneath this project can break it at any time, and nothing here promises otherwise.
 
 Python 3.9 is past upstream end of life and is kept deliberately. macOS ships `/usr/bin/python3`
 at 3.9, and this package is standard-library-only at runtime precisely so it installs against the
 system interpreter without anyone having to install Python first. Development dependencies
 (`requirements-dev.txt`) are a separate matter and are only needed to run the test suites.
 
-## Platform support
+## Platforms it has been run on
 
-macOS is **manually validated end to end**: the release matrix -- install, reject, approve,
-cancel, stop, uninstall -- is run there by hand on a clean host. Linux is **exercised by CI unit
-tests only** (Ubuntu, Python 3.9/3.12/3.14) with no clean-host validation, so it has automated
-coverage but no evidence that a real installation works. WSL2 is **unverified**: no CI, no manual
-run. Both are expected to work, because the runtime and process control use POSIX interfaces --
-expected is not the same as validated, and this section exists to keep those apart. The host's own
-platform support does not imply that this plugin has been verified there.
+**No platform is supported.** What differs between them is only how much evidence exists, and on
+every one of them the answer is "not much".
 
-Native Windows and WSL1 are not supported. The reasons differ. The Claude Code package's
-Bash-oriented commands and both packages' POSIX process control have not been ported to native
-Windows. Claude Code can run in WSL1, although its sandbox is unavailable there, but current Codex
-cannot: starting with [Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl), its Linux sandbox
-uses `bubblewrap` and WSL1 is no longer supported. A Claude Code plus Pi installation might work in
-WSL1, but this project has not tested or documented that combination. WSL2 is therefore the one
-common Windows beta path covered here.
+- **macOS Tahoe** — the only platform where this has been installed and used. The release matrix
+  (install, reject, approve, cancel, stop, uninstall) is run there by hand, and two configurations
+  have had daily use. That is evidence it can work on one machine, not assurance it will work on
+  yours.
+- **Other macOS versions** — never tried.
+- **Linux** — CI unit tests only (Ubuntu, Python 3.9/3.12/3.14). No installation has ever been
+  performed on a Linux host. Automated coverage is not evidence that installing it works.
+- **WSL2** — no CI, no manual run, nothing.
+- **Native Windows and WSL1** — the code is not written for them. The Claude Code package's
+  Bash-oriented commands and both packages' POSIX process control have not been ported to native
+  Windows. Claude Code can run in WSL1, although its sandbox is unavailable there, but current
+  Codex cannot: from [Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl) its Linux sandbox
+  uses `bubblewrap`, which WSL1 does not provide. A Claude Code plus Pi installation might work in
+  WSL1; nobody has tried it.
 
-### Native Linux (untested beta)
+Linux and WSL2 are expected to work, because the runtime and process control use POSIX
+interfaces — but expected is not the same as tried, and this section exists to keep those apart.
+The host's own platform coverage says nothing about whether this project has ever been run there.
+
+### Native Linux (never run there)
 
 These directions apply to both hosts. Install Git, `curl`, and Python 3.9 or newer with the Linux
 distribution's package manager, and confirm that the interpreter is named `python3`:
@@ -799,7 +845,7 @@ Authenticate and verify the selected host with `claude --version` or `codex --ve
 the Pi backend does not need Codex; install and authenticate Pi as described under
 [Pi backend](#pi-backend).
 
-### Windows through WSL2 (untested beta)
+### Windows through WSL2 (never run there)
 
 First install WSL2 from an elevated PowerShell window, then restart Windows if prompted. See the
 [OpenAI WSL guide](https://learn.chatgpt.com/docs/windows/wsl) for host setup and troubleshooting:
@@ -846,8 +892,9 @@ invoke it across the WSL boundary.
 Please report failures at [GitHub Issues](https://github.com/rladr-org/reviewer-agent/issues). A
 useful report names the distribution and version, native Linux or WSL2, Claude Code or Codex and its
 version, Python version, reviewer backend, the failed command or hook, and the complete error after
-removing credentials or private repository content. Linux and WSL2 reports will be used to turn
-these beta paths into tested platforms.
+removing credentials or private repository content. Reports may be read and acted upon, or may
+not — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Filing one is worth doing anyway: it is the only
+way a platform this has never run on could ever get evidence behind it.
 
 The Codex and Pi backends are external dependencies and neither is bundled; the Claude backend runs the `claude` CLI you already have, on your own subscription quota.
 
@@ -865,7 +912,6 @@ askq_answer_hook.py                    Claude Code timed-out question handler
 stop_hook.py                           Claude Code stop supervisor
 session_start_hook.py                  Claude Code Codex-session bootstrap
 reviewerAgent.md.template              project brief template
-REVIEWER_PROMPT_SPEC.md                prompt-layer contract
 pi-extensions/git-read-only/           required read-only Pi Git extension
 tests/                                 Claude Code and distribution tests
 ```
@@ -902,7 +948,7 @@ PI_GIT_READ_LIVE=1 node pi-extensions/git-read-only/test/live.mjs
 
 ## Backlog
 
-- Add Linux and WSL2 CI plus live-host coverage before declaring either platform supported; treat
+- Add Linux and WSL2 CI plus live-host coverage before claiming either platform has been run; treat
   native Windows process control as a separate portability project.
 - Add an explicit opt-in Pi shell mode if Pi gains a permission model that can prevent writes and
   shell redirection. Pi remains shell-free by default.
@@ -923,3 +969,6 @@ carry the unmodified license text. JSON, Markdown, lockfiles and generated files
 and rely on the same `LICENSE`.
 
 Copyright (c) 2026 RLADR.
+
+Claude, Claude Code, Anthropic, Codex, OpenAI and Pi are third-party names used only to identify
+interoperability. No affiliation with or endorsement by their respective owners is claimed.

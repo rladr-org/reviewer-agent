@@ -1,6 +1,7 @@
 ---
 description: "Show this Claude session's reviewerAgent session, or retire it so the next gated action briefs a fresh reviewer with the current standing brief. Usage: /reviewerSession [rotate]"
 allowed-tools: Bash(python3:*)
+disable-model-invocation: true
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_session_toggle.py" $ARGUMENTS`

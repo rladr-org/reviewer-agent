@@ -1,8 +1,18 @@
 # Contributing
 
-This is a beta maintained by one person. Bug reports with a reproduction are the most useful
-contribution; pull requests are welcome but please open an issue first for anything larger than
-a fix, so nobody writes code that a design decision has already ruled out.
+
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
+
+This is a personal project published as-is. Bug reports with a reproduction are the most useful contribution. Please open an issue first for anything larger than a fix, so nobody writes code that a design decision has already ruled out.
+
+> **No maintenance is promised, and no response is promised.** This is a personal project published as-is. There is no undertaking that it is maintained, monitored, or supported; that issues, pull requests, security reports, or messages of any kind will be read, acknowledged, triaged, answered, or acted upon; that any defect or vulnerability will ever be fixed or disclosed; or that any future release, update, or patch will be published. Reports may be ignored or closed without a reply, and the project may be archived or abandoned at any time without notice. Do not depend on a fix arriving.
+
+Contributions are received on exactly those terms: send one because you want the change to exist, not because a review or a merge is expected.
+
+By submitting a contribution, you represent that you have the right to submit it and license it
+under the Mozilla Public License 2.0, the license used by this repository. Do not submit
+third-party code, confidential information, or material whose license is incompatible with
+MPL-2.0.
 
 ## Reporting
 

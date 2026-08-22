@@ -1,5 +1,10 @@
 # reviewer-agent-codex
 
+
+> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has been run in one person's private installation on macOS Tahoe and nowhere else. Use it entirely at your own risk: see [`DISCLAIMER.md`](../../DISCLAIMER.md).
+
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](../../DISCLAIMER.md) and [`LICENSE`](../../LICENSE).
+
 A Codex-native autonomous reviewer with two independent, per-repository capabilities:
 
 1. **Commit gate:** intercepts `git commit` and immediately redirects Codex to one blocking
@@ -13,6 +18,13 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
 
 Both features are off by default.
 
+> **`stopContinue` is autonomous delegation, not merely a reminder.** Its model output is fed back
+> to the developer agent as a next-step directive. The developer agent may act on that output with
+> its own tools, credentials and permissions, potentially without another human confirmation. The
+> supervisor may misunderstand the operator's scope or incorrectly conclude that an action was
+> already authorized. Limit external and destructive permissions before enabling it; see
+> [`DISCLAIMER.md`](../../DISCLAIMER.md).
+
 ## Requirements
 
 - Codex CLI with lifecycle hooks enabled.
@@ -23,12 +35,12 @@ Both features are off by default.
 
 macOS is tested. Native Linux and Windows through WSL2 are untested beta platforms that are
 expected to work, but this plugin does not yet have Linux/WSL2 CI or live-host coverage. Native
-Windows is unsupported because the reviewer relies on POSIX process and signal APIs. WSL1 is
-unsupported for a different reason: starting with
+Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
+will not work for a different reason: starting with
 [Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl), Codex's Linux sandbox uses `bubblewrap`
 and no longer supports WSL1.
 
-### Native Linux (untested beta)
+### Native Linux (never run there)
 
 Install Git, `curl`, and Python 3.9 or newer using the distribution's package manager. If Codex is
 not already installed and authenticated, use the
@@ -43,7 +55,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.version)'
 Then use [Shared repository install](#shared-repository-install) below. Run Codex, the checkout
 installer, and repositories protected by the plugin in the same Linux environment.
 
-### Windows through WSL2 (untested beta)
+### Windows through WSL2 (never run there)
 
 Install WSL2 from an elevated PowerShell window and restart Windows if prompted:
 
@@ -82,7 +94,7 @@ sanitized error output.
 
 For the minimal-human route covering clone, verification, installation, project brief creation,
 feature toggles, restart, and hook trust, start Codex in the repository to protect and give it the
-prompt in [`INSTALL_WITH_AGENT.md`](../../INSTALL_WITH_AGENT.md). The agent runs the supported
+prompt in [`INSTALL_WITH_AGENT.md`](../../INSTALL_WITH_AGENT.md). The agent runs the same
 installer below and stops only at the human-only new-thread and `/hooks` trust checkpoint.
 
 ### Shared repository install
@@ -104,9 +116,9 @@ discovery with:
 codex plugin marketplace add rladr-org/reviewer-agent
 ```
 
-Registration alone is not the supported installation path. A bare `codex plugin add` cannot run
-this plugin's host-configuration step, so use the checkout installer above to guarantee that the
-blocking reviewer tools are configured as direct calls.
+Registration alone is not the whole installation. A bare `codex plugin add` cannot run
+this plugin's host-configuration step, so use the checkout installer above to configure the
+blocking reviewer tools as direct calls.
 
 The marketplace layout follows Codex's official
 [plugin distribution documentation](https://developers.openai.com/plugins/build/plugins/): the
@@ -122,9 +134,9 @@ checkout), run:
 python3 scripts/install_local.py
 ```
 
-The installer safely exposes this checkout through Codex's personal marketplace and runs
+The installer exposes this checkout through Codex's personal marketplace and runs
 `codex plugin add`. It preserves other personal plugins and refuses to replace an unrelated source
-path. Re-running it is safe. It atomically parks and moves back every prior immutable version
+path. It is designed to be rerunnable. It atomically parks and moves back every prior immutable version
 directory around `codex plugin add`, preserving each live directory inode rather than copying it
 after deletion; hooks and long-lived MCP servers already trusted by a live thread keep working,
 while new threads load the newly installed version. If a successful install replaces the same
@@ -257,7 +269,7 @@ python3 plugins/reviewer-agent-codex/scripts/uninstall_local.py
 
 It asks Codex to remove the installed plugin, deletes its cache and its entry in the personal
 marketplace, and removes the `~/plugins/reviewer-agent-codex` symlink pointing at this checkout.
-Running it twice, or after a half-finished install, is safe. Two things it does not do:
+It is designed to tolerate a repeat run or a half-finished prior install. Two things it does not do:
 
 - **Retained verdicts and reviewer state survive.** They are your data, not installer output.
   Add `--purge-state` to delete `~/.codex/reviewer-agent-codex/` as well, or use
@@ -265,7 +277,7 @@ Running it twice, or after a half-finished install, is safe. Two things it does 
   keeping the plugin.
 - **One config edit is left to you.** Installation added `mcp__reviewer_agent` to
   `features.code_mode.direct_only_tool_namespaces` through Codex's own config RPC. Removing one
-  entry from a shared array is not safe to automate against a running host, so the uninstaller
+  entry from a shared array is left manual to avoid rewriting a running host's shared setting, so the uninstaller
   prints the exact edit instead. Leave the other namespaces alone.
 
 ## Enable in a repository
@@ -319,11 +331,11 @@ Commit reviews default to a 3,600-second (one-hour) fail-closed backend limit. S
 `commitReviewTimeoutSeconds` in that same JSON file, or set
 `REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS`, to choose an integer from 60 through 7,200 seconds. The
 environment value wins over `config.json`; invalid or out-of-range values are skipped. The MCP
-tool ceiling is 7,260 seconds so every supported backend limit has time to return its ruling and
+tool ceiling is 7,260 seconds so every backend limit has time to return its ruling and
 cleanup result.
 
 Model settings are read on every child invocation and apply to both fresh and resumed reviewer
-threads. A model name or effort unsupported by the installed Codex host will cause that child call
+threads. A model name or effort the installed Codex host does not accept will cause that child call
 to fail; the commit gate remains fail-closed and stop supervision remains fail-open.
 
 Every fresh and resumed reviewer invocation requests Codex's fast/priority service tier. The
@@ -440,13 +452,13 @@ next task.
   Claude Code implementation into the Codex-native blocking `review_commit` MCP flow. This includes
   explicit per-repository backend selection, Pi model/thinking controls, fresh and resumed Pi
   sessions, bounded exact staged-index deltas, durable verdicts, fail-closed behavior, and the same
-  process-tree cancellation guarantee as the Codex backend. Treat Pi-backed `stopContinue` as a
+  process-tree cancellation implementation as the Codex backend. Treat Pi-backed `stopContinue` as a
   separate milestone: it must use its own role-scoped Pi session, receive only the minimal stop
   context described above, never receive `reviewerAgent.md`, and remain blocking, cancellable, and
   isolated from the Pi commit reviewer. Until that second milestone lands, `stopContinue` remains
   Codex-backed even when Pi is selected for commit review.
 
-## Safety model
+## Intended safety model
 
 - Commit review is fail-closed.
 - Commit and stop reviews suspend the developer model in a single cancellable MCP tool call.
@@ -470,7 +482,7 @@ next task.
 
 See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 
-## Supported host versions
+## Host versions it has been run against
 
 The 1.2.0-beta.1 release matrix was run against Codex CLI 0.147.0 and Python 3.9 (the macOS
 system interpreter). `scripts/install_local.py` detects both and prints a warning below either

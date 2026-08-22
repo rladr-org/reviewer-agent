@@ -1,7 +1,7 @@
 # `git_read`: read-only git for a headless reviewer
 
-A [pi](https://github.com/earendil-works/pi) extension registering one tool, `git_read`, that
-gives a headless reviewer real git reads with no ability to mutate the repository.
+A [pi](https://github.com/earendil-works/pi) extension registering one tool, `git_read`, designed
+to give a headless reviewer bounded Git reads without exposing a mutation operation.
 
 To be clear about why it is needed: **pi is perfectly capable of running a shell.** `pi -t` is an
 allowlist, and the reviewer omits bash from it deliberately, for the reason below. This extension
@@ -23,10 +23,11 @@ git diff --stat HEAD~1 > written_by_a_read_only_review.txt
 executed and wrote the file in headless mode. The permission surface matched on the command path
 and had no read/write distinction, and no "deny any redirect" control existed.
 
-The resolution is structural rather than a longer denylist: **give the reviewer a tool that spawns
+The current design uses a structural boundary rather than a longer denylist: **give the reviewer a tool that spawns
 `git` with a fixed, validated argv and `shell:false`, and leave `bash` out of the allowlist
-entirely.** With no shell there is no redirect class to defend against, and the read-only guarantee
-lives in code that can be unit-tested rather than in configuration.
+entirely.** Omitting the shell removes the ordinary redirect path, and the intended read-only
+property lives in code that can be tested rather than only in configuration. This is an
+implementation description, not a security guarantee.
 
 ## Surface
 
@@ -52,8 +53,8 @@ the dispatch is the only source of truth for which git flags are used:
 | `blame` | `git blame --no-textconv --abbrev <ref> -- <path>` |
 | `rev-parse` | `--git-dir --git-common-dir`, or `--short <ref>` |
 
-Only `diff` with `staged: true` produces a patch. Everything else is `--stat` or a summary, so
-the tool cannot be used to dump arbitrary file contents.
+Only `diff` with `staged: true` is intended to produce a patch. The other operations request
+`--stat` or summary output; the tool does not expose a general arbitrary-file read operation.
 
 ## Hardening
 

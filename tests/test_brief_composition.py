@@ -186,9 +186,9 @@ def test_no_prompt_constant_has_a_missing_space_at_a_concatenation_seam():
     sentence-ending `.` running into one. Restricted to the prompt constants, since prose
     elsewhere is not sent to the reviewer.
 
-    `reviewerAgent` is allowed because it is a real filename the prompts must name, and it is
-    the only legitimate camelCase token in this text."""
-    allowed = {"reviewerAgent"}
+    `reviewerAgent` and `stopContinue` are allowed because they are real product names the prompts
+    must use."""
+    allowed = {"reviewerAgent", "stopContinue"}
     bad = []
     for name in ("STOP_SUPERVISE_PROMPT", "REVIEWER_STANDING_BRIEF", "DEFAULT_BRIEF",
                  "COMMIT_PROMPT", "PI_COMMIT_PROMPT", "_CAPSULE_UNIVERSAL",

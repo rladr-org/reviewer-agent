@@ -50,7 +50,32 @@ def _on(proj):
     )
     _arm_question_answering()
     _warn_about_an_old_host()
+    _state_the_risk(root)
     return 0
+
+
+# Shown when gating starts so the operator sees the principal risks at the point of enablement.
+# LAST, so it is the final thing on screen rather than scrolled away by the notices above.
+_RISK_NOTICE = (
+    "reviewerAgent: USE AT YOUR OWN RISK. An AI reviewer will read staged changes and send "
+    "review context to the configured provider. On the Codex backend it may run commands in "
+    "the repository. Its output may be wrong and it may consume provider quota. Keep "
+    "independent backups and review resulting code. Full terms: {}"
+)
+
+
+def _state_the_risk(root):
+    """Print the risk notice, naming the DISCLAIMER shipped alongside this file.
+
+    Never fatal, and deliberately not a prompt: `/reviewerAgent on` is a slash command whose
+    output the operator reads, with no way to answer a question, so blocking on acknowledgement
+    would wedge the command rather than inform anyone."""
+    try:
+        disclaimer = Path(__file__).resolve().parent / "DISCLAIMER.md"
+        print(_RISK_NOTICE.format(disclaimer))
+        rl.log("[on] risk notice shown root={}".format(root))
+    except Exception:  # a notice must never be the reason enabling fails
+        pass
 
 
 def _warn_about_an_old_host():

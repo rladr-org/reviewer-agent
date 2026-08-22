@@ -1,5 +1,8 @@
 # Install reviewer-agent with an agent
 
+
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
+
 This is the single handoff file for agent-assisted installation of either the Claude Code plugin
 or the Codex plugin. It minimizes manual setup without pretending that an agent can authenticate
 accounts, approve its own elevated writes, restart its host, or trust lifecycle hooks on a human's
@@ -10,11 +13,12 @@ behalf.
 Before starting:
 
 1. Install and authenticate the developer host to be protected: Claude Code or Codex.
-2. Give the machine's Git client read access to the private `rladr-org/reviewer-agent` repository.
+2. Confirm that the machine's Git client can read `rladr-org/reviewer-agent`; authentication is
+   needed only when installing from a private fork or mirror.
 3. For Claude Code only, install and authenticate at least one desired reviewer backend: `codex`,
    `pi`, or the `claude` CLI you are already running. They are alternatives; a Pi-only setup does
-   not need Codex, and the `claude` backend needs no additional install at all — it spends your
-   own Claude subscription quota instead.
+   not need Codex, and the `claude` backend needs no additional install. Its usage, quota, billing
+   and account consequences are controlled by Anthropic and the user's plan.
 4. Start the developer host in the repository you want to protect.
 
 Then give the agent this prompt:
@@ -108,7 +112,7 @@ reported. Do not make a demo commit in the target repository unless the operator
 
 ### 4B. Codex installation
 
-From `<INSTALLER_REPO>`, use the supported installer rather than a bare marketplace command:
+From `<INSTALLER_REPO>`, use the checkout installer rather than a bare marketplace command:
 
 ```bash
 python3 plugins/reviewer-agent-codex/scripts/install_local.py

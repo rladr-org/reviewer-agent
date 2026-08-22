@@ -1,6 +1,7 @@
 ---
 description: "Show or set the reviewerAgent's model, the commit-audit timeout, and the reasoning effort. Model and effort follow this project's backend (codex, pi or claude, each with its own slots and level set); the timeout is shared. Usage: /reviewerModel [<model> [<seconds>] | clear | timeout <seconds>|clear | effort <level>|clear]"
 allowed-tools: Bash(python3:*)
+disable-model-invocation: true
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_model_toggle.py" $ARGUMENTS`

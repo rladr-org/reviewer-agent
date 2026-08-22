@@ -71,6 +71,7 @@ def export(tmp_path_factory):
 @requires_repository
 def test_the_export_contains_every_required_file_and_no_excluded_one(export):
     assert rex.verify(export) == []
+    assert "DISCLAIMER.md" in rex.REQUIRED_PATHS
     for name in rex.REQUIRED_PATHS:
         assert (export / name).is_file(), name
     for name in rex.EXCLUDED_PATHS:
