@@ -11,6 +11,11 @@ Briefing here (rather than lazily on the first commit) means the reviewer sessio
 is established at session start, exactly as intended. Inactive projects do nothing.
 Failure is logged but never blocks the session (the PreToolUse hooks lazily brief as
 a fallback).
+
+SEPARATELY -- and independent of the main reviewer flag -- when stopContinueWatchdog is on
+for the project, this hook injects `additionalContext` telling the fresh/resumed session to
+re-arm its CronCreate recovery cron (the backstop for the `/stopContinueWatchdog on`-turn
+arming). See docs/plans/stopcontinue_watchdog.md.
 """
 import json
 import sys
@@ -20,25 +25,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
 
 
-def main():
-    raw = sys.stdin.read()
-    data = json.loads(raw) if raw.strip() else {}
-    cwd = data.get("cwd") or rl.project_dir()
+def _brief_if_active(data, cwd):
+    """Establish/capture the reviewer session at session start (Codex backend only). Pure
+    side effects + logging; never prints and never raises out."""
     if not rl.is_active(cwd):  # resolves cwd -> canonical project root internally
-        return 0
+        return
     claude_sid = rl.claude_session_key(data)
     key = rl.canonical_project_key(cwd)
     backend = rl.reviewer_backend(cwd)
     if backend in ("pi", "claude"):
-        # Neither backend has a briefing turn to run here: pi captures its session from the
-        # first gated action's response, and claude mints its own id at that same moment. Doing
-        # nothing at session start is what keeps selecting one of them from launching codex.
         rl.log(
             "[session_start] key={} claude_sid={} backend={} -> lazy first gated action".format(
                 key, rl.short(str(claude_sid), 60), backend
             )
         )
-        return 0
+        return
     sid, serr = rl.ensure_session(cwd, claude_sid)
     if sid:
         rl.log(
@@ -52,6 +53,31 @@ def main():
                 key, rl.short(str(claude_sid), 60), serr
             )
         )
+
+
+def _watchdog_rearm_context(cwd):
+    """The SessionStart additionalContext that re-arms the watchdog cron, or None. Gated on the
+    EFFECTIVE state (watchdog flag AND stopContinue active), so a session that resumes after
+    stopContinue was turned off does not re-arm ticks the now-inert Stop hook cannot supervise.
+    Independent of the main reviewer flag -- the watchdog is its own opt-in."""
+    if not rl.is_stopcontinue_watchdog_effective(cwd):
+        return None
+    return rl.watchdog_arm_instruction(rl.watchdog_interval(cwd))
+
+
+def main():
+    raw = sys.stdin.read()
+    data = json.loads(raw) if raw.strip() else {}
+    cwd = data.get("cwd") or rl.project_dir()
+    try:
+        _brief_if_active(data, cwd)
+    except Exception as e:
+        rl.log("[session_start] brief EXCEPTION {}: {}".format(type(e).__name__, e))
+    ctx = _watchdog_rearm_context(cwd)
+    if ctx:
+        rl.log("[session_start] key={} watchdog re-arm context injected".format(
+            rl.canonical_project_key(cwd)))
+        print(json.dumps(rl.sessionstart_context_output(ctx)))
     return 0
 
 

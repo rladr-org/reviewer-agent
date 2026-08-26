@@ -50,6 +50,16 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
   slots, its own per-project session slots for the reviewer and stop-supervisor roles, and an
   exhausted-quota diagnostic that names what actually helps instead of reporting a bare exit
   code.
+- `/stopContinueWatchdog on [interval]|off|status` (Claude Code): a per-project recovery loop for
+  the failure mode where the stop supervisor's API times out, the Stop hook fails open, and the
+  agent is left idle with nothing to re-fire supervision. Arms a `CronCreate` cron (interval 1–59
+  min, default 3) whose tick re-invokes the idle session so the existing Stop hook supervises it
+  again; `CronList` is the source of truth, so arming is idempotent, liveness-correct and
+  interval-correct, and a stale cron self-cancels on its next tick once the flag is off. Requires
+  `stopContinue` active — the tick relies on the Stop hook, which is inert otherwise. The initial
+  design ships the minimal feature (toggle, interval, mid-session and SessionStart arming); a
+  block-until-armed cap, fail-open decision markers, and an opt-in alert are documented as deferred
+  refinements in `docs/plans/stopcontinue_watchdog.md`.
 
 ### Changed
 

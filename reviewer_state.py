@@ -796,6 +796,64 @@ def clear_stopcontinue_active(proj):
 
 
 # --------------------------------------------------------------------------
+# stopContinueWatchdog: a per-PROJECT flag + interval for the CronCreate-armed
+# idle-strand recovery loop. The cron re-invokes an idle session so the EXISTING
+# Stop hook (stopContinue) can recover an unsupervised fail-open strand -- so this
+# REQUIRES stopContinue to be active (the tick is inert otherwise). The flag file's
+# CONTENT is the interval in minutes. See docs/plans/stopcontinue_watchdog.md.
+# --------------------------------------------------------------------------
+WATCHDOG_DEFAULT_INTERVAL = 3
+WATCHDOG_MIN_INTERVAL = 1
+WATCHDOG_MAX_INTERVAL = 59  # `*/N` in the cron minute field is not a general >1h interval
+
+
+def stopcontinue_watchdog_flag_file(proj):
+    return reviewer_home() / "state" / (
+        _project_control_stem(proj) + ".stopcontinue_watchdog.active")
+
+
+def is_stopcontinue_watchdog_active(proj):
+    return stopcontinue_watchdog_flag_file(proj).exists()
+
+
+def is_valid_watchdog_interval(n):
+    return isinstance(n, int) and WATCHDOG_MIN_INTERVAL <= n <= WATCHDOG_MAX_INTERVAL
+
+
+def set_stopcontinue_watchdog_active(proj, interval=WATCHDOG_DEFAULT_INTERVAL):
+    if not is_valid_watchdog_interval(interval):
+        raise ValueError("watchdog interval must be an integer 1-59 minutes")
+    f = stopcontinue_watchdog_flag_file(proj)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(interval) + "\n")
+
+
+def clear_stopcontinue_watchdog_active(proj):
+    stopcontinue_watchdog_flag_file(proj).unlink(missing_ok=True)
+
+
+def watchdog_interval(proj):
+    """The armed interval in minutes. A missing or corrupt flag file -> the default, so a
+    hand-edit can never produce an out-of-range `*/N` cron expression."""
+    raw = _read_state_text(stopcontinue_watchdog_flag_file(proj))
+    try:
+        n = int((raw or "").strip())
+    except (ValueError, TypeError):
+        return WATCHDOG_DEFAULT_INTERVAL
+    return n if is_valid_watchdog_interval(n) else WATCHDOG_DEFAULT_INTERVAL
+
+
+def is_stopcontinue_watchdog_effective(proj):
+    """The watchdog only DOES anything while stopContinue is also active: its tick relies on the
+    Stop hook, which returns immediately when the stopContinue flag is off. `on` enforces this up
+    front, but stopContinue can be turned off LATER -- and clearing the stopContinue flag does not
+    touch the watchdog flag. So the tick's self-cancel check and the SessionStart re-arm both gate
+    on this combined predicate: with stopContinue off the watchdog reports INACTIVE, so its crons
+    self-cancel and re-arming stops, WITHOUT the stopContinue toggle needing to know it exists."""
+    return is_stopcontinue_active(proj) and is_stopcontinue_watchdog_active(proj)
+
+
+# --------------------------------------------------------------------------
 # per Claude-session codex reviewer session id
 # (captured once at session start; resumed BY ID from any worktree)
 # --------------------------------------------------------------------------

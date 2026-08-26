@@ -215,6 +215,52 @@ The agent's proposed final message:
 {}"""
 
 
+# --------------------------------------------------------------------------
+# stopContinueWatchdog: text the model acts on to arm / cancel the CronCreate
+# recovery loop, and the tick prompt the cron fires. `CronList` is the source of
+# truth -- watchdog crons are identified by WATCHDOG_MARKER in their tick prompt,
+# so arming is idempotent, liveness-correct, and interval-correct with no state
+# file to go stale. See docs/plans/stopcontinue_watchdog.md.
+# --------------------------------------------------------------------------
+WATCHDOG_MARKER = "stopContinueWatchdog"
+
+# ABSOLUTE path, resolved where this module actually lives, NOT `${CLAUDE_PLUGIN_ROOT}`: the tick
+# runs as an ordinary model Bash call, whose shell does not carry the hook/command env, so the
+# variable would expand to empty and the status check would fail open (INACTIVE -> self-delete).
+_WATCHDOG_TOGGLE_PATH = str(Path(__file__).resolve().parent / "stopcontinue_watchdog_toggle.py")
+
+WATCHDOG_TICK_PROMPT = (
+    "stopContinueWatchdog tick -- run "
+    '`python3 "{}" status`. '
+    "If it prints INACTIVE, delete THIS watchdog cron (CronDelete) and stop. If it prints "
+    "ACTIVE: if you have unfinished work from before, resume it; otherwise reply briefly "
+    "that you are done and stop.".format(_WATCHDOG_TOGGLE_PATH)
+)
+
+
+def watchdog_arm_instruction(interval):
+    """The instruction the model follows (in the `/stopContinueWatchdog on` turn and the
+    SessionStart backstop) to reconcile the marker-tagged crons to exactly one at `*/N`."""
+    cron = "*/{} * * * *".format(interval)
+    return (
+        "[stopContinueWatchdog] Arm the recovery cron for THIS session. Call CronList, then "
+        'reconcile the marker-tagged tasks (whose prompt contains "{marker}") to EXACTLY ONE '
+        'at schedule "{cron}":\n'
+        '- if one or more are already at "{cron}", keep a single one and CronDelete every '
+        "OTHER marker-tagged task;\n"
+        '- otherwise CronDelete all marker-tagged tasks and CronCreate("{cron}", <the tick '
+        "prompt below>).\n"
+        "Post-condition: exactly one marker-tagged cron at \"{cron}\". Tick prompt to use "
+        "verbatim:\n{tick}"
+    ).format(marker=WATCHDOG_MARKER, cron=cron, tick=WATCHDOG_TICK_PROMPT)
+
+
+WATCHDOG_CANCEL_INSTRUCTION = (
+    "[stopContinueWatchdog] Cancel the recovery cron for THIS session: call CronList and "
+    'CronDelete every task whose prompt contains "{marker}".'.format(marker=WATCHDOG_MARKER)
+)
+
+
 # Built-in fallback brief used when the project has no reviewerAgent.md at its root. A
 # missing project brief must NOT block all commits -- the reviewer still audits with these
 # generic standing instructions (the per-commit COMMIT_PROMPT carries the actual task).
@@ -1507,6 +1553,18 @@ def posttool_context_output(additional_context, system_message=None):
     if system_message:
         out["systemMessage"] = system_message
     return out
+
+
+def sessionstart_context_output(additional_context):
+    """SessionStart output that injects `additional_context` into the NEW session's context so
+    the agent acts on it at session start. Used to re-arm the stopContinueWatchdog cron on a
+    fresh/resumed session where the flag is on (the backstop for the `on`-turn arming)."""
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": additional_context,
+        }
+    }
 
 
 # The first non-empty line must OPEN with APPROVED as a whole word. A bare `startswith`
