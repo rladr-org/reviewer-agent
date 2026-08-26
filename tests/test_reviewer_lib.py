@@ -275,12 +275,14 @@ def test_both_commit_prompts_offer_suggestions_on_a_REJECTION_too():
     Observed 2026-07-31: a ten-round review of a design document did not converge (finding
     counts 16, 13, 8, 8 -- flat), because findings about code the staged set did not modify
     kept arriving as blocking items."""
-    for name, text in (("COMMIT_PROMPT", rl.COMMIT_PROMPT),
-                       ("PI_COMMIT_PROMPT", rl.PI_COMMIT_PROMPT)):
-        assert "Output nothing else" not in text, name
-        # The rejection form must OFFER the block, not merely mention SUGGESTIONS once for
-        # the approval form -- so require the marker twice.
-        assert text.count("SUGGESTIONS") >= 2, name
+    # pi keeps the text verdict, so its SUGGESTIONS: block must be OFFERED on the rejection form
+    # too -- the marker appears at least twice (approval form + rejection form).
+    assert "Output nothing else" not in rl.PI_COMMIT_PROMPT
+    assert rl.PI_COMMIT_PROMPT.count("SUGGESTIONS") >= 2
+    # codex emits JSON: `suggestions` is a REQUIRED key present on BOTH verdicts by construction,
+    # so the rejection channel is offered structurally, not by repeating a text marker.
+    assert "Output nothing else" not in rl.COMMIT_PROMPT
+    assert "EITHER verdict" in rl.COMMIT_PROMPT
 
 
 def test_both_commit_prompts_carry_the_staged_set_scope_boundary():
@@ -455,12 +457,22 @@ def test_the_stated_contract_matches_what_is_approved_actually_accepts():
     first line with the word APPROVED` is what the parser enforces, and the one genuine
     ambiguity -- a line that approves and rejects at once -- is called out in the prompt AND
     refused by the parser."""
-    for name, text in (("COMMIT_PROMPT", rl.COMMIT_PROMPT),
-                       ("PI_COMMIT_PROMPT", rl.PI_COMMIT_PROMPT)):
+    # Text-verdict backends (pi) state the exact APPROVED-line form the parser accepts.
+    for name, text in (("PI_COMMIT_PROMPT", rl.PI_COMMIT_PROMPT),):
         assert "begin the first line with the word APPROVED" in text, name
         assert "Do not write REJECTED anywhere on the APPROVED line" in text, name
         # The old absolute phrasing must not come back while the parser stays lenient.
         assert "APPROVED on the first line and nothing else" not in text, name
+
+    # The CODEX backend emits a strict JSON verdict (--output-schema {verdict,findings,
+    # suggestions}) that codex_verdict_to_text reconstructs into the canonical APPROVED/REJECTED
+    # text BEFORE is_approved sees it -- so its prompt states the JSON contract, not the text
+    # APPROVED-line form. The reconstruction (tested in test_audit_record.py) keeps the prompt
+    # and the parser in agreement here.
+    assert "begin the first line with the word APPROVED" not in rl.COMMIT_PROMPT
+    assert ('"verdict"' in rl.COMMIT_PROMPT and '"findings"' in rl.COMMIT_PROMPT
+            and '"suggestions"' in rl.COMMIT_PROMPT)
+    assert "APPROVED" in rl.COMMIT_PROMPT and "REJECTED" in rl.COMMIT_PROMPT
 
     # The forms the prompt sanctions must be exactly the forms the parser accepts.
     assert rl.is_approved("APPROVED")

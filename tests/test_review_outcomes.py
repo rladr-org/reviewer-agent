@@ -116,7 +116,10 @@ def test_an_empty_verdict_is_recorded(home, tmp_path):
     rl.set_active(repo)
     rl.write_session_id(repo, "claude-out", "sid-1")
 
-    result = run_commit_hook(repo, {"FAKE_CODEX_STDOUT": "", "FAKE_CODEX_EXIT": "0"})
+    # codex exits 0 but writes NO schema verdict to its -o file: the reviewer ran yet produced
+    # no usable ruling. run_codex_streaming_audit fails closed (SCHEMA_VERDICT_MISSING), which the
+    # hook records as the EMPTY outcome.
+    result = run_commit_hook(repo, {"FAKE_CODEX_NO_VERDICT_FILE": "1", "FAKE_CODEX_EXIT": "0"})
 
     assert result.returncode == 0, result.stderr
     texts = history_texts(repo)
@@ -159,7 +162,10 @@ def test_a_cancelled_review_is_recorded(home, tmp_path):
     env = dict(os.environ)
     env["REVIEWER_HOME"] = str(rl.reviewer_home())
     env["REVIEWER_CODEX_BIN"] = FAKE
-    env["FAKE_CODEX_SLEEP"] = "30"
+    # The audit runs through the streaming path (--json resume), which hangs on FIRST_DELAY (silent
+    # before any event), not the plain-resume FAKE_CODEX_SLEEP. Long enough to still be running
+    # when the test cancels it, but the test signals as soon as the review starts.
+    env["FAKE_CODEX_FIRST_DELAY"] = "30"
     payload = {
         "cwd": repo,
         "session_id": "claude-out",

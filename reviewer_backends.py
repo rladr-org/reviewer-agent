@@ -32,6 +32,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -49,6 +50,8 @@ from reviewer_state import (
     canonical_project_key,
     claude_bin,
     codex_bin,
+    first_output_timeout as _resolve_first_output_timeout,
+    idle_timeout as _resolve_idle_timeout,
     codex_effort,
     codex_effort_config,
     codex_model,
@@ -93,6 +96,13 @@ def serialize_questions(tool_input):
 # SIGKILL-by-timeout). Named so callers can tell "the reviewer ran out of time" -- which has
 # its own remedy, a bigger budget -- from "the reviewer failed".
 TIMEOUT_EXIT = 124
+
+
+# codex exited 0 but its `-o` file held no schema-conforming verdict. A DISTINCT nonzero code (not
+# TIMEOUT_EXIT, not 0) so the fail-CLOSED block is attributable to a malformed/absent verdict
+# rather than a timeout, and so commit_hook's `completed = code==0 and out.strip()` counts it as
+# NOT completed -- the preserved prior verdict is kept and the commit stays blocked.
+SCHEMA_VERDICT_MISSING = 65
 
 
 # What the most recent `_run` actually executed. Recorded HERE because `_run` is the single
@@ -712,14 +722,26 @@ def brief_and_capture_text(proj, text, timeout=BRIEF_CAPTURE_TIMEOUT, on_cancel=
 # inherit an unrelated thread. Every audit resumes BY ID via resume_by_id_argv below.
 # (Moved here with the code at split step 8; tests/test_session_isolation.py:83 enforces it by
 # asserting the facade has no `resume_argv` / `run_codex_resume`.)
-def resume_by_id_argv(session_id, proj, sandbox, prompt, extra_config=None):
+def resume_by_id_argv(session_id, proj, sandbox, prompt, extra_config=None,
+                      json_mode=False, output_schema=None, output_last_message=None):
     """Resume a SPECIFIC codex session by id. Unlike `resume --last`, an explicit id is
     NOT cwd-filtered, so one briefed reviewer session serves the main checkout and every
     worktree; `-C proj` still sets the directory the audit runs in, so pointing -C at a
-    worktree makes the same session audit that worktree's own staged diff."""
+    worktree makes the same session audit that worktree's own staged diff.
+
+    The streaming commit audit sets `json_mode`/`output_schema`/`output_last_message` to add
+    `--json --output-schema <file> -o <file>` (all accepted BEFORE the `resume` subcommand), so
+    codex emits a watchable JSONL event stream and writes its schema-constrained final verdict to
+    the `-o` file. The stop and askq paths leave them defaulted, so their argv is unchanged."""
     argv = [codex_bin(), "exec", "-C", str(proj)]
     if sandbox:
         argv += ["--sandbox", sandbox]
+    if json_mode:
+        argv += ["--json"]
+    if output_schema:
+        argv += ["--output-schema", str(output_schema)]
+    if output_last_message:
+        argv += ["-o", str(output_last_message)]
     argv += ["-c", APPROVAL_CONFIG, "-c", SERVICE_TIER_CONFIG, "-c", DISABLE_PLUGINS]
     # The /reviewerModel override must reach THIS path: commit/askq/stop all resume by id,
     # so without it a mid-session model change would never take effect (the override would
@@ -750,6 +772,89 @@ def run_codex_resume_by_id(
         timeout=timeout,
         on_cancel=on_cancel,
     )
+
+
+def run_codex_streaming_audit(
+    session_id, proj, sandbox, prompt, timeout=DEFAULT_TIMEOUT,
+    first_output_timeout=None, idle_timeout=None, extra_config=None, on_cancel=None,
+):
+    """Run the codex COMMIT audit as a schema-constrained, streamed call, and return
+    `(code, verdict_text, stderr)` where `verdict_text` is the CANONICAL APPROVED/REJECTED text
+    reconstructed from the strict JSON verdict -- so commit_hook.is_approved is unchanged.
+
+    codex writes its schema-conforming final message to a FRESH `-o` temp file per attempt (never
+    reused, so a retry can never read the previous attempt's verdict), while `_run_streaming`
+    watches the `--json` event pipe and kills a hung reviewer on the N1/N2 idle thresholds. The
+    whole audit shares ONE absolute deadline (start + total budget); an N1/N2 idle kill is retried
+    ONCE with the REMAINING budget (a hang may be transient), but the total cap is not -- so total
+    wall time is bounded by `timeout`, then the gate fails closed.
+
+    Fail-CLOSED return contract: on `code == 0` with a missing/malformed verdict (reconstruction is
+    ""), return `(SCHEMA_VERDICT_MISSING, "", <reason>)` -- a NONZERO code with an EMPTY verdict,
+    NEVER `(0, <nonempty>, ...)`, because commit_hook counts any exit-0 nonempty string as a real
+    verdict and would overwrite the preserved prior review (and could approve)."""
+    if first_output_timeout is None:
+        first_output_timeout = _resolve_first_output_timeout()
+    if idle_timeout is None:
+        idle_timeout = _resolve_idle_timeout()
+    deadline = time.monotonic() + timeout
+
+    tmp_paths = []
+    try:
+        attempts = 0
+        code, out, err = TIMEOUT_EXIT, "", "review not run"
+        while attempts < 2:
+            attempts += 1
+            fd, tmp = tempfile.mkstemp(prefix="codex_verdict_", suffix=".json")
+            os.close(fd)
+            tmp_paths.append(tmp)
+            remaining = max(0.0, deadline - time.monotonic())
+            argv = resume_by_id_argv(
+                session_id, proj, sandbox, prompt, extra_config=extra_config,
+                json_mode=True, output_schema=codex_verdict_schema_path(),
+                output_last_message=tmp)
+            if attempts > 1:
+                # The retry's cost is measured on ITS OWN invocation, not added to the first.
+                reset_last_invocation()
+            code, out, err = _run_streaming(
+                argv, timeout=remaining, on_cancel=on_cancel,
+                first_output_timeout=first_output_timeout, idle_timeout=idle_timeout)
+            # Retry ONLY an idle kill (its reason carries "idle"; the total cap does NOT), and only
+            # while budget remains -- so a genuine total timeout is never retried.
+            if (code == TIMEOUT_EXIT and "idle" in (err or "")
+                    and (deadline - time.monotonic()) > 0):
+                continue
+            break
+
+        verdict_text = ""
+        if code == 0:
+            try:
+                raw = Path(tmp_paths[-1]).read_text(encoding="utf-8")
+            except OSError:
+                raw = ""
+            verdict_text = codex_verdict_to_text(parse_codex_verdict_json(raw))
+            usage = parse_codex_turn_usage(out)
+            inv = last_invocation()
+            if inv is not None and usage is not None:
+                inv["turn_usage"] = usage
+        if attempts > 1:
+            inv = last_invocation()
+            if inv is not None:
+                inv["idle_retried"] = True
+
+        if code == 0 and not verdict_text.strip():
+            # codex succeeded but produced no schema-conforming verdict: fail CLOSED with a NONZERO
+            # code and EMPTY verdict, so `completed` is False, the commit is blocked, and any
+            # previously saved verdict is preserved.
+            return (SCHEMA_VERDICT_MISSING, "",
+                    "codex --json produced no schema-conforming verdict")
+        return (code, verdict_text, err)
+    finally:
+        for path in tmp_paths:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 # --------------------------------------------------------------------------

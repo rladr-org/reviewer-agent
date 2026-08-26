@@ -142,7 +142,8 @@ def test_active_commit_rejected_denies_and_relays_issue_list(tmp_path, monkeypat
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "REJECTED:\n1. fix f.py:1",
+            "FAKE_CODEX_VERDICT": "REJECTED",
+            "FAKE_CODEX_FINDINGS": "fix f.py:1",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -162,7 +163,7 @@ def test_active_commit_approved_allows_the_commit_to_proceed(tmp_path, monkeypat
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "APPROVED",
+            "FAKE_CODEX_VERDICT": "APPROVED",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -196,14 +197,15 @@ def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
 
     (Path(repo) / "f.py").write_text("rejected = 1\n", encoding="utf-8")
     subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
-    rejected = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="REJECTED:\n1. fix it"))
+    rejected = run_hook(payload, dict(env, FAKE_CODEX_VERDICT="REJECTED",
+                                      FAKE_CODEX_FINDINGS="fix it"))
     assert json.loads(rejected.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert rl.commit_retry_pending(repo, "claude-rotate")
 
     # The next attempt is a retry because a rejection preceded it.
     (Path(repo) / "f.py").write_text("fixed = 1\n", encoding="utf-8")
     subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
-    retry = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="APPROVED"))
+    retry = run_hook(payload, dict(env, FAKE_CODEX_VERDICT="APPROVED"))
     assert json.loads(retry.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert rl.reviewer_session_completed_audits(repo, "claude-rotate", "sid-A") == 1
     subprocess.run(["git", "-C", repo, "commit", "-qm", "retry"], check=True)
@@ -214,7 +216,7 @@ def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
             "qualifying = {}\n".format(number), encoding="utf-8"
         )
         subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
-        approved = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="APPROVED"))
+        approved = run_hook(payload, dict(env, FAKE_CODEX_VERDICT="APPROVED"))
         assert json.loads(approved.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
         if number < 2:
             assert rl.read_session_id(repo, "claude-rotate") == "sid-A"
@@ -251,7 +253,8 @@ def test_rejection_at_limit_rotates_and_keeps_findings_for_the_fresh_retry(
             "REVIEWER_HOME": home,
             "REVIEWER_SESSION_AUDIT_LIMIT": "1",
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "REJECTED:\n1. Preserve me",
+            "FAKE_CODEX_VERDICT": "REJECTED",
+            "FAKE_CODEX_FINDINGS": "Preserve me",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -281,7 +284,8 @@ def test_rejected_findings_are_echoed_in_systemmessage(tmp_path, monkeypatch):
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "REJECTED:\n1. fix f.py:1",
+            "FAKE_CODEX_VERDICT": "REJECTED",
+            "FAKE_CODEX_FINDINGS": "fix f.py:1",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -304,7 +308,8 @@ def test_approved_verdict_is_echoed_in_systemmessage(tmp_path, monkeypatch):
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "APPROVED -- clean diff, tests green",
+            "FAKE_CODEX_VERDICT": "APPROVED",
+            "FAKE_CODEX_SUGGESTIONS": "clean diff, tests green",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -327,18 +332,17 @@ def test_an_approved_verdict_relays_a_long_suggestions_list_whole(tmp_path, monk
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_staged_repo(tmp_path)
     rl.set_active(repo)
-    items = "".join(
-        "{}. suggestion number {} about caching and allocation\n".format(i, i)
-        for i in range(1, 21)
-    )
-    verdict = "APPROVED\nSUGGESTIONS:\n" + items + "LAST_SUGGESTION_MARKER\n"
-    assert len(verdict) > 600, "fixture must exceed the old truncation point"
+    suggestions = ["suggestion number {} about caching and allocation".format(i)
+                   for i in range(1, 21)] + ["LAST_SUGGESTION_MARKER"]
+    payload = "||".join(suggestions)
+    assert len(payload) > 600, "fixture must exceed the old truncation point"
     p = run_hook(
         _input("git commit -m 'feature'", cwd=repo),
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": verdict,
+            "FAKE_CODEX_VERDICT": "APPROVED",
+            "FAKE_CODEX_SUGGESTIONS": payload,
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -364,13 +368,13 @@ def test_an_oversized_approved_verdict_is_bounded_but_recoverable(tmp_path, monk
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_staged_repo(tmp_path)
     rl.set_active(repo)
-    verdict = "APPROVED\nSUGGESTIONS:\n" + ("x" * 4000) + "\nTAIL_MARKER\n"
     p = run_hook(
         _input("git commit -m 'feature'", cwd=repo),
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": verdict,
+            "FAKE_CODEX_VERDICT": "APPROVED",
+            "FAKE_CODEX_SUGGESTIONS": ("x" * 4000) + "||TAIL_MARKER",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -388,9 +392,12 @@ def test_an_oversized_approved_verdict_is_bounded_but_recoverable(tmp_path, monk
     assert "TAIL_MARKER" in Path(named).read_text(encoding="utf-8")
 
 
-def test_a_verdict_whose_first_line_is_not_approved_still_denies(tmp_path, monkeypatch):
-    """The relay change must not loosen the gate. Only the APPROVED branch's TRUNCATION
-    was removed; what counts as approval is unchanged and still fails closed."""
+def test_a_non_schema_conforming_verdict_fails_closed(tmp_path, monkeypatch):
+    """The gate must not loosen. codex now emits a STRICT JSON verdict; a final message that does
+    NOT parse as the exact {verdict,findings,suggestions} schema -- here a stray text blob that
+    even contains the word APPROVED -- reconstructs to "" and returns a NONZERO code, so the
+    commit is denied. is_approved never sees a hand-rolled 'APPROVED' that slipped past the
+    schema, exit 0."""
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_staged_repo(tmp_path)
@@ -400,7 +407,7 @@ def test_a_verdict_whose_first_line_is_not_approved_still_denies(tmp_path, monke
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "SUGGESTIONS:\n1. looks fine to me\nAPPROVED\n",
+            "FAKE_CODEX_VERDICT_JSON": "SUGGESTIONS:\n1. looks fine to me\nAPPROVED\n",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -426,7 +433,8 @@ def test_active_commit_from_worktree_is_reviewed_not_bypassed(tmp_path, monkeypa
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "REJECTED:\n1. fix wt_change.py:1",
+            "FAKE_CODEX_VERDICT": "REJECTED",
+            "FAKE_CODEX_FINDINGS": "fix wt_change.py:1",
             "FAKE_CODEX_EXIT": "0",
         },
     )
@@ -455,7 +463,7 @@ def test_active_commit_resumes_preseeded_session_without_rebriefing(tmp_path, mo
         {
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
-            "FAKE_CODEX_STDOUT": "APPROVED",
+            "FAKE_CODEX_VERDICT": "APPROVED",
             "FAKE_CODEX_EXIT": "0",
             "FAKE_CODEX_SESSION_ID": "SHOULD_NOT_BE_CAPTURED",
         },
@@ -506,7 +514,7 @@ def test_a_completed_review_is_recorded_with_its_cost_and_inputs(tmp_path, monke
     p = run_hook(
         {"cwd": repo, "session_id": "claude-A", "tool_name": "Bash",
          "tool_input": {"command": "git commit -m 'x'"}},
-        _audit_env(home, FAKE_CODEX_STDOUT="REJECTED:\n1. fix f.py:1\ntokens used\n5,000\n"),
+        _audit_env(home, FAKE_CODEX_VERDICT="REJECTED", FAKE_CODEX_FINDINGS="fix f.py:1"),
     )
     assert p.returncode == 0, p.stderr
 
@@ -519,7 +527,11 @@ def test_a_completed_review_is_recorded_with_its_cost_and_inputs(tmp_path, monke
     assert r["verdict_file"] == str(rl.last_review_file(repo, "claude-A"))
     assert r["staged_files"] == 1 and r["staged_lines"] == 1
     assert r["staged"] == rl.staged_blob_shas(repo)
-    assert r["tokens_cumulative"] == 5000
+    # No stdout "tokens used" footer in --json mode; per-turn usage now comes from the
+    # turn.completed event (the fake emits fixed counts), so the cumulative footer is absent.
+    assert r["tokens_cumulative"] is None
+    assert r["turn_output_tokens"] == 340 and r["turn_input_tokens"] == 1200
+    assert r["turn_cached_tokens"] == 100 and r["turn_reasoning_tokens"] == 88
     assert r["dur_s"] >= 0
     assert r["request"]["timeout_s"] == rl.commit_review_timeout()
     assert r["request"]["argv"][0] == FAKE
@@ -534,7 +546,7 @@ def test_the_recorded_argv_never_carries_the_prompt(tmp_path, monkeypatch):
     run_hook(
         {"cwd": repo, "session_id": "claude-B", "tool_name": "Bash",
          "tool_input": {"command": "git commit -m 'x'"}},
-        _audit_env(home, FAKE_CODEX_STDOUT="APPROVED"),
+        _audit_env(home, FAKE_CODEX_VERDICT="APPROVED"),
     )
     r = ra.read_audit_records(repo)[0]
     blob = json.dumps(r)
@@ -572,8 +584,8 @@ def test_records_accumulate_one_per_attempt(tmp_path, monkeypatch):
     rl.write_session_id(repo, "claude-D", "sid-D")
     stdin = {"cwd": repo, "session_id": "claude-D", "tool_name": "Bash",
              "tool_input": {"command": "git commit -m 'x'"}}
-    run_hook(stdin, _audit_env(home, FAKE_CODEX_STDOUT="REJECTED:\n1. fix"))
-    run_hook(stdin, _audit_env(home, FAKE_CODEX_STDOUT="APPROVED"))
+    run_hook(stdin, _audit_env(home, FAKE_CODEX_VERDICT="REJECTED", FAKE_CODEX_FINDINGS="fix"))
+    run_hook(stdin, _audit_env(home, FAKE_CODEX_VERDICT="APPROVED"))
     recs = ra.read_audit_records(repo)
     assert [r["approved"] for r in recs] == [False, True]
     assert [r["round"] for r in recs] == [1, 2]
@@ -595,7 +607,7 @@ def test_the_exec_trace_survives_into_the_record(tmp_path, monkeypatch):
     run_hook(
         {"cwd": repo, "session_id": "claude-E", "tool_name": "Bash",
          "tool_input": {"command": "git commit -m 'x'"}},
-        _audit_env(home, FAKE_CODEX_STDOUT="APPROVED", FAKE_CODEX_STDERR=trace),
+        _audit_env(home, FAKE_CODEX_VERDICT="APPROVED", FAKE_CODEX_STDERR=trace),
     )
     r = ra.read_audit_records(repo)[0]
     assert r["exec_delta_diffs"] == 1
@@ -623,7 +635,7 @@ def test_a_failed_command_is_recorded_with_its_exit_code(tmp_path, monkeypatch):
     run_hook(
         {"cwd": repo, "session_id": "claude-EF", "tool_name": "Bash",
          "tool_input": {"command": "git commit -m 'x'"}},
-        _audit_env(home, FAKE_CODEX_STDOUT="APPROVED", FAKE_CODEX_STDERR=trace),
+        _audit_env(home, FAKE_CODEX_VERDICT="APPROVED", FAKE_CODEX_STDERR=trace),
     )
     r = ra.read_audit_records(repo)[0]
     assert r["exec_test_runs"] == 1
@@ -644,11 +656,11 @@ def test_the_recorded_capsule_is_the_one_that_was_sent(tmp_path, monkeypatch):
     rl.write_session_id(repo, "claude-H", "sid-H")
     stdin = {"cwd": repo, "session_id": "claude-H", "tool_name": "Bash",
              "tool_input": {"command": "git commit -m 'x'"}}
-    run_hook(stdin, _audit_env(home, FAKE_CODEX_STDOUT="REJECTED:\n1. fix"))
+    run_hook(stdin, _audit_env(home, FAKE_CODEX_VERDICT="REJECTED", FAKE_CODEX_FINDINGS="fix"))
     first = ra.read_audit_records(repo)[0]
     assert "last_review.txt" not in ra.load_prompt_part(first["static"]["capsule_sha256"])
 
-    run_hook(stdin, _audit_env(home, FAKE_CODEX_STDOUT="REJECTED:\n2. still"))
+    run_hook(stdin, _audit_env(home, FAKE_CODEX_VERDICT="REJECTED", FAKE_CODEX_FINDINGS="still"))
     second = ra.read_audit_records(repo)[1]
     assert "last_review.txt" in ra.load_prompt_part(second["static"]["capsule_sha256"])
 
@@ -662,12 +674,15 @@ def test_the_commit_log_line_carries_the_cost_fields(tmp_path, monkeypatch):
     run_hook(
         {"cwd": repo, "session_id": "claude-F", "tool_name": "Bash",
          "tool_input": {"command": "git commit -m 'x'"}},
-        _audit_env(home, FAKE_CODEX_STDOUT="APPROVED\ntokens used\n77,000\n"),
+        _audit_env(home, FAKE_CODEX_VERDICT="APPROVED"),
     )
     line = (Path(home) / "logs" / "reviewer.log").read_text(encoding="utf-8")
     assert "dur_s=" in line
     assert "staged_files=1" in line and "staged_lines=1" in line
-    assert "tokens=77000" in line
+    # The streaming audit's timing fields ride the same log line (there is no stdout token
+    # footer in --json mode, so tokens= is present but None for codex).
+    assert "t_first=" in line and "max_gap=" in line and "idle_retried=" in line
+    assert "tokens=" in line
 
 
 def test_an_audit_record_failure_never_blocks_the_gate(tmp_path, monkeypatch):
@@ -684,7 +699,7 @@ def test_an_audit_record_failure_never_blocks_the_gate(tmp_path, monkeypatch):
         p = run_hook(
             {"cwd": repo, "session_id": "claude-G", "tool_name": "Bash",
              "tool_input": {"command": "git commit -m 'x'"}},
-            _audit_env(str(home), FAKE_CODEX_STDOUT="APPROVED"),
+            _audit_env(str(home), FAKE_CODEX_VERDICT="APPROVED"),
         )
         assert p.returncode == 0, p.stderr
         assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -825,7 +840,7 @@ def test_commit_audit_uses_the_configured_timeout(tmp_path, monkeypatch):
         return 0, "APPROVED", ""
 
     monkeypatch.setattr(commit_hook.rl, "ensure_session", lambda cwd, sid, **kwargs: ("sid-1", ""))
-    monkeypatch.setattr(commit_hook.rl, "run_codex_resume_by_id", fake_run)
+    monkeypatch.setattr(commit_hook.rl, "run_codex_streaming_audit", fake_run)
     monkeypatch.setattr(commit_hook.rl, "staged_change_block", lambda *a, **k: "")
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
     monkeypatch.setattr(commit_hook.rl, "save_review", lambda *a, **k: "/dev/null")
@@ -863,7 +878,7 @@ def test_timeout_blocks_the_commit_and_names_the_remedy(tmp_path, monkeypatch):
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
     monkeypatch.setattr(commit_hook.rl, "save_review", lambda *a, **k: "/dev/null")
     monkeypatch.setattr(
-        commit_hook.rl, "run_codex_resume_by_id",
+        commit_hook.rl, "run_codex_streaming_audit",
         lambda *a, **k: (rl.TIMEOUT_EXIT, "", "review timed out after 900s"))
     monkeypatch.setattr(
         sys, "stdin", io.StringIO(json.dumps(_input("git commit -m x", cwd=repo))))
@@ -900,7 +915,7 @@ def test_a_timeout_does_not_record_the_stage_as_audited(tmp_path, monkeypatch):
     monkeypatch.setattr(commit_hook.rl, "record_audited_stage",
                         lambda *a, **k: recorded.append(a))
     monkeypatch.setattr(
-        commit_hook.rl, "run_codex_resume_by_id",
+        commit_hook.rl, "run_codex_streaming_audit",
         lambda *a, **k: (rl.TIMEOUT_EXIT, "", "review timed out after 900s"))
     monkeypatch.setattr(
         sys, "stdin", io.StringIO(json.dumps(_input("git commit -m x", cwd=repo))))
@@ -936,7 +951,7 @@ def test_a_failed_review_does_not_destroy_the_prior_verdict(tmp_path, monkeypatc
     monkeypatch.setattr(commit_hook.rl, "ensure_session", lambda cwd, sid, **kwargs: ("sid-1", ""))
     monkeypatch.setattr(commit_hook.rl, "staged_change_block", lambda *a, **k: "")
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
-    monkeypatch.setattr(commit_hook.rl, "run_codex_resume_by_id", lambda *a, **k: result)
+    monkeypatch.setattr(commit_hook.rl, "run_codex_streaming_audit", lambda *a, **k: result)
     payload = _input("git commit -m x", cwd=repo)
     payload["session_id"] = "sid-keep"
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -964,7 +979,7 @@ def test_an_empty_verdict_does_not_record_the_stage_as_audited(tmp_path, monkeyp
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
     monkeypatch.setattr(commit_hook.rl, "record_audited_stage",
                         lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr(commit_hook.rl, "run_codex_resume_by_id", lambda *a, **k: (0, "  \n", ""))
+    monkeypatch.setattr(commit_hook.rl, "run_codex_streaming_audit", lambda *a, **k: (0, "  \n", ""))
     payload = _input("git commit -m x", cwd=repo)
     payload["session_id"] = "sid-keep"
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -988,7 +1003,7 @@ def test_a_real_verdict_does_record_the_stage_as_audited(tmp_path, monkeypatch):
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
     monkeypatch.setattr(commit_hook.rl, "record_audited_stage",
                         lambda *a, **k: recorded.append(a))
-    monkeypatch.setattr(commit_hook.rl, "run_codex_resume_by_id",
+    monkeypatch.setattr(commit_hook.rl, "run_codex_streaming_audit",
                         lambda *a, **k: (0, "REJECTED:\n1. fix f.py:1", ""))
     payload = _input("git commit -m x", cwd=repo)
     payload["session_id"] = "sid-keep"
@@ -1015,7 +1030,7 @@ def test_an_empty_verdict_is_not_reported_as_a_fix_list(tmp_path, monkeypatch):
     monkeypatch.setattr(commit_hook.rl, "ensure_session", lambda cwd, sid, **kwargs: ("sid-1", ""))
     monkeypatch.setattr(commit_hook.rl, "staged_change_block", lambda *a, **k: "")
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
-    monkeypatch.setattr(commit_hook.rl, "run_codex_resume_by_id", lambda *a, **k: (0, "  \n", ""))
+    monkeypatch.setattr(commit_hook.rl, "run_codex_streaming_audit", lambda *a, **k: (0, "  \n", ""))
     payload = _input("git commit -m x", cwd=repo)
     payload["session_id"] = "sid-keep"
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
@@ -1049,7 +1064,7 @@ def test_a_completed_verdict_does_replace_the_prior_one(tmp_path, monkeypatch):
     monkeypatch.setattr(commit_hook.rl, "staged_change_block", lambda *a, **k: "")
     monkeypatch.setattr(commit_hook.rl, "apply_context", lambda p, *a, **k: p)
     monkeypatch.setattr(
-        commit_hook.rl, "run_codex_resume_by_id",
+        commit_hook.rl, "run_codex_streaming_audit",
         lambda *a, **k: (0, "REJECTED:\n1. NEW FINDING", ""))
     payload = _input("git commit -m x", cwd=repo)
     payload["session_id"] = "sid-keep"

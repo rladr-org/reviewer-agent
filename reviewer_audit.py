@@ -534,6 +534,12 @@ def record_commit_attempt(proj, claude_session, reviewer_session, backend, promp
         staged = rl.staged_blob_shas(proj)
         files, lines = staged_size(proj)
         invocation = rl.last_invocation() or {}
+        # The codex streaming audit records per-turn usage on the invocation (there is no stdout
+        # "tokens used" footer in --json mode). These are PER-TURN counts, kept alongside the
+        # cumulative footer figure rather than folded into it, so advance_session_cursor's
+        # cumulative-delta logic is untouched. Absent for pi/claude and the plain (non-streaming)
+        # codex paths, which leave them None.
+        usage = invocation.get("turn_usage") or {}
         capsule = rl.reviewer_capsule(proj, commit_audit=True, claude_session_id=claude_session)
         commit_prompt = rl.PI_COMMIT_PROMPT if backend == "pi" else rl.COMMIT_PROMPT
         brief, brief_source = _session_brief(proj, reviewer_session, backend)
@@ -552,9 +558,18 @@ def record_commit_attempt(proj, claude_session, reviewer_session, backend, promp
             "required_fixes": count_required_fixes(out, completed, approved),
             "verdict_file": verdict_file,
             "dur_s": invocation.get("dur_s"),
+            # Streaming instrumentation (codex --json only; None elsewhere): time to the first
+            # event, the largest between-event gap, and whether an idle kill forced one retry.
+            "t_first_event_s": invocation.get("t_first_event_s"),
+            "max_gap_s": invocation.get("max_gap_s"),
+            "idle_retried": bool(invocation.get("idle_retried")),
             "tokens_cumulative": tokens,
             "tokens_delta": (tokens - previous)
                             if (tokens is not None and previous is not None) else None,
+            "turn_input_tokens": usage.get("input_tokens"),
+            "turn_output_tokens": usage.get("output_tokens"),
+            "turn_cached_tokens": usage.get("cached_input_tokens"),
+            "turn_reasoning_tokens": usage.get("reasoning_output_tokens"),
             "head": _head(proj),
             "staged": staged,
             "staged_files": files,

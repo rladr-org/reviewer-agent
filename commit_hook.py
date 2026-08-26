@@ -256,8 +256,15 @@ def main():
         # AFTER ensure_session: briefing is its own `_run`, and without the reset the audit
         # would be recorded with the brief's argv and duration.
         rl.reset_last_invocation()
-        code, out, err = rl.run_codex_resume_by_id(
+        # Streaming, schema-constrained audit: codex emits a --json event stream (watched for the
+        # N1/N2 idle thresholds) and a strict JSON verdict, which the call reconstructs into the
+        # canonical APPROVED/REJECTED text -- so `is_approved`/`completed` below are unchanged. A
+        # hung reviewer is killed and retried once; a malformed verdict fails CLOSED (nonzero,
+        # empty out), so `completed` is False and any saved verdict is preserved.
+        code, out, err = rl.run_codex_streaming_audit(
             sid, cwd, "workspace-write", prompt, timeout=rl.commit_review_timeout(),
+            first_output_timeout=rl.first_output_timeout(),
+            idle_timeout=rl.idle_timeout(),
             on_cancel=_record_cancellation,
         )
 
@@ -308,6 +315,10 @@ def main():
                 "the review exceeded the {}s budget and produced no verdict".format(
                     rl.commit_review_timeout())
             )
+        elif code == rl.SCHEMA_VERDICT_MISSING:
+            # codex exited 0 but its --json verdict was missing or unparseable: the reviewer ran
+            # yet produced no usable ruling, which is the EMPTY case, not an operational FAILURE.
+            outcome, detail = rl.OUTCOME_EMPTY, "exit 0 but no schema-conforming verdict"
         elif code != 0:
             outcome, detail = rl.OUTCOME_FAILED, "exit {}: {}".format(
                 code, rl.short(err, 2000))
@@ -324,13 +335,14 @@ def main():
     provenance = rl.context_provenance(cwd, transcript_path, claude_sid)
     rl.log(
         "[commit] key={} cwd={} backend={} sid={} exit={} approved={} effort={} fixes={} "
-        "dur_s={} tokens={} "
+        "dur_s={} t_first={} max_gap={} idle_retried={} tokens={} "
         "staged_files={} staged_lines={} delta_diffs={} full_reads={} test_runs={} "
         "test_runs_failed={} exec_failed={} cmd={!r} "
         "verdict_tail={!r} stderr_tail={!r}{}".format(
             key, cwd, backend, sid, code, approved,
             _effort_label(backend), audit.get("required_fixes"),
-            audit.get("dur_s"), audit.get("tokens_cumulative"),
+            audit.get("dur_s"), audit.get("t_first_event_s"), audit.get("max_gap_s"),
+            audit.get("idle_retried"), audit.get("tokens_cumulative"),
             audit.get("staged_files"), audit.get("staged_lines"),
             audit.get("exec_delta_diffs"), audit.get("exec_full_reads"),
             audit.get("exec_test_runs"), audit.get("exec_test_runs_failed"),

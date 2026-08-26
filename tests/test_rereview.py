@@ -416,7 +416,8 @@ def _run_commit(repo, session="s1"):
     env = dict(os.environ)
     env.update({"REVIEWER_HOME": os.environ["REVIEWER_HOME"],
                 "REVIEWER_CONFIG_FILE": os.environ["REVIEWER_CONFIG_FILE"],
-                "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_STDOUT": "REJECTED:\n1. no",
+                "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_VERDICT": "REJECTED",
+                "FAKE_CODEX_FINDINGS": "no",
                 "FAKE_CODEX_ARGV_FILE": str(Path(repo) / "argv.jsonl")})
     subprocess.run(
         [sys.executable, str(ROOT / "commit_hook.py")],
