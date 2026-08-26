@@ -1,5 +1,5 @@
 ---
-description: "Show this Claude session's reviewerAgent session, or retire it so the next gated action briefs a fresh reviewer with the current standing brief. Usage: /reviewerSession [rotate]"
+description: "Show or rotate this Claude session's reviewerAgent session, or configure automatic rotation. Usage: /reviewerSession [rotate | limit <N|off|clear>]"
 allowed-tools: Bash(python3:*)
 disable-model-invocation: true
 ---
@@ -11,12 +11,13 @@ The block above is the live output of the session script (it ran before you saw 
 Relay that result to the user, quoting it verbatim from the output -- one short line per
 `reviewerSession:` line present. Add no commentary and take no further action.
 
-Forms: `/reviewerSession` shows the current reviewer session and what rotating would do;
-`/reviewerSession rotate` retires it.
+Forms: `/reviewerSession` shows the current reviewer session and effective automatic limit;
+`/reviewerSession rotate` retires it; `/reviewerSession limit <N>` changes the limit;
+`/reviewerSession limit off` disables automatic rotation; and `/reviewerSession limit clear`
+returns to the config-file or built-in default.
 
-Rotation is manual by design. Automatic rotation was measured and rejected: the FIRST commit
-review in a session costs a median 93k tokens against a flat ~40k steady state, so rotating on a
-schedule pays a cold start every time. Rotate when you want a changed standing brief
-(`reviewerAgent.md`, or the plugin's own system prompt) to reach a session that is already
-running -- the brief is sent once per session -- or when accumulated reviewer context is no
-longer useful.
+Automatic rotation defaults to three completed non-retry audits. Any commit attempt after a rejection is a
+retry until an audit approves, and retry audits never advance the counter. The persistent config
+key is `reviewerSessionAuditLimit`; `0` disables rotation. Manual rotation remains available when
+you want a changed standing brief to reach a live session immediately.
+A first-pass rejection counts as one completed audit; only the attempts after it are retries.

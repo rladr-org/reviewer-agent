@@ -67,6 +67,7 @@ def main():
         return 0
     claude_sid = rl.claude_session_key(data)
     key = rl.canonical_project_key(cwd)
+    retry_audit = rl.commit_retry_pending(cwd, claude_sid)
 
     if rl.commits_beyond_index(command):
         reason = (
@@ -339,6 +340,16 @@ def main():
         )
     )
 
+    automatically_rotated = False
+    if completed and session_known and not retry_audit:
+        _, automatically_rotated = rl.record_completed_reviewer_audit(
+            cwd, claude_sid, sid, preserve_last_review=not approved
+        )
+    if completed and approved:
+        rl.clear_commit_retry_pending(cwd, claude_sid)
+    elif completed:
+        rl.set_commit_retry_pending(cwd, claude_sid)
+
     if code == rl.TIMEOUT_EXIT:
         # A timeout is NOT a verdict, so it still blocks (fail-closed). But it is a distinct
         # failure with a distinct remedy, and reporting it as a generic "review failed" left
@@ -424,9 +435,15 @@ def main():
             "[reviewerAgent] git commit -> the reviewer APPROVED the staged changes. Letting "
             "the commit proceed. Commit ONLY the already-staged set -- do not stage "
             "more files or amend the diff after this approval.\n"
-            "--- the reviewer said ---\n{}\n(full review: {})".format(
-                rl.short(out, 1500), review_path)
+            "--- the reviewer said ---\n{}".format(rl.short(out, 1500))
         )
+        if not automatically_rotated:
+            msg += "\n(full review: {})".format(review_path)
+        if automatically_rotated:
+            msg += (
+                "\n[reviewerAgent] reviewer session automatically rotated after the "
+                "configured number of completed non-retry audits; the next audit starts fresh."
+            )
         print(json.dumps(rl.allow_output(msg)))
     else:
         reason, msg = rl.required_fixes_message(out, review_path)

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
 interface:
   display_name: "Reviewer Session"
-  short_description: "Show or rotate the commit reviewer session"
-  default_prompt: "Use $reviewer-agent-codex:reviewer-session to report or rotate this thread's nested commit reviewer."
+  short_description: "Show, rotate, or configure the commit reviewer session"
+  default_prompt: "Use $reviewer-agent-codex:reviewer-session to report, rotate, or configure this thread's nested commit reviewer."

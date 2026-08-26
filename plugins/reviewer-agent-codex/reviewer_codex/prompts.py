@@ -267,9 +267,11 @@ def commit_capsule(cwd, session_id, include_previous=True):
     text += _CAPSULE_COMMIT
     previous = state.last_review_file(root, session_id)
     if include_previous and previous.exists():
+        # Neutral provenance: automatic rotation can hand a retry to a fresh reviewer that did not
+        # write this verdict, so do not call it "your" verdict.
         text += (
-            "   Your previous verdict for this repository is saved at {} -- read it if you need "
-            "its exact wording.\n".format(previous)
+            "   The previous commit-review verdict for this repository is saved at {} -- read it "
+            "if you need its exact wording.\n".format(previous)
         )
     return text + "\n"
 

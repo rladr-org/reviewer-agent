@@ -27,7 +27,13 @@ import re
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Claude Code is currently POSIX-only.
+    fcntl = None
 
 from reviewer_base import (
     _atomic_write_text,
@@ -265,6 +271,7 @@ def codex_effort_config(level):
 # fail-closed, so a slow one costs a wasted turn, never a blocked commit.
 # --------------------------------------------------------------------------
 DEFAULT_COMMIT_TIMEOUT = 900
+DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT = 3
 
 
 COMMIT_TIMEOUT_FLOOR = 60
@@ -331,6 +338,76 @@ def set_commit_timeout(seconds):
 
 def clear_commit_timeout():
     commit_timeout_file().unlink(missing_ok=True)
+
+
+def reviewer_session_audit_limit_file():
+    return reviewer_home() / "state" / "reviewer_session_audit_limit"
+
+
+def _audit_limit(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if str(parsed) != str(value).strip():
+        return None
+    return parsed if 0 <= parsed <= 1000 else None
+
+
+def reviewer_session_audit_limit_detail():
+    """Completed non-retry audits per child session; zero disables rotation."""
+    for source, candidate in (
+        ("env REVIEWER_SESSION_AUDIT_LIMIT", os.environ.get("REVIEWER_SESSION_AUDIT_LIMIT")),
+        (str(reviewer_session_audit_limit_file()),
+         _read_state_text(reviewer_session_audit_limit_file())),
+        ("config.json reviewerSessionAuditLimit", config_get("reviewerSessionAuditLimit")),
+        ("default", DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT),
+    ):
+        parsed = _audit_limit(candidate)
+        if parsed is not None:
+            return parsed, source
+    return DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT, "default"
+
+
+def reviewer_session_audit_limit():
+    return reviewer_session_audit_limit_detail()[0]
+
+
+def set_reviewer_session_audit_limit(value):
+    parsed = _audit_limit(value)
+    if parsed is None:
+        raise ValueError("invalid reviewer session audit limit")
+    _atomic_write_text(reviewer_session_audit_limit_file(), str(parsed) + "\n")
+
+
+def clear_reviewer_session_audit_limit():
+    reviewer_session_audit_limit_file().unlink(missing_ok=True)
+
+
+def commit_retry_file(proj, claude_session_id):
+    stem = _project_session_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".commit-retry.pending")
+
+
+def commit_retry_pending(proj, claude_session_id):
+    f = commit_retry_file(proj, claude_session_id)
+    return bool(f and f.exists())
+
+
+def set_commit_retry_pending(proj, claude_session_id):
+    f = commit_retry_file(proj, claude_session_id)
+    if f is not None:
+        _atomic_write_text(f, "pending\n")
+
+
+def clear_commit_retry_pending(proj, claude_session_id):
+    f = commit_retry_file(proj, claude_session_id)
+    if f is not None:
+        f.unlink(missing_ok=True)
 
 
 def project_dir():
@@ -1008,12 +1085,10 @@ def rotate_session(proj, claude_session_id):
     Returns the list of state paths cleared (empty when there was nothing to clear), so the
     caller can report honestly rather than claiming a rotation that did not happen.
 
-    Manual only, and deliberately so. Automatic rotation was measured and rejected: the FIRST
-    commit review in a session costs a median 93k tokens against a flat ~40k steady state from
-    turn 3 out past turn 41, so any automatic trigger would buy a cold start every time it fired
-    (REVIEW_COST_REDUCTION_PLAN.md A1.3). What this IS for: the brief is sent once per session,
-    so a session briefed before a REVIEWER_STANDING_BRIEF change keeps the old instructions until
-    it is retired, and for a reviewer whose accumulated context is no longer useful.
+    This is the explicit all-role rotation used by `/reviewerSession rotate`. Scheduled rotation
+    uses `retire_commit_reviewer_session()` instead, so it leaves the stopContinue supervisor
+    untouched. The explicit command remains useful when a changed standing brief must reach both
+    live role sessions immediately.
 
     Clears BOTH role sessions' codex ids, BOTH role sessions' pi ids, THIS project's
     audited-stage record for this session, and THIS project's saved verdict for it. Both roles,
@@ -1053,6 +1128,7 @@ def rotate_session(proj, claude_session_id):
         claude_session_file(proj, sid, ROLE_STOP),
         audited_stage_path(proj, sid),
         last_review_file(proj, sid),
+        reviewer_session_audit_count_file(proj, sid),
     ]
     targets += legacy_session_files(sid)
     for f in targets:
@@ -1063,6 +1139,106 @@ def rotate_session(proj, claude_session_id):
                 continue
             cleared.append(str(f))
     return cleared
+
+
+def reviewer_session_audit_count_file(proj, claude_session_id):
+    stem = _project_session_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".reviewer-audits.json")
+
+
+@contextmanager
+def _reviewer_session_audit_lock():
+    lock = reviewer_home() / "state" / ".reviewer-session-audits.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def reviewer_session_completed_audits(proj, claude_session_id, reviewer_session_id):
+    f = reviewer_session_audit_count_file(proj, claude_session_id)
+    if f is None:
+        return 0
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, dict) or data.get("reviewer_session") != reviewer_session_id:
+        return 0
+    try:
+        return max(0, int(data.get("count", 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _current_reviewer_matches(proj, claude_session_id, reviewer_session_id):
+    expected = str(reviewer_session_id or "")
+    if expected.startswith("pi:"):
+        return read_pi_session(proj, claude_session_id) == expected[3:]
+    if expected.startswith("claude:"):
+        return read_claude_session(proj, claude_session_id) == expected[7:]
+    return read_session_id(proj, claude_session_id) == expected
+
+
+def retire_commit_reviewer_session(
+    proj, claude_session_id, reviewer_session_id, preserve_last_review=False
+):
+    """Retire only the commit reviewer, preserving the stopContinue supervisor."""
+    if not _current_reviewer_matches(proj, claude_session_id, reviewer_session_id):
+        return False
+    expected = str(reviewer_session_id or "")
+    if expected.startswith("pi:"):
+        target = pi_session_file(proj, claude_session_id, ROLE_REVIEWER)
+    elif expected.startswith("claude:"):
+        target = claude_session_file(proj, claude_session_id, ROLE_REVIEWER)
+    else:
+        target = session_id_file(proj, claude_session_id, ROLE_REVIEWER)
+    targets = [
+        target,
+        audited_stage_path(proj, claude_session_id),
+        reviewer_session_audit_count_file(proj, claude_session_id),
+    ]
+    if not preserve_last_review:
+        targets.append(last_review_file(proj, claude_session_id))
+    for f in targets:
+        if f is not None:
+            f.unlink(missing_ok=True)
+    return True
+
+
+def record_completed_reviewer_audit(
+    proj, claude_session_id, reviewer_session_id, preserve_last_review=False
+):
+    """Count one completed non-retry audit and rotate at the configured limit."""
+    limit = reviewer_session_audit_limit()
+    if limit == 0 or not reviewer_session_id:
+        return 0, False
+    f = reviewer_session_audit_count_file(proj, claude_session_id)
+    if f is None:
+        return 0, False
+    with _reviewer_session_audit_lock():
+        if not _current_reviewer_matches(proj, claude_session_id, reviewer_session_id):
+            return 0, False
+        count = reviewer_session_completed_audits(
+            proj, claude_session_id, reviewer_session_id
+        ) + 1
+        _atomic_write_text(f, json.dumps({
+            "reviewer_session": reviewer_session_id,
+            "count": count,
+        }, indent=2) + "\n")
+        if count >= limit:
+            return count, retire_commit_reviewer_session(
+                proj, claude_session_id, reviewer_session_id,
+                preserve_last_review=preserve_last_review,
+            )
+        return count, False
 
 
 def audited_stage_path(proj, claude_session_id):

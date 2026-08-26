@@ -28,7 +28,8 @@ def _isolate(tmp_path, monkeypatch):
     for var in ("REVIEWER_BG_SHELL_STALE_SECS", "REVIEWER_MONITOR_STALE_SECS",
                 "REVIEWER_ASYNC_AGENT_STALE_SECS", "REVIEWER_COMMIT_TIMEOUT_SECS",
                 "REVIEWER_STOPCONTINUE_MAX_NUDGES", "REVIEWER_STOPCONTINUE_EFFORT",
-                "REVIEWER_CODEX_BIN", "REVIEWER_CODEX_MODEL", "REVIEWER_PI_BIN"):
+                "REVIEWER_CODEX_BIN", "REVIEWER_CODEX_MODEL", "REVIEWER_PI_BIN",
+                "REVIEWER_SESSION_AUDIT_LIMIT"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -40,6 +41,7 @@ def test_defaults_apply_with_no_config_file(tmp_path, monkeypatch):
     assert rl.commit_review_timeout() == 900
     assert rl.max_nudges() == 10
     assert rl.stopcontinue_effort() == "low"
+    assert rl.reviewer_session_audit_limit() == 3
 
 
 def test_config_file_sets_every_tunable(tmp_path, monkeypatch):
@@ -54,6 +56,7 @@ def test_config_file_sets_every_tunable(tmp_path, monkeypatch):
         "codexBin": "/opt/codex",
         "piBin": "/opt/pi",
         "model": "gpt-5.4",
+        "reviewerSessionAuditLimit": 6,
     })
     assert rl._bg_shell_stale_secs() == 30 * 3600
     assert rl._monitor_stale_secs() == 900
@@ -64,6 +67,7 @@ def test_config_file_sets_every_tunable(tmp_path, monkeypatch):
     assert rl.codex_bin() == "/opt/codex"
     assert rl.pi_bin() == "/opt/pi"
     assert rl.codex_model() == "gpt-5.4"
+    assert rl.reviewer_session_audit_limit() == 6
 
 
 def test_commit_timeout_env_overrides_the_config_file(tmp_path, monkeypatch):

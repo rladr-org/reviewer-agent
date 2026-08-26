@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - Codex desktop currently runs this on P
 DEFAULT_REVIEWER_MODEL = "gpt-5.6-luna"
 DEFAULT_REVIEWER_EFFORT = "xhigh"
 DEFAULT_COMMIT_REVIEW_TIMEOUT = 3600
+DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT = 3
 REVIEW_HISTORY_KEEP = 100
 MIN_COMMIT_REVIEW_TIMEOUT = 60
 MAX_COMMIT_REVIEW_TIMEOUT = 7200
@@ -141,6 +142,53 @@ def commit_review_timeout_detail():
 
 def commit_review_timeout():
     return commit_review_timeout_detail()[0]
+
+
+def _valid_reviewer_session_audit_limit(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if str(parsed) != str(value).strip():
+        return None
+    return parsed if 0 <= parsed <= 1000 else None
+
+
+def reviewer_session_audit_limit_detail():
+    """Completed non-retry audits per child session; zero disables rotation."""
+    for source, candidate in (
+        (
+            "env REVIEWER_CODEX_SESSION_AUDIT_LIMIT",
+            os.environ.get("REVIEWER_CODEX_SESSION_AUDIT_LIMIT"),
+        ),
+        ("command override", _read_setting("session_audit_limit")),
+        (
+            "config.json reviewerSessionAuditLimit",
+            load_config().get("reviewerSessionAuditLimit"),
+        ),
+        ("default", DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT),
+    ):
+        value = _valid_reviewer_session_audit_limit(candidate)
+        if value is not None:
+            return value, source
+    return DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT, "default"
+
+
+def reviewer_session_audit_limit():
+    return reviewer_session_audit_limit_detail()[0]
+
+
+def set_reviewer_session_audit_limit(value):
+    parsed = _valid_reviewer_session_audit_limit(value)
+    if parsed is None:
+        raise ValueError("invalid reviewer session audit limit")
+    _atomic_write(_setting_file("session_audit_limit"), str(parsed) + "\n")
+
+
+def clear_reviewer_session_audit_limit():
+    _setting_file("session_audit_limit").unlink(missing_ok=True)
 
 
 def set_reviewer_model(value):
@@ -694,6 +742,30 @@ def clear_commit_cursor(path, session_id, expected_reviewer_id=None):
         return True
 
 
+def commit_retry_file(path, session_id):
+    root = project_root(path)
+    key = project_key(root) if root else ""
+    token = _safe(str(key or "") + "\0" + str(session_id or ""))
+    return state_home() / "commit-retries" / (token + ".pending") if token else None
+
+
+def commit_retry_pending(path, session_id):
+    target = commit_retry_file(path, session_id)
+    return bool(target and target.exists())
+
+
+def set_commit_retry_pending(path, session_id):
+    target = commit_retry_file(path, session_id)
+    if target is not None:
+        _atomic_write(target, "pending\n")
+
+
+def clear_commit_retry_pending(path, session_id):
+    target = commit_retry_file(path, session_id)
+    if target is not None:
+        target.unlink(missing_ok=True)
+
+
 def project_token(path):
     """A per-repository token for state filenames, or None outside a Git repository.
 
@@ -734,6 +806,11 @@ def reviewer_session_file(path, session_id, role):
     return state_home() / "sessions" / (name + ".thread") if name else None
 
 
+def reviewer_session_audits_file(path, session_id, role):
+    target = reviewer_session_file(path, session_id, role)
+    return target.with_suffix(".audits") if target is not None else None
+
+
 def read_reviewer_session(path, session_id, role):
     target = reviewer_session_file(path, session_id, role)
     try:
@@ -755,7 +832,54 @@ def publish_reviewer_session(path, session_id, role, reviewer_id):
             return read_reviewer_session(path, session_id, role) or reviewer_id
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(str(reviewer_id).strip() + "\n")
+        _atomic_write(reviewer_session_audits_file(path, session_id, role), "0\n")
         return reviewer_id
+
+
+def reviewer_session_completed_audits(path, session_id, role="reviewer"):
+    counter = reviewer_session_audits_file(path, session_id, role)
+    if counter is None:
+        return 0
+    try:
+        value = int(counter.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+    return max(0, value)
+
+
+def record_completed_reviewer_audit(
+    path, session_id, reviewer_id, role="reviewer"
+):
+    """Count a completed non-retry audit and retire at the configured limit.
+
+    Returns ``(count, retired)``. The caller decides whether the audit was a retry; keeping
+    that decision beside prompt construction prevents rejected/corrective rounds from leaking
+    into this state primitive.
+    """
+    target = reviewer_session_file(path, session_id, role)
+    counter = reviewer_session_audits_file(path, session_id, role)
+    limit = reviewer_session_audit_limit()
+    expected = str(reviewer_id or "").strip()
+    if target is None or counter is None or not expected or limit == 0:
+        return 0, False
+    with _mutation_lock():
+        try:
+            current = target.read_text(encoding="utf-8").strip()
+        except OSError:
+            return 0, False
+        if current != expected:
+            return 0, False
+        try:
+            count = int(counter.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            count = 0
+        count = max(0, count) + 1
+        if count >= limit:
+            target.unlink(missing_ok=True)
+            counter.unlink(missing_ok=True)
+            return count, True
+        _atomic_write(counter, str(count) + "\n")
+        return count, False
 
 
 def retire_reviewer_session(path, session_id, role, expected_reviewer_id=None):
@@ -776,6 +900,9 @@ def retire_reviewer_session(path, session_id, role, expected_reviewer_id=None):
             target.unlink()
         except OSError:
             return False
+        counter = reviewer_session_audits_file(path, session_id, role)
+        if counter is not None:
+            counter.unlink(missing_ok=True)
         return True
 
 

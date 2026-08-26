@@ -1,15 +1,9 @@
 # SPDX-License-Identifier: MPL-2.0
 """`/reviewerSession` -- inspect the reviewer session, and retire it on demand.
 
-Why manual only. Automatic rotation was proposed (retire on every approved commit) and REJECTED
-on measurement: the FIRST commit review in a session costs a median 93k tokens against a flat
-~40k steady state from turn 3 out past turn 41, so rotating would pay a cold start on every
-trigger instead of once. See REVIEW_COST_REDUCTION_PLAN.md A1.3 for the tables.
-
-What survives is an escape hatch, and it has one concrete job beyond "the session seems
-confused": the brief is sent ONCE per session, so a session briefed before a
-REVIEWER_SYSTEM_PROMPT change keeps running on the old instructions. Rotating is how a new brief
-reaches a live session without restarting Claude Code.
+Automatic rotation is covered here alongside the manual escape hatch. The explicit command still
+has one concrete job beyond "the session seems confused": the brief is sent once per session, so
+manual rotation makes a changed brief reach a live session immediately.
 """
 import json
 import os
@@ -215,10 +209,37 @@ def test_rotate_via_the_command_clears_the_session(home, tmp_path):
     assert rl.read_session_id(PROJ, "claude-cmd") is None
 
 
+def test_limit_command_sets_disables_and_clears_the_override(home, tmp_path):
+    hd = str(tmp_path / "rh")
+    env = {"CLAUDE_CODE_SESSION_ID": "claude-limit"}
+
+    set_result = run_toggle(["limit", "5"], hd, env)
+    assert set_result.returncode == 0, set_result.stderr
+    assert "5" in set_result.stdout
+
+    off_result = run_toggle(["limit", "off"], hd, env)
+    assert off_result.returncode == 0, off_result.stderr
+    assert "disabled" in off_result.stdout.lower()
+
+    clear_result = run_toggle(["limit", "clear"], hd, env)
+    assert clear_result.returncode == 0, clear_result.stderr
+    assert "3" in clear_result.stdout
+
+
 def test_rotate_reports_clearly_when_there_was_nothing_to_rotate(home, tmp_path):
     p = run_toggle(["rotate"], str(tmp_path / "rh"), {"CLAUDE_CODE_SESSION_ID": "claude-nada"})
     assert p.returncode == 0
     assert "nothing" in p.stdout.lower() or "no reviewer session" in p.stdout.lower()
+
+
+def test_manual_rotation_does_not_erase_retry_classification(home, tmp_path):
+    repo = str(_repo(tmp_path / "retry-rotation"))
+    rl.write_session_id(repo, "claude-retry", "old-reviewer")
+    rl.set_commit_retry_pending(repo, "claude-retry")
+
+    rl.rotate_session(repo, "claude-retry")
+
+    assert rl.commit_retry_pending(repo, "claude-retry")
 
 
 def test_an_unrecognized_argument_fails_and_changes_nothing(home, tmp_path):

@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""`/reviewerSession [rotate]` implementation.
+"""`/reviewerSession [rotate | limit <N|off|clear>]` implementation.
 
 No argument reports this Claude session's reviewer: which backend it uses, whether a session has
 been established yet, and its id. `rotate` retires it, so the next gated action briefs a fresh
 reviewer.
 
-Rotation is MANUAL only. Automatic rotation (on every approved commit, or on a turn ceiling) was
-measured and rejected: the first commit review in a session costs a median 93k tokens against a
-flat ~40k steady state from turn 3 out past turn 41, so any automatic trigger would pay a cold
-start every time it fired, and it would also move the fail-closed brief-failure exposure from
-once per Claude session to once per commit. See REVIEW_COST_REDUCTION_PLAN.md A1.3.
-
-What rotation is genuinely for: the brief is sent ONCE per session, so a session established
-before a change to the standing instructions keeps running on the old ones until it is retired.
-Rotating is how a new brief reaches a live session without restarting Claude Code. It can also
-replace a reviewer whose accumulated context is no longer useful.
+By default, automatic rotation happens after three completed first-pass audits. Corrective retry
+audits do not count. The limit command overrides the config-file default; zero/off disables it.
 """
 import os
 import sys
@@ -63,9 +55,19 @@ def _show(proj, sid):
     # report that named only the session would describe state an operator standing in a
     # different repository does not have -- and rotation acts on exactly this root.
     print("reviewerSession: project {}".format(rl.canonical_project_key(proj)))
+    limit, source = rl.reviewer_session_audit_limit_detail()
+    if limit:
+        print("reviewerSession: automatic rotation after {} completed non-retry audit(s) "
+              "(from {})".format(limit, source))
+    else:
+        print("reviewerSession: automatic rotation disabled (from {})".format(source))
     if reviewer:
         print("reviewerSession: {} reviewer {} for this Claude session".format(
             backend, reviewer))
+        audit_id = reviewer if backend == "codex" else backend + ":" + reviewer
+        print("reviewerSession: current reviewer has completed {} counted audit(s)".format(
+            rl.reviewer_session_completed_audits(proj, sid, audit_id)
+        ))
     else:
         print(
             "reviewerSession: no reviewer session yet for this Claude session "
@@ -117,11 +119,39 @@ def _rotate(proj, sid):
     return 0
 
 
+def _limit(value):
+    token = str(value or "").strip().lower()
+    if token == "clear":
+        rl.clear_reviewer_session_audit_limit()
+    elif token == "off":
+        rl.set_reviewer_session_audit_limit(0)
+    else:
+        try:
+            parsed = int(token)
+        except ValueError:
+            parsed = -1
+        if not 1 <= parsed <= 1000 or str(parsed) != token:
+            print("reviewerSession: ERROR - limit expects 1..1000, off, or clear",
+                  file=sys.stderr)
+            return 2
+        rl.set_reviewer_session_audit_limit(parsed)
+    limit, source = rl.reviewer_session_audit_limit_detail()
+    if limit:
+        print("reviewerSession: automatic rotation after {} completed non-retry audit(s) "
+              "(from {})".format(limit, source))
+    else:
+        print("reviewerSession: automatic rotation disabled (from {})".format(source))
+    return 0
+
+
 def main(argv):
     args = [a.strip() for a in argv[1:] if a.strip()]
-    if len(args) > 1 or (args and args[0].lower() != "rotate"):
+    valid = (not args or args == ["rotate"] or
+             (len(args) == 2 and args[0].lower() == "limit"))
+    if not valid:
         print(
-            "reviewerSession: ERROR - expected no argument (show) or `rotate`, got: "
+            "reviewerSession: ERROR - expected no argument, `rotate`, or "
+            "`limit <N|off|clear>`, got: "
             "{!r}".format(args),
             file=sys.stderr,
         )
@@ -137,7 +167,11 @@ def main(argv):
         )
         return 2
     proj = rl.project_dir()
-    return _rotate(proj, sid) if args else _show(proj, sid)
+    if not args:
+        return _show(proj, sid)
+    if args[0].lower() == "limit":
+        return _limit(args[1])
+    return _rotate(proj, sid)
 
 
 if __name__ == "__main__":

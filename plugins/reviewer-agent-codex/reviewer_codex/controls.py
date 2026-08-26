@@ -80,7 +80,21 @@ def apply_history_action(path, action):
     )
 
 
-def apply_reviewer_session_action(path, session_id, action):
+def _session_limit_message(path=None, session_id=None, reviewer_id=None):
+    limit, source = state.reviewer_session_audit_limit_detail()
+    if limit == 0:
+        return "automatic rotation disabled (from {})".format(source)
+    progress = ""
+    if reviewer_id:
+        progress = "; current session has completed {}".format(
+            state.reviewer_session_completed_audits(path, session_id, "reviewer")
+        )
+    return "automatic rotation after {} completed non-retry audit(s) (from {}){}".format(
+        limit, source, progress
+    )
+
+
+def apply_reviewer_session_action(path, session_id, action, value=None):
     """Report or retire the commit reviewer owned by one Codex root session."""
     root = state.project_root(path)
     if not root:
@@ -93,10 +107,28 @@ def apply_reviewer_session_action(path, session_id, action):
     current = state.read_reviewer_session(path, owner, "reviewer")
     if action == "status":
         if current:
-            return 0, "reviewerSession: {} for {}".format(current, root)
-        return 0, "reviewerSession: no reviewer session for {}".format(root)
+            return 0, "reviewerSession: {} for {}; {}".format(
+                current, root, _session_limit_message(path, owner, current)
+            )
+        return 0, "reviewerSession: no reviewer session for {}; {}".format(
+            root, _session_limit_message()
+        )
+    if action == "limit":
+        token = str(value or "").strip().lower()
+        if token == "clear":
+            state.clear_reviewer_session_audit_limit()
+        elif token == "off":
+            state.set_reviewer_session_audit_limit(0)
+        else:
+            parsed = state._valid_reviewer_session_audit_limit(token)
+            if parsed is None or parsed == 0:
+                return 1, (
+                    "reviewerSession: ERROR - limit expects 1..1000, off, or clear"
+                )
+            state.set_reviewer_session_audit_limit(parsed)
+        return 0, "reviewerSession: {}".format(_session_limit_message())
     if action != "rotate":
-        return 1, "reviewerSession: ERROR - expected status or rotate"
+        return 1, "reviewerSession: ERROR - expected status, rotate, or limit"
     if not current:
         return 0, (
             "reviewerSession: no reviewer session to rotate for {}; next commit audit "

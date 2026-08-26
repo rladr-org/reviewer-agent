@@ -23,6 +23,32 @@ def test_commit_review_timeout_defaults_to_one_hour(isolated_state, monkeypatch)
     assert state.commit_review_timeout_detail() == (3600, "default")
 
 
+def test_reviewer_session_audit_limit_defaults_to_three_and_config_can_disable_it(
+    isolated_state, monkeypatch
+):
+    monkeypatch.delenv("REVIEWER_CODEX_SESSION_AUDIT_LIMIT", raising=False)
+    assert state.reviewer_session_audit_limit_detail() == (3, "default")
+
+    _write_config(isolated_state, reviewerSessionAuditLimit=7)
+    assert state.reviewer_session_audit_limit_detail() == (
+        7, "config.json reviewerSessionAuditLimit"
+    )
+
+    _write_config(isolated_state, reviewerSessionAuditLimit=0)
+    assert state.reviewer_session_audit_limit() == 0
+
+
+def test_reviewer_session_audit_limit_command_override_can_set_and_clear(
+    isolated_state, monkeypatch
+):
+    monkeypatch.delenv("REVIEWER_CODEX_SESSION_AUDIT_LIMIT", raising=False)
+    _write_config(isolated_state, reviewerSessionAuditLimit=6)
+    state.set_reviewer_session_audit_limit(4)
+    assert state.reviewer_session_audit_limit_detail() == (4, "command override")
+    state.clear_reviewer_session_audit_limit()
+    assert state.reviewer_session_audit_limit() == 6
+
+
 def test_commit_review_timeout_can_be_configured_and_environment_wins(
     isolated_state, monkeypatch
 ):

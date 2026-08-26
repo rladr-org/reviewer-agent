@@ -1452,12 +1452,13 @@ def reviewer_capsule(proj, commit_audit=False, claude_session_id=None):
     )
     # Only name the saved verdict once one exists AND the session is identifiable. "Restate your
     # prior findings" is unactionable on a compacted session, so the pointer earns its place --
-    # but pointing at a file that is missing wastes a tool call, and calling an unattributable
-    # file "your previous verdict" is worse than silence, since it looks authoritative.
+    # but pointing at a file that is missing wastes a tool call. Use neutral provenance because
+    # scheduled rotation can hand a retry to a fresh reviewer while deliberately preserving the
+    # prior reviewer's rejection.
     prior = last_review_file(proj, claude_session_id) if claude_session_id else None
     if prior is not None and prior.exists():
         repeat += (
-            "   Your previous verdict for this repository is saved at {} -- read it if you need "
+            "   The previous commit-review verdict for this repository is saved at {} -- read it if you need "
             "its exact wording.\n".format(prior)
         )
     return (

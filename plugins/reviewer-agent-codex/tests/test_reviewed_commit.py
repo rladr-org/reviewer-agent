@@ -239,6 +239,121 @@ def test_timeout_retires_reviewer_and_next_retry_starts_fresh(
     assert "CHANGED: change.txt" not in calls[1][1]
 
 
+def test_commit_reviewer_rotates_after_three_completed_non_retry_audits(
+    git_repo, isolated_state, monkeypatch
+):
+    _enable(git_repo)
+    calls = []
+    verdicts = iter((
+        "REJECTED:\n1. Fix the first attempt",
+        "APPROVED\n",  # corrective retry: deliberately excluded
+        "APPROVED\n",
+        "APPROVED\n",
+        "REJECTED:\n1. Fresh reviewer confirmation",
+    ))
+
+    def review(cwd, session_id, role, sandbox, prompt, timeout, **kwargs):
+        current = state.read_reviewer_session(cwd, session_id, role)
+        calls.append((current, prompt))
+        if current is None:
+            state.publish_reviewer_session(
+                cwd, session_id, role,
+                "review-thread" if len(calls) == 1 else "fresh-review-thread",
+            )
+        return 0, next(verdicts), ""
+
+    monkeypatch.setattr(commit_tool.backend, "review_turn", review)
+
+    _stage(git_repo, "rejected\n")
+    assert commit_tool.reviewed_commit(git_repo, "rejected", _ticket(git_repo))["status"] == "rejected"
+    _stage(git_repo, "fixed retry\n")
+    assert commit_tool.reviewed_commit(git_repo, "retry", _ticket(git_repo))["status"] == "committed"
+    assert "STAGED SET vs YOUR LAST AUDIT" in calls[1][1]
+
+    for number in range(1, 3):
+        _stage(git_repo, "qualifying {}\n".format(number))
+        result = commit_tool.reviewed_commit(
+            git_repo, "qualifying {}".format(number), _ticket(git_repo)
+        )
+        assert result["status"] == "committed"
+        if number < 2:
+            assert state.read_reviewer_session(
+                git_repo, "root-session", "reviewer"
+            ) == "review-thread"
+
+    assert state.read_reviewer_session(git_repo, "root-session", "reviewer") is None
+    _stage(git_repo, "after rotation\n")
+    assert commit_tool.reviewed_commit(git_repo, "fresh", _ticket(git_repo))["status"] == "rejected"
+    assert calls[-1][0] is None
+    assert "PROJECT BRIEF:" in calls[-1][1]
+    assert state.read_reviewer_session(
+        git_repo, "root-session", "reviewer"
+    ) == "fresh-review-thread"
+
+
+def test_rejection_at_limit_rotates_but_preserves_the_saved_verdict(
+    git_repo, isolated_state, monkeypatch
+):
+    _stage(git_repo, "rejected at limit\n")
+    _enable(git_repo)
+    state.set_reviewer_session_audit_limit(1)
+    _review_result(monkeypatch, (0, "REJECTED:\n1. Keep this finding", ""))
+
+    result = commit_tool.reviewed_commit(
+        git_repo, "rejected", _ticket(git_repo)
+    )
+
+    assert result["status"] == "rejected"
+    assert "automatically rotated" in result["message"]
+    assert state.read_reviewer_session(
+        git_repo, "root-session", "reviewer"
+    ) is None
+    assert state.commit_retry_pending(git_repo, "root-session")
+    assert state.last_review_file(git_repo, "root-session").read_text(
+        encoding="utf-8"
+    ).startswith("REJECTED")
+
+
+def test_retry_after_rejection_at_limit_surfaces_the_preserved_verdict(
+    git_repo, isolated_state, monkeypatch
+):
+    """Regression: a rejection that trips the audit limit rotates the reviewer but preserves the
+    verdict. The retry runs a FRESH reviewer, which must still be POINTED at that saved verdict --
+    otherwise the new reviewer never sees the unresolved findings and can approve them."""
+    _enable(git_repo)
+    state.set_reviewer_session_audit_limit(1)
+    calls = []
+
+    def review(cwd, session_id, role, sandbox, prompt, timeout, **kwargs):
+        current = state.read_reviewer_session(cwd, session_id, role)
+        calls.append((current, prompt))
+        if current is None:
+            state.publish_reviewer_session(
+                cwd, session_id, role,
+                "first-thread" if len(calls) == 1 else "fresh-thread",
+            )
+        return 0, "REJECTED:\n1. Unresolved finding", ""
+
+    monkeypatch.setattr(commit_tool.backend, "review_turn", review)
+
+    _stage(git_repo, "rejected at limit\n")
+    assert commit_tool.reviewed_commit(
+        git_repo, "rejected", _ticket(git_repo)
+    )["status"] == "rejected"
+    assert state.read_reviewer_session(git_repo, "root-session", "reviewer") is None
+
+    _stage(git_repo, "retry fix\n")
+    commit_tool.reviewed_commit(git_repo, "retry", _ticket(git_repo))
+
+    # The retry ran a fresh reviewer (no session id at call time) ...
+    assert calls[-1][0] is None
+    retry_prompt = calls[-1][1]
+    previous = state.last_review_file(git_repo, "root-session")
+    # ... and its prompt points at the preserved verdict, so the unresolved findings are visible.
+    assert "verdict for this repository is saved at" in retry_prompt
+    assert str(previous) in retry_prompt
+
+
 def test_timeout_does_not_retire_a_concurrent_replacement_reviewer(
     git_repo, isolated_state, monkeypatch
 ):

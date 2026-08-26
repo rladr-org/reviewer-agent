@@ -17,7 +17,8 @@ _CONTROL_RE = re.compile(
 )
 _SESSION_CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:reviewer-session\s+"
-    r"(status|rotate)\s*$"
+    r"(status|rotate)(?:\s+([^\s]+))?\s*$|"
+    r"^\s*\$reviewer-agent-codex:reviewer-session\s+limit\s+([^\s]+)\s*$"
 )
 _HISTORY_CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:reviewer-history\s+"
@@ -53,10 +54,15 @@ def _control_output(data, prompt):
                 )
     elif session_match:
         try:
+            action = session_match.group(1) or "limit"
+            value = session_match.group(2) or session_match.group(3)
+            if value and action != "limit":
+                raise ValueError("{} takes no value".format(action))
             code, message = controls.apply_reviewer_session_action(
                 data.get("cwd") or ".",
                 state.session_key(data),
-                session_match.group(1),
+                action,
+                value,
             )
         except (OSError, ValueError) as error:
             code = 1

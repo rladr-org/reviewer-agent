@@ -130,10 +130,10 @@ details to verify, not as a guarantee that a provider or later CLI version will 
 
 Either way the reviewer is a **different session from the developer agent**. One reviewer
 conversation is kept per project, developer session and role, briefed with that project's
-`reviewerAgent.md` when it is created; it persists across commit attempts, so when the developer
-agent fixes its findings and attempts the commit again, it remembers what it asked for. It is not
-permanent: a new developer session gets a new reviewer, and `/reviewerSession rotate` retires it deliberately
-(the next gated action briefs a fresh reviewer with the current brief).
+`reviewerAgent.md` when it is created. It persists through rejected commit attempts, so when the
+developer agent fixes its findings and tries again, it remembers what it asked for. By default it
+rotates after three completed non-retry audits; every attempt after a rejection is a retry until approval and
+does not advance that counter. `/reviewerSession rotate` retires it immediately.
 
 **Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
 no supported configuration, no supported platform, and no supported host version — "supported"
@@ -595,6 +595,7 @@ is chosen explicitly or not at all.
 | `/reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
 | `/reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
 | `/reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
+| `/reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
 | `/reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
 | `/reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
 
@@ -619,6 +620,13 @@ The full brief is sent once when each role session is created. A compact capsule
 non-negotiable rules, project-brief path, directives, and current context is sent on every commit,
 question, and stop call. Changes to the capsule apply on the next call. Changes to the full brief
 require `/reviewerSession rotate`.
+
+The commit reviewer automatically rotates after three completed non-retry audits. Configure the
+default with `reviewerSessionAuditLimit` in `~/.claude/reviewer-agent/config.json` (`0` disables
+it), or override it live with `/reviewerSession limit <N|off|clear>`. A retry is any commit attempt
+after a rejection until the next approval; retries never advance the rotation counter. A
+first-pass rejection itself counts once; only the later attempts in its retry chain are excluded.
+Automatic rotation leaves the separate stop-supervisor session untouched.
 
 ### Role isolation
 

@@ -172,6 +172,103 @@ def test_active_commit_approved_allows_the_commit_to_proceed(tmp_path, monkeypat
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
+    tmp_path, monkeypatch
+):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    monkeypatch.setenv("REVIEWER_CONFIG_FILE", str(tmp_path / "missing.json"))
+    repo = make_committed_repo(tmp_path, "rotation")
+    rl.set_active(repo)
+    rl.write_session_id(repo, "claude-rotate", "sid-A")
+    env = {
+        "REVIEWER_HOME": home,
+        "REVIEWER_CONFIG_FILE": str(tmp_path / "missing.json"),
+        "REVIEWER_CODEX_BIN": FAKE,
+        "FAKE_CODEX_EXIT": "0",
+    }
+    payload = {
+        "cwd": repo,
+        "session_id": "claude-rotate",
+        "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m 'x'"},
+    }
+
+    (Path(repo) / "f.py").write_text("rejected = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
+    rejected = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="REJECTED:\n1. fix it"))
+    assert json.loads(rejected.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert rl.commit_retry_pending(repo, "claude-rotate")
+
+    # The next attempt is a retry because a rejection preceded it.
+    (Path(repo) / "f.py").write_text("fixed = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
+    retry = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="APPROVED"))
+    assert json.loads(retry.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert rl.reviewer_session_completed_audits(repo, "claude-rotate", "sid-A") == 1
+    subprocess.run(["git", "-C", repo, "commit", "-qm", "retry"], check=True)
+
+    rl.write_session_id(repo, "claude-rotate", "stop-sid", role=rl.ROLE_STOP)
+    for number in range(1, 3):
+        (Path(repo) / "f.py").write_text(
+            "qualifying = {}\n".format(number), encoding="utf-8"
+        )
+        subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
+        approved = run_hook(payload, dict(env, FAKE_CODEX_STDOUT="APPROVED"))
+        assert json.loads(approved.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
+        if number < 2:
+            assert rl.read_session_id(repo, "claude-rotate") == "sid-A"
+        subprocess.run(
+            ["git", "-C", repo, "commit", "-qm", "qualifying {}".format(number)],
+            check=True,
+        )
+
+    assert rl.read_session_id(repo, "claude-rotate") is None
+    assert rl.read_session_id(
+        repo, "claude-rotate", role=rl.ROLE_STOP
+    ) == "stop-sid"
+
+
+def test_rejection_at_limit_rotates_and_keeps_findings_for_the_fresh_retry(
+    tmp_path, monkeypatch
+):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_committed_repo(tmp_path, "reject_rotation")
+    rl.set_active(repo)
+    rl.write_session_id(repo, "claude-reject", "sid-reject")
+    (Path(repo) / "f.py").write_text("bad = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
+
+    result = run_hook(
+        {
+            "cwd": repo,
+            "session_id": "claude-reject",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git commit -m 'x'"},
+        },
+        {
+            "REVIEWER_HOME": home,
+            "REVIEWER_SESSION_AUDIT_LIMIT": "1",
+            "REVIEWER_CODEX_BIN": FAKE,
+            "FAKE_CODEX_STDOUT": "REJECTED:\n1. Preserve me",
+            "FAKE_CODEX_EXIT": "0",
+        },
+    )
+
+    output = json.loads(result.stdout)
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert rl.read_session_id(repo, "claude-reject") is None
+    assert rl.commit_retry_pending(repo, "claude-reject")
+    saved = rl.last_review_file(repo, "claude-reject")
+    assert saved.exists()
+    assert "Preserve me" in saved.read_text(encoding="utf-8")
+    capsule = rl.reviewer_capsule(
+        repo, commit_audit=True, claude_session_id="claude-reject"
+    )
+    assert "previous commit-review verdict" in capsule
+
+
 def test_rejected_findings_are_echoed_in_systemmessage(tmp_path, monkeypatch):
     # The operator must see the required fixes in the terminal, not just "commit blocked";
     # the systemMessage also points at the on-disk full review.

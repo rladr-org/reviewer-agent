@@ -330,6 +330,7 @@ The persistent JSON configuration is `~/.codex/reviewer-agent-codex/config.json`
   "model": "gpt-5.6-luna",
   "reasoningEffort": "xhigh",
   "commitReviewTimeoutSeconds": 3600,
+  "reviewerSessionAuditLimit": 3,
   "reviewHistoryKeep": 100
 }
 ```
@@ -356,17 +357,24 @@ built-in profile is therefore `gpt-5.6-luna` with `xhigh` reasoning and
 
 ## Reviewer session recovery
 
-Successful and rejected audits continue to reuse one commit reviewer per developer session. Show
-that nested session or retire it manually when it has become slow or confused:
+Each commit reviewer handles three completed non-retry audits by default, then retires so the next
+audit begins in a fresh session. Once an audit rejects, every following commit attempt is a retry
+until one approves; those retries do not advance the counter. A first-pass rejection itself counts
+as one completed audit. Show, rotate, or configure the nested session with:
 
 ```text
 $reviewer-agent-codex:reviewer-session status
 $reviewer-agent-codex:reviewer-session rotate
+$reviewer-agent-codex:reviewer-session limit 5
+$reviewer-agent-codex:reviewer-session limit off
+$reviewer-agent-codex:reviewer-session limit clear
 ```
 
-Rotation affects only the commit reviewer for the current developer session; the separate
-stopContinue supervisor is unchanged. The next commit attempt creates a fresh reviewer and sends
-the full standing and project brief.
+`reviewerSessionAuditLimit` in the JSON config supplies the default; `0` disables automatic
+rotation. The command override takes precedence, and `clear` removes it. Rotation affects only the
+commit reviewer for the current developer session; the separate stopContinue supervisor is
+unchanged. The next commit attempt creates a fresh reviewer and sends the full standing and
+project brief.
 
 If a commit audit reaches its configured fail-closed limit, no verdict is saved and no commit is
 created. The plugin compare-safely retires only the timed-out reviewer session, clears only that

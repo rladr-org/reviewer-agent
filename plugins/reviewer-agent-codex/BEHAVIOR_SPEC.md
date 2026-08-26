@@ -124,6 +124,10 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   write, approval prompt, or model request; the hook returns `continue: false` after updating state.
 - Enabling stopContinue defers supervision only for the enabling `turn_id`; a later turn is never
   skipped, even when the enabling turn was interrupted.
+- A commit reviewer is retired after three completed non-retry audits by default. Rejection marks
+  every later attempt as a retry until an approval, and retries do not advance the counter.
+- `reviewerSessionAuditLimit` configures the limit; the reviewer-session command overrides it,
+  `clear` restores it, and zero/`off` disables automatic rotation.
 
 ## Reviewer model
 

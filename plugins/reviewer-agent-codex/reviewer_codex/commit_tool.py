@@ -206,14 +206,21 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
     if before is None or snapshot is None:
         return _result("error", "could not fingerprint the staged index")
     review_timeout = state.commit_review_timeout()
+    retry_audit = state.commit_retry_pending(root, session_id)
     try:
         reviewer_id = state.read_reviewer_session(root, session_id, "reviewer")
         if reviewer_id:
-            prompt = _change_block(root, session_id, reviewer_id, snapshot)
+            change_block = _change_block(root, session_id, reviewer_id, snapshot)
+            prompt = change_block
         else:
+            change_block = ""
             prompt = prompts.reviewer_brief(root, "reviewer") + "\n\n"
+        # Surface the saved verdict on a retry even when the reviewer is FRESH: a rejection that
+        # tripped the audit limit rotates the reviewer but preserves its verdict, so the retry's
+        # new reviewer must still be pointed at those unresolved findings -- otherwise it cannot
+        # see them and may approve them.
         prompt += prompts.commit_prompt(
-            root, session_id, include_previous=bool(reviewer_id)
+            root, session_id, include_previous=bool(reviewer_id) or retry_audit
         )
         if cancel_event is None:
             code, output, stderr = backend.review_turn(
@@ -331,13 +338,29 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
         session_id,
         {"reviewer_id": reviewer_id, "head": git_head(root), "files": snapshot},
     )
-    if not approved(output):
+    is_approved = approved(output)
+    automatically_rotated = False
+    if not retry_audit:
+        _, automatically_rotated = state.record_completed_reviewer_audit(
+            root, session_id, reviewer_id, "reviewer"
+        )
+        if automatically_rotated:
+            state.clear_commit_cursor(
+                root, session_id, expected_reviewer_id=reviewer_id
+            )
+    if not is_approved:
+        state.set_commit_retry_pending(root, session_id)
         return _result(
             "rejected",
-            "the independent reviewer rejected the staged changes",
+            "the independent reviewer rejected the staged changes{}".format(
+                "; its session was automatically rotated after the configured audit limit"
+                if automatically_rotated else ""
+            ),
             review=output.strip(),
             review_path=str(review_path),
         )
+
+    state.clear_commit_retry_pending(root, session_id)
 
     completed, commit = cancellation.complete(
         cancel_event,
@@ -361,7 +384,10 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
         )
     return _result(
         "committed",
-        "the staged changes were approved and committed",
+        "the staged changes were approved and committed{}".format(
+            "; the reviewer session was automatically rotated after the configured audit limit"
+            if automatically_rotated else ""
+        ),
         review=output.strip(),
         review_path=str(review_path),
         commit=git_head(root),

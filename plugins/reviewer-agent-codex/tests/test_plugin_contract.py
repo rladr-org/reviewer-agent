@@ -160,6 +160,7 @@ def test_readme_documents_one_command_local_install():
     assert "$reviewer-agent-codex:reviewer-session" in readme
     assert "timed-out reviewer session" in " ".join(readme.split())
     assert '"commitReviewTimeoutSeconds": 3600' in readme
+    assert '"reviewerSessionAuditLimit": 3' in readme
     assert "REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS" in readme
     assert '"reviewHistoryKeep": 100' in readme
     assert "REVIEWER_CODEX_REVIEW_HISTORY_KEEP" in readme

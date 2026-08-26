@@ -322,10 +322,48 @@ def test_prompt_hook_reports_reviewer_session_without_mutating_it(
     result = _run("hook_prompt.py", payload, isolated_state)
 
     output = json.loads(result.stdout)
-    assert output["systemMessage"] == (
-        "reviewerSession: current-thread for {}".format(git_repo)
+    assert output["systemMessage"].startswith(
+        "reviewerSession: current-thread for {};".format(git_repo)
     )
+    assert "after 3 completed non-retry audit(s)" in output["systemMessage"]
     assert state.read_reviewer_session(git_repo, "root", "reviewer") == "current-thread"
+
+
+def test_prompt_hook_sets_disables_and_clears_session_audit_limit(
+    git_repo, isolated_state
+):
+    base = {
+        "session_id": "root",
+        "cwd": str(git_repo),
+        "hook_event_name": "UserPromptSubmit",
+    }
+    configured = _run(
+        "hook_prompt.py",
+        dict(base, prompt="$reviewer-agent-codex:reviewer-session limit 5"),
+        isolated_state,
+    )
+    assert configured.returncode == 0
+    assert "after 5 completed non-retry audit(s)" in json.loads(
+        configured.stdout
+    )["systemMessage"]
+
+    disabled = _run(
+        "hook_prompt.py",
+        dict(base, prompt="$reviewer-agent-codex:reviewer-session limit off"),
+        isolated_state,
+    )
+    assert "automatic rotation disabled" in json.loads(
+        disabled.stdout
+    )["systemMessage"]
+
+    cleared = _run(
+        "hook_prompt.py",
+        dict(base, prompt="$reviewer-agent-codex:reviewer-session limit clear"),
+        isolated_state,
+    )
+    assert "after 3 completed non-retry audit(s)" in json.loads(
+        cleared.stdout
+    )["systemMessage"]
 
 
 def test_prompt_hook_reports_non_repository_toggle_failure(tmp_path, isolated_state):
