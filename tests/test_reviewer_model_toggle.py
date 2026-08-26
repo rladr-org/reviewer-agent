@@ -20,6 +20,8 @@ def run_toggle(args, home, env_extra=None):
     env.pop("REVIEWER_CODEX_MODEL", None)
     env.pop("REVIEWER_CODEX_EFFORT", None)
     env.pop("REVIEWER_COMMIT_TIMEOUT_SECS", None)  # ambient value must not leak into tests
+    env.pop("REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", None)  # ...and the two streaming thresholds
+    env.pop("REVIEWER_IDLE_TIMEOUT_SECS", None)
     env.pop("REVIEWER_CONFIG_FILE", None)
     env.pop("REVIEWER_PI_MODEL", None)   # highest-precedence pi source; same leak risk
     env.pop("REVIEWER_PI_EFFORT", None)  # ...and its effort twin, which outranks the default
@@ -149,6 +151,84 @@ def test_model_clear_does_not_touch_the_timeout(tmp_path, monkeypatch):
     assert p.returncode == 0
     assert _effective(home, monkeypatch) is None
     assert _effective_timeout(home, monkeypatch) == 1500
+
+
+# --------------------------------------------------------------------------
+# The two codex-streaming idle thresholds are each their own subcommand, mirroring `timeout`
+# (parse, per-knob floor, set/clear, display). N1 (firstOutputTimeout) bounds time-to-first
+# event; N2 (idleTimeout) bounds the gap between events. Neither touches the model, the total
+# commit timeout, or effort. (docs/plans/codex_jsonl_streaming.md, Task 3.)
+# --------------------------------------------------------------------------
+def _effective_first_output(home, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    monkeypatch.delenv("REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", raising=False)
+    return rl.first_output_timeout()
+
+
+def _effective_idle(home, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    monkeypatch.delenv("REVIEWER_IDLE_TIMEOUT_SECS", raising=False)
+    return rl.idle_timeout()
+
+
+def test_first_output_timeout_subcommand_sets_and_leaves_others_alone(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    run_toggle(["m1", "1500"], home)
+    p = run_toggle(["firstOutputTimeout", "45"], home)
+    assert p.returncode == 0, p.stderr
+    assert "45" in p.stdout
+    assert _effective_first_output(home, monkeypatch) == 45
+    assert _effective(home, monkeypatch) == "m1"
+    assert _effective_timeout(home, monkeypatch) == 1500
+
+
+def test_idle_timeout_subcommand_sets_and_leaves_others_alone(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    run_toggle(["m1", "1500"], home)
+    p = run_toggle(["idleTimeout", "300"], home)
+    assert p.returncode == 0, p.stderr
+    assert "300" in p.stdout
+    assert _effective_idle(home, monkeypatch) == 300
+    assert _effective(home, monkeypatch) == "m1"
+    assert _effective_timeout(home, monkeypatch) == 1500
+
+
+def test_streaming_thresholds_clear_revert_to_their_defaults(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    run_toggle(["firstOutputTimeout", "45"], home)
+    run_toggle(["idleTimeout", "300"], home)
+    assert run_toggle(["firstOutputTimeout", "clear"], home).returncode == 0
+    assert run_toggle(["idleTimeout", "clear"], home).returncode == 0
+    assert _effective_first_output(home, monkeypatch) == 30
+    assert _effective_idle(home, monkeypatch) == 600
+
+
+def test_streaming_thresholds_below_floor_are_rejected_and_write_nothing(tmp_path, monkeypatch):
+    # N1 floor 5, N2 floor 60. A tiny threshold would kill every audit, so it is refused (like
+    # the commit-timeout floor) rather than clamped, and nothing is written.
+    home = str(tmp_path / "rh")
+    p1 = run_toggle(["firstOutputTimeout", "2"], home)
+    assert p1.returncode == 2 and "floor" in p1.stderr.lower()
+    p2 = run_toggle(["idleTimeout", "30"], home)
+    assert p2.returncode == 2 and "floor" in p2.stderr.lower()
+    assert _effective_first_output(home, monkeypatch) == 30
+    assert _effective_idle(home, monkeypatch) == 600
+
+
+def test_streaming_threshold_non_integer_is_rejected(tmp_path):
+    home = str(tmp_path / "rh")
+    p = run_toggle(["firstOutputTimeout", "abc"], home)
+    assert p.returncode == 2 and "invalid" in p.stderr.lower()
+
+
+def test_show_displays_both_streaming_thresholds_with_values(tmp_path):
+    home = str(tmp_path / "rh")
+    run_toggle(["firstOutputTimeout", "45"], home)
+    run_toggle(["idleTimeout", "300"], home)
+    p = run_toggle([], home)
+    assert p.returncode == 0, p.stderr
+    assert "first-output" in p.stdout and "45" in p.stdout
+    assert "idle" in p.stdout.lower() and "300" in p.stdout
 
 
 # --------------------------------------------------------------------------

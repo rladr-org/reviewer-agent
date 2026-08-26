@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""`/reviewerModel [<model> [<seconds>] | clear | timeout <secs>|clear | effort <level>|clear]`.
+"""`/reviewerModel [<model> [<seconds>] | clear | timeout <secs>|clear |
+firstOutputTimeout <secs>|clear | idleTimeout <secs>|clear | effort <level>|clear]`.
 
-Three knobs on the reviewer, each a runtime property tuned per machine rather than per project.
-No argument shows all three with their sources.
+Knobs on the reviewer, each a runtime property tuned per machine rather than per project.
+No argument shows them all with their sources. Beyond MODEL/TIMEOUT/EFFORT (below), two knobs
+tune the codex --json audit's hang detection: firstOutputTimeout (N1) bounds time-to-first-event
+and idleTimeout (N2) bounds the gap between events; each kills and retries the audit once.
 
 MODEL and EFFORT are stored PER BACKEND and this command scopes both to whichever backend the
 project resolves to, naming it in every line it prints. Writing the codex slot from a pi project
@@ -114,6 +117,19 @@ def _timeout_line():
     return "reviewerModel: commit-audit timeout {}s ({}{})".format(secs, prefix, source)
 
 
+def _first_output_line():
+    # Source from the resolver, same reason as _timeout_line.
+    secs, source = rl.first_output_timeout_detail()
+    prefix = "" if source == "default" else "from "
+    return "reviewerModel: first-output timeout {}s ({}{})".format(secs, prefix, source)
+
+
+def _idle_line():
+    secs, source = rl.idle_timeout_detail()
+    prefix = "" if source == "default" else "from "
+    return "reviewerModel: between-output (idle) timeout {}s ({}{})".format(secs, prefix, source)
+
+
 def _backend():
     """The backend THIS project resolves to. Every model/effort operation is scoped to it:
     writing the codex slot from a pi project produced a success line for a change the running
@@ -147,6 +163,8 @@ def _show():
                 backend, _inherit_phrase(backend), suffix)
         )
     print(_timeout_line())
+    print(_first_output_line())
+    print(_idle_line())
     print(_effort_line())
     return 0
 
@@ -253,12 +271,81 @@ def _set_timeout(token):
     return 0
 
 
+def _parse_threshold(token, floor, label):
+    """(seconds, error) for a codex-streaming idle threshold. Mirrors _parse_timeout's
+    parse-and-floor shape but with the knob's OWN floor and NO hook-timeout ceiling: N1/N2 are
+    sub-budgets of the total, which _run_streaming checks first, so a value above the total simply
+    never fires. Below-floor is refused, not clamped -- a tiny threshold would kill every audit."""
+    try:
+        secs = int(token)
+    except (TypeError, ValueError):
+        return None, "invalid {} timeout {!r} -- expected whole seconds, e.g. 30".format(
+            label, token)
+    if secs < floor:
+        return None, ("{} timeout {}s is below the {}s floor (a threshold that small would kill "
+                      "every audit before it could finish)".format(label, secs, floor))
+    return secs, None
+
+
+def _set_first_output(token):
+    if token.lower() == "clear":
+        rl.clear_first_output_timeout()
+        rl.log("[model] first-output timeout cleared")
+        # Report what resolution ACTUALLY yields now, not an assumed default: `clear` removes the
+        # state-file slot, but REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS or config.json can still win, so
+        # announcing "default 30s" would misreport a value not in force (the model/effort clears
+        # already learned this).
+        secs, source = rl.first_output_timeout_detail()
+        tail = ("default {}s".format(secs) if source == "default"
+                else "now {}s (from {})".format(secs, source))
+        print("reviewerModel: first-output timeout slot cleared -> {}".format(tail))
+        return 0
+    secs, err = _parse_threshold(token, rl.FIRST_OUTPUT_TIMEOUT_FLOOR, "first-output")
+    if err:
+        print("reviewerModel: ERROR - " + err, file=sys.stderr)
+        return 2
+    rl.set_first_output_timeout(secs)
+    rl.log("[model] first-output timeout set {}s".format(secs))
+    print(
+        "reviewerModel: first-output timeout {}s -- if codex emits no --json event within this "
+        "long, the audit is killed and retried ONCE. Applies from the next commit. "
+        "/reviewerModel firstOutputTimeout clear reverts.".format(secs)
+    )
+    return 0
+
+
+def _set_idle(token):
+    if token.lower() == "clear":
+        rl.clear_idle_timeout()
+        rl.log("[model] idle timeout cleared")
+        # Resolved value/source, not an assumed default -- see _set_first_output's clear.
+        secs, source = rl.idle_timeout_detail()
+        tail = ("default {}s".format(secs) if source == "default"
+                else "now {}s (from {})".format(secs, source))
+        print("reviewerModel: between-output (idle) timeout slot cleared -> {}".format(tail))
+        return 0
+    secs, err = _parse_threshold(token, rl.IDLE_TIMEOUT_FLOOR, "between-output")
+    if err:
+        print("reviewerModel: ERROR - " + err, file=sys.stderr)
+        return 2
+    rl.set_idle_timeout(secs)
+    rl.log("[model] idle timeout set {}s".format(secs))
+    print(
+        "reviewerModel: between-output (idle) timeout {}s -- after the first event, a silence "
+        "longer than this kills the audit and retries it ONCE, so it MUST exceed the slowest "
+        "legitimate test run. Applies from the next commit. /reviewerModel idleTimeout clear "
+        "reverts.".format(secs)
+    )
+    return 0
+
+
 def main(argv):
     args = [a.strip() for a in argv[1:] if a.strip()]
     if len(args) > 2:
         print(
             "reviewerModel: ERROR - expected `<model>`, `clear`, `<model> <seconds>`, "
-            "`timeout <seconds>|clear`, or `effort <level>|clear`, got: {!r}".format(args),
+            "`timeout <seconds>|clear`, `firstOutputTimeout <seconds>|clear`, "
+            "`idleTimeout <seconds>|clear`, or `effort <level>|clear`, got: {!r}".format(args),
             file=sys.stderr,
         )
         return 2
@@ -272,6 +359,23 @@ def main(argv):
                   "/reviewerModel timeout <seconds>|clear", file=sys.stderr)
             return 2
         return _set_timeout(args[1])
+
+    # The two codex-streaming idle thresholds, each its own subcommand. Checked BEFORE the model
+    # branch: `firstOutputTimeout`/`idleTimeout` are well-formed model tokens, so without this a
+    # bare one would silently persist as the model and its first use would be a failed audit.
+    if args[0].lower() == "firstoutputtimeout":
+        if len(args) != 2:
+            print("reviewerModel: ERROR - `firstOutputTimeout` needs a value: "
+                  "/reviewerModel firstOutputTimeout <seconds>|clear", file=sys.stderr)
+            return 2
+        return _set_first_output(args[1])
+
+    if args[0].lower() == "idletimeout":
+        if len(args) != 2:
+            print("reviewerModel: ERROR - `idleTimeout` needs a value: "
+                  "/reviewerModel idleTimeout <seconds>|clear", file=sys.stderr)
+            return 2
+        return _set_idle(args[1])
 
     # `effort ...` likewise. Checked BEFORE the model branch: a bare `/reviewerModel effort`
     # would otherwise be a well-formed model name and would silently persist "effort" as the
