@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings", "suggestions"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["APPROVED", "REJECTED"]},
+    "findings": {"type": "array", "items": {"type": "string"}},
+    "suggestions": {"type": "array", "items": {"type": "string"}}
+  }
+}

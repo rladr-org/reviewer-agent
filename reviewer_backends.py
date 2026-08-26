@@ -357,6 +357,112 @@ def parse_session_id(stdout):
     return None
 
 
+# --------------------------------------------------------------------------
+# Strict codex verdict schema (docs/plans/codex_jsonl_streaming.md, Task 1).
+#
+# The codex commit audit runs with `--output-schema codex_verdict_schema.json -o <tmp>`, so
+# codex writes a schema-constrained JSON object to the temp file. We parse that STRICTLY and
+# reconstruct the canonical APPROVED/REJECTED text, keeping commit_hook.is_approved and
+# reviewer_audit backend-agnostic and unchanged. Everything here fails CLOSED (-> None / "").
+# --------------------------------------------------------------------------
+_VERDICT_ENUM = ("APPROVED", "REJECTED")
+_VERDICT_KEYS = frozenset({"verdict", "findings", "suggestions"})
+
+
+def codex_verdict_schema_path():
+    """Absolute path to the shipped strict-verdict JSON Schema, resolved where THIS module
+    lives so the deployed tree uses its own copy, not the dev checkout's."""
+    return str(Path(__file__).resolve().parent / "codex_verdict_schema.json")
+
+
+def _all_strings(seq):
+    return isinstance(seq, list) and all(isinstance(x, str) for x in seq)
+
+
+def _strict_verdict_dict(obj):
+    """Return `obj` iff it is EXACTLY a well-formed, self-consistent verdict dict, else None.
+    The single source of truth for verdict validity, shared by parse_codex_verdict_json (after
+    json.loads) and codex_verdict_to_text so BOTH fail closed identically. Strict: exactly the
+    three keys {verdict, findings, suggestions}; `verdict` in the enum; `findings`/`suggestions`
+    lists of strings; and the prompt-contract CONSISTENCY -- APPROVED has no findings, REJECTED
+    has >=1. Without this, codex_verdict_to_text would reconstruct an inconsistent object (e.g.
+    APPROVED with findings) into a bare `APPROVED`, silently dropping the findings and approving
+    what should have been refused."""
+    if not isinstance(obj, dict) or set(obj.keys()) != _VERDICT_KEYS:
+        return None
+    verdict = obj.get("verdict")
+    findings = obj.get("findings")
+    suggestions = obj.get("suggestions")
+    if verdict not in _VERDICT_ENUM:
+        return None
+    if not _all_strings(findings) or not _all_strings(suggestions):
+        return None
+    # verdict/findings consistency: an approval lists no required fixes; a rejection must list at
+    # least one. The contradictory combos fail closed rather than being silently accepted.
+    if verdict == "APPROVED" and findings:
+        return None
+    if verdict == "REJECTED" and not findings:
+        return None
+    return {"verdict": verdict, "findings": findings, "suggestions": suggestions}
+
+
+def parse_codex_verdict_json(text):
+    """Parse the `-o` verdict file's single JSON object into {verdict, findings, suggestions},
+    or None on ANY deviation (see _strict_verdict_dict). Never raises, never partially accepts."""
+    if not isinstance(text, str):
+        return None
+    try:
+        obj = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    return _strict_verdict_dict(obj)
+
+
+def _numbered(items):
+    return "\n".join("{}. {}".format(i, s) for i, s in enumerate(items, 1))
+
+
+def codex_verdict_to_text(obj):
+    """Reconstruct the canonical verdict text from a parsed verdict dict, byte-matching what
+    is_approved / reviewer_audit and the developer expect: `APPROVED` (+ optional SUGGESTIONS
+    block) or `REJECTED:` + numbered findings (+ optional SUGGESTIONS block). "" when `obj` is
+    None or not a well-formed, self-consistent verdict dict -- it is re-validated through the same
+    strict check as parsing, so a malformed or contradictory object fails closed to "" instead of
+    becoming reviewer prose."""
+    obj = _strict_verdict_dict(obj)
+    if obj is None:
+        return ""
+    verdict, findings, suggestions = obj["verdict"], obj["findings"], obj["suggestions"]
+    head = "APPROVED" if verdict == "APPROVED" else "REJECTED:\n" + _numbered(findings)
+    if suggestions:
+        return head + "\nSUGGESTIONS:\n" + _numbered(suggestions)
+    return head
+
+
+def parse_codex_turn_usage(stdout):
+    """The `usage` dict from the LAST `turn.completed` event in a `codex exec --json` stream, or
+    None if absent. Accepts usage at the event top level or under `payload` (mirrors
+    parse_session_id's tolerance). Non-dict usage values are ignored. Never raises."""
+    found = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict) or ev.get("type") != "turn.completed":
+            continue
+        payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+        usage = ev.get("usage")
+        if not isinstance(usage, dict):
+            usage = payload.get("usage")
+        if isinstance(usage, dict):
+            found = usage
+    return found
+
+
 def brief_capture_argv(proj):
     """Brief argv that emits JSONL (`--json`) so the new session's id can be captured from
     the leading `thread.started` event. Read-only; low reasoning effort (session start

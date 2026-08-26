@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 import reviewer_audit as ra
+import reviewer_backends as rb
 import reviewer_lib as rl
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -550,3 +551,156 @@ def test_recording_the_change_block_is_optional_for_callers(tmp_path):
         prompt="P", code=0, out="APPROVED", err="", completed=True, approved=True,
         verdict_file=None)
     assert rec is not None and rec["static"]["change_block_sha256"] is None
+
+
+# --------------------------------------------------------------------------
+# Strict codex verdict schema (docs/plans/codex_jsonl_streaming.md, Task 1).
+#
+# The codex commit audit now emits a schema-constrained JSON object
+# {verdict, findings, suggestions} to its `-o` file. parse_codex_verdict_json
+# accepts ONLY that exact shape AND the verdict/findings consistency the prompt
+# contract requires (APPROVED => no findings, REJECTED => >=1 finding); anything
+# else -> None so the gate fails CLOSED. codex_verdict_to_text reconstructs the
+# canonical APPROVED/REJECTED text so is_approved / reviewer_audit stay unchanged.
+# --------------------------------------------------------------------------
+def test_verdict_json_valid_approved_no_findings():
+    obj = rb.parse_codex_verdict_json(
+        '{"verdict":"APPROVED","findings":[],"suggestions":[]}')
+    assert obj == {"verdict": "APPROVED", "findings": [], "suggestions": []}
+
+
+def test_verdict_json_valid_approved_with_suggestions():
+    obj = rb.parse_codex_verdict_json(
+        '{"verdict":"APPROVED","findings":[],"suggestions":["prefer x","cache y"]}')
+    assert obj["verdict"] == "APPROVED"
+    assert obj["findings"] == []
+    assert obj["suggestions"] == ["prefer x", "cache y"]
+
+
+def test_verdict_json_valid_rejected_with_findings_and_suggestions():
+    obj = rb.parse_codex_verdict_json(
+        '{"verdict":"REJECTED","findings":["off-by-one at a.py:10"],'
+        '"suggestions":["rename z"]}')
+    assert obj["verdict"] == "REJECTED"
+    assert obj["findings"] == ["off-by-one at a.py:10"]
+    assert obj["suggestions"] == ["rename z"]
+
+
+@pytest.mark.parametrize("text", [
+    "not json at all",
+    "",
+    "[]",                                                       # non-object top level (list)
+    '"APPROVED"',                                               # non-object top level (string)
+    "42",                                                       # non-object top level (number)
+    "null",                                                     # non-object top level (null)
+    '{"verdict":"APPROVED","findings":[]}',                     # missing suggestions
+    '{"verdict":"APPROVED","suggestions":[]}',                  # missing findings
+    '{"findings":[],"suggestions":[]}',                         # missing verdict
+    '{"verdict":"APPROVED","findings":[],"suggestions":[],"extra":1}',   # extra key
+    '{"verdict":"MAYBE","findings":[],"suggestions":[]}',       # verdict outside enum
+    '{"verdict":"approved","findings":[],"suggestions":[]}',    # wrong case (enum is exact)
+    '{"verdict":"APPROVED","findings":"none","suggestions":[]}',  # findings not a list
+    '{"verdict":"APPROVED","findings":[],"suggestions":"x"}',     # suggestions not a list
+    '{"verdict":"REJECTED","findings":[1,2],"suggestions":[]}',   # non-string finding element
+    '{"verdict":"APPROVED","findings":[],"suggestions":[{"a":1}]}',  # non-string suggestion
+    '{"verdict":"APPROVED","findings":["oops"],"suggestions":[]}',   # APPROVED w/ findings
+    '{"verdict":"REJECTED","findings":[],"suggestions":["x"]}',      # REJECTED w/o findings
+])
+def test_verdict_json_strict_rejections_return_none(text):
+    assert rb.parse_codex_verdict_json(text) is None
+
+
+def test_verdict_json_never_raises_on_garbage():
+    for bad in [None, "{", "{}", '{"verdict":null}', "\x00", "{}\n{}", "  "]:
+        assert rb.parse_codex_verdict_json(bad) is None
+
+
+def test_verdict_text_approved_no_suggestions():
+    obj = {"verdict": "APPROVED", "findings": [], "suggestions": []}
+    assert rb.codex_verdict_to_text(obj) == "APPROVED"
+
+
+def test_verdict_text_approved_with_suggestions():
+    obj = {"verdict": "APPROVED", "findings": [], "suggestions": ["do x", "do y"]}
+    assert rb.codex_verdict_to_text(obj) == "APPROVED\nSUGGESTIONS:\n1. do x\n2. do y"
+
+
+def test_verdict_text_rejected_with_findings():
+    obj = {"verdict": "REJECTED", "findings": ["bug a", "bug b"], "suggestions": []}
+    assert rb.codex_verdict_to_text(obj) == "REJECTED:\n1. bug a\n2. bug b"
+
+
+def test_verdict_text_rejected_with_findings_and_suggestions():
+    obj = {"verdict": "REJECTED", "findings": ["bug a"], "suggestions": ["tidy z"]}
+    assert (rb.codex_verdict_to_text(obj)
+            == "REJECTED:\n1. bug a\nSUGGESTIONS:\n1. tidy z")
+
+
+def test_verdict_text_none_is_empty_string():
+    assert rb.codex_verdict_to_text(None) == ""
+
+
+def test_verdict_text_invalid_obj_is_empty_string():
+    # not the output of a successful parse -> fail closed to ""
+    assert rb.codex_verdict_to_text({"verdict": "APPROVED"}) == ""
+    assert rb.codex_verdict_to_text("APPROVED") == ""
+    assert rb.codex_verdict_to_text({"verdict": "MAYBE", "findings": [],
+                                     "suggestions": []}) == ""
+
+
+def test_verdict_text_fails_closed_on_inconsistent_or_extra_key_objects():
+    """Regression (gate finding 2): codex_verdict_to_text must NOT reconstruct a contradictory or
+    malformed object. An APPROVED-with-findings dict rendered as a bare "APPROVED" would silently
+    drop the findings and approve what the parser refuses -- so to_text re-validates through the
+    same strict check as parsing and fails closed to ""."""
+    # APPROVED carrying findings -> reconstructing it would silently lose them; must be ""
+    assert rb.codex_verdict_to_text(
+        {"verdict": "APPROVED", "findings": ["dropped bug"], "suggestions": []}) == ""
+    # REJECTED with no findings -> inconsistent; must be ""
+    assert rb.codex_verdict_to_text(
+        {"verdict": "REJECTED", "findings": [], "suggestions": ["x"]}) == ""
+    # extra key -> not exactly the three keys; must be ""
+    assert rb.codex_verdict_to_text(
+        {"verdict": "APPROVED", "findings": [], "suggestions": [], "extra": 1}) == ""
+    # missing key -> must be ""
+    assert rb.codex_verdict_to_text({"verdict": "REJECTED", "findings": ["b"]}) == ""
+    # non-string finding element -> must be ""
+    assert rb.codex_verdict_to_text(
+        {"verdict": "REJECTED", "findings": [1], "suggestions": []}) == ""
+
+
+def test_verdict_text_reconstruction_round_trips_through_is_approved():
+    ap = rb.codex_verdict_to_text(
+        {"verdict": "APPROVED", "findings": [], "suggestions": ["s"]})
+    rj = rb.codex_verdict_to_text(
+        {"verdict": "REJECTED", "findings": ["f"], "suggestions": []})
+    assert rl.is_approved(ap) is True
+    assert rl.is_approved(rj) is False
+
+
+def test_turn_usage_reads_last_turn_completed():
+    stream = "\n".join([
+        json.dumps({"type": "thread.started", "thread_id": "t1"}),
+        json.dumps({"type": "turn.completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5}}),
+        json.dumps({"type": "turn.completed",
+                    "usage": {"input_tokens": 100, "output_tokens": 50,
+                              "cached_input_tokens": 8, "reasoning_output_tokens": 20}}),
+    ])
+    assert rb.parse_codex_turn_usage(stream) == {
+        "input_tokens": 100, "output_tokens": 50,
+        "cached_input_tokens": 8, "reasoning_output_tokens": 20}
+
+
+def test_turn_usage_absent_is_none():
+    assert rb.parse_codex_turn_usage("") is None
+    assert rb.parse_codex_turn_usage(json.dumps({"type": "thread.started"})) is None
+    assert rb.parse_codex_turn_usage("not json\n{bad}") is None
+
+
+def test_turn_usage_ignores_turn_completed_without_usage_dict():
+    stream = "\n".join([
+        json.dumps({"type": "turn.completed"}),                 # no usage
+        json.dumps({"type": "turn.completed", "usage": "nope"}),  # usage not a dict
+    ])
+    assert rb.parse_codex_turn_usage(stream) is None
