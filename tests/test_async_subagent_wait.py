@@ -68,6 +68,20 @@ def _async_ack(tool_use_id, agent_id, minutes_ago, stamped=True):
     return _at(ev, minutes_ago) if stamped else ev
 
 
+def _resume_ack(tool_use_id, agent_id, minutes_ago, stamped=True):
+    """The real SendMessage resume ack for an async subagent. It names the resumed agent via
+    `resumedAgentId` and NEVER re-emits an 'Async agent launched' line, so only a
+    resume-aware scan sees the agent running again after its earlier completion. The short
+    id in `message` is a red herring -- `resumedAgentId` carries the full id."""
+    body = (
+        '{{"success":true,"message":"Resuming agent {short}","resumedAgentId":"{aid}",'
+        '"pin":{{"id":"{aid}","name":"{aid}","ref":"28a9e3"}}}}'
+    ).format(short=agent_id[:7], aid=agent_id)
+    ev = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id, "content": body}]}}
+    return _at(ev, minutes_ago) if stamped else ev
+
+
 # --------------------------------------------------------------------------
 # Root cause 1: the launch-flag default flipped.
 # --------------------------------------------------------------------------
@@ -208,6 +222,81 @@ def test_terminal_evidence_wins_over_a_fresh_launch(tmp_path):
         _async_ack("toolu_A", "afinished", 9),
         _at(_task_notification("toolu_A", task_id="afinished"), 3),
         _at(_asst("The lens returned; its findings are applied and committed."), 2),
+    )
+    assert rl.has_outstanding_background_task(path) is False
+
+
+# --------------------------------------------------------------------------
+# Root cause 3: a RESUMED subagent is running again (Amendment 8).
+#
+# Observed 2026-08-25 (session 4ccf4df7): the operator resumed a research subagent with
+# SendMessage several times; each resume ran the agent again, but the harness emits a
+# `resumedAgentId` ack (never a fresh launch line) and leaves the earlier completion
+# <task-notification> in the transcript. The detector read that completion as PERMANENT
+# termination, so every resumed-and-running subagent logged bg_wait=False and stopContinue
+# fired on top of live work. A resume that post-dates the completion revives the wait; a
+# later completion still ends it (terminal evidence wins only while it is the latest signal).
+# --------------------------------------------------------------------------
+def test_resumed_subagent_after_completion_is_outstanding_again(tmp_path):
+    path = _transcript(
+        tmp_path,
+        _at(_human("research the timer primitive"), 20),
+        _agent("toolu_A", 19),
+        _async_ack("toolu_A", "aresumed", 19),
+        _at(_task_notification("toolu_A", task_id="aresumed"), 12),
+        _at(_asst("First answer is in; sending it a follow-up question."), 11),
+        _resume_ack("toolu_S", "aresumed", 3),
+        _at(_asst("Follow-up dispatched; waiting on the same agent."), 2),
+    )
+    assert rl.has_outstanding_background_task(path) is True
+
+
+def test_resumed_subagent_that_completed_again_allows_the_stop(tmp_path):
+    # The guard against over-correction: a resume revives the wait, but a LATER completion
+    # (post-dating the resume) ends it again -- otherwise a resumed agent could suppress
+    # forever.
+    path = _transcript(
+        tmp_path,
+        _at(_human("research"), 20),
+        _agent("toolu_A", 19),
+        _async_ack("toolu_A", "aroundtrip", 19),
+        _at(_task_notification("toolu_A", task_id="aroundtrip"), 14),
+        _resume_ack("toolu_S", "aroundtrip", 8),
+        _at(_task_notification("toolu_S", task_id="aroundtrip"), 3),
+        _at(_asst("Both rounds are in and applied; nothing further to do."), 2),
+    )
+    assert rl.has_outstanding_background_task(path) is False
+
+
+def test_resume_refreshes_the_staleness_window(tmp_path):
+    # Staleness is measured from the LATEST start, not the original launch: a launch far
+    # older than the 4h window still suppresses when a fresh resume revived it.
+    path = _transcript(
+        tmp_path,
+        _at(_human("dispatch the very long lens"), 9 * 60),
+        _agent("toolu_A", 9 * 60 - 1),
+        _async_ack("toolu_A", "alonglived", 9 * 60 - 1),
+        _at(_task_notification("toolu_A", task_id="alonglived"), 9 * 60 - 5),
+        _resume_ack("toolu_S", "alonglived", 3),
+        _at(_asst("Resumed the long lens; still waiting on it."), 2),
+    )
+    assert rl.has_outstanding_background_task(path) is True
+
+
+def test_resume_followed_by_undated_completion_allows_the_stop(tmp_path):
+    # ORDER beats timestamps: a terminal <status> with NO parseable timestamp that arrives
+    # AFTER the resume still ends the subagent. A timestamp-only comparison could not see an
+    # undated terminal and would keep the agent live until the stale window -- the exact edge
+    # the resume-revive rule must not reopen.
+    path = _transcript(
+        tmp_path,
+        _at(_human("research"), 20),
+        _agent("toolu_A", 19),
+        _async_ack("toolu_A", "aundatedend", 19),
+        _at(_task_notification("toolu_A", task_id="aundatedend"), 12),
+        _resume_ack("toolu_S", "aundatedend", 3),
+        _task_notification("toolu_S", task_id="aundatedend"),  # UNDATED terminal (no _at)
+        _at(_asst("Both rounds are in and applied; nothing further to do."), 1),
     )
     assert rl.has_outstanding_background_task(path) is False
 

@@ -474,6 +474,13 @@ def _background_shell_last_signal(events):
 _ASYNC_AGENT_STARTED = re.compile(
     r"Async agent launched successfully.*?\bagentId:\s*([0-9A-Za-z_-]+)", re.S)
 
+# A SendMessage RESUME of an async subagent (Amendment 8). Resuming a completed subagent runs
+# it again, but the harness emits this ack -- NOT a fresh "Async agent launched" line -- and
+# the agent's earlier completion <task-notification> stays in the transcript. Without a
+# resume-aware scan, `_live_async_agent_ids` reads a resumed-and-running subagent as long dead
+# and lets stopContinue fire on top of live work.
+_ASYNC_AGENT_RESUMED = re.compile(r'"resumedAgentId"\s*:\s*"([0-9A-Za-z_-]+)"')
+
 
 def _async_agent_launch_times(events):
     """Map each async subagent's agent id to the epoch seconds of its launch ack. Ids whose
@@ -492,6 +499,39 @@ def _async_agent_launch_times(events):
                 if aid not in launched or ts < launched[aid]:
                     launched[aid] = ts
     return launched
+
+
+def _agent_lifecycle_signals(ev):
+    """(start_ids, end_ids) an event carries for async subagents.
+
+    A START is a launch ack or a resume ack; an END is a terminal <status> task-notification,
+    a TaskStop, or a "successfully stopped" result. Classification is by CONTENT only -- the
+    caller uses transcript ORDER, not timestamps, to decide which is latest, so an UNDATED
+    terminal that arrives after a resume still ends the subagent (Amendment 8). Timestamps
+    only bound staleness, never ordering."""
+    starts, ends = set(), set()
+    for text in _tool_result_texts(ev):
+        for m in _ASYNC_AGENT_STARTED.finditer(text):
+            starts.add(m.group(1))
+        for m in _ASYNC_AGENT_RESUMED.finditer(text):
+            starts.add(m.group(1))
+        m = _TASK_STOPPED_MSG.search(text)
+        if m:
+            ends.add(m.group(1))
+    c = _event_content(ev)
+    if ev.get("type") == "assistant" and isinstance(c, list):
+        for b in c:
+            if (isinstance(b, dict) and b.get("type") == "tool_use"
+                    and b.get("name") == "TaskStop"):
+                tid = (b.get("input") or {}).get("task_id")
+                if tid:
+                    ends.add(tid)
+    for text in _notification_texts(ev):
+        if "<status>" in text:
+            m = _TASK_NOTIFICATION_TASK_ID.search(text)
+            if m:
+                ends.add(m.group(1))
+    return starts, ends
 
 
 _ASYNC_AGENT_STALE_SECS_DEFAULT = 4 * 3600
@@ -550,22 +590,41 @@ def _inline_resolved_tool_use_ids(ev):
 
 
 def _live_async_agent_ids(events, now=None):
-    """Agent ids of async subagents still in flight: launched, no terminal evidence, and
-    inside the staleness window. Terminal evidence WINS over recency -- `_ended_monitor_ids`
-    already reads every notification delivery path (user / queue-operation / attachment), so
-    a completed subagent stops suppressing the moment its notification lands anywhere.
+    """Agent ids of async subagents still in flight: their LATEST lifecycle signal in
+    transcript ORDER is a start, that start ack was dated, and it is inside the staleness
+    window measured from it.
+
+    A start is a launch ack OR a resume ack (Amendment 8): a SendMessage resume runs a
+    completed subagent again. ORDER, not timestamps, decides which of a resume and a terminal
+    signal is latest -- so an undated terminal <status> that arrives AFTER a resume still ends
+    the agent, and a resume after a completion revives it. An undateable latest start cannot be
+    bounded, so per the unified no-timestamp rule (Amendment 3) it never suppresses.
 
     `now` is injectable so a historical replay can ask "was it live AT THE STOP" rather than
     at wall clock, the convention Amendment 3 established for monitors."""
-    launched = _async_agent_launch_times(events)
-    if not launched:
+    last_kind = {}      # aid -> 'start'|'end' for its LATEST signal in transcript order
+    last_start_ts = {}  # aid -> epoch of that latest start (None if the start ack was undated)
+    for ev in events:
+        ts = _event_epoch_seconds(ev)
+        starts, ends = _agent_lifecycle_signals(ev)
+        for aid in starts:
+            last_kind[aid] = "start"
+            last_start_ts[aid] = ts
+        for aid in ends:
+            last_kind[aid] = "end"
+    if not last_kind:
         return set()
     if now is None:
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-    ended = _ended_monitor_ids(events)
     stale = _async_agent_stale_secs()
-    return {aid for aid, ts in launched.items()
-            if aid not in ended and 0 <= now - ts <= stale}
+    live = set()
+    for aid, kind in last_kind.items():
+        if kind != "start":
+            continue
+        ts = last_start_ts.get(aid)
+        if ts is not None and 0 <= now - ts <= stale:
+            live.add(aid)
+    return live
 
 
 def _tool_result_texts(ev):
