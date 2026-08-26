@@ -5,16 +5,13 @@
 stopContinue supervises **only at a turn boundary**: `stop_hook.py` runs when the agent ends its
 turn. It is **fail-open** — `stop_hook.py` computes
 `keep_going = code == 0 and bool(out.strip()) and not rl.is_stop_ok(out)`, so any supervisor
-timeout, non-zero exit, or empty verdict lets the stop proceed. `STOP_TIMEOUT = 300` and the hook's
-own `hooks.json` timeout is 330s.
+timeout, non-zero exit, or empty verdict lets the stop proceed. `STOP_TIMEOUT = 300`
+(`stop_hook.py:35`) and the hook's own `hooks.json` timeout is 330s.
 
 That leaves an unrecovered failure mode: **the supervisor API times out (or the main model's
 connection drops mid-response) → the hook fails open → the agent goes idle → nothing ever re-fires
 the Stop hook.** The agent is stranded with no retry. Observed live 2026-08-25 (`Connection lost
 mid-response`), and the exact shape the operator asked to close.
-
-The whole point of stopContinue is that a genuinely-incomplete stop keeps working. An *unsupervised*
-fail-open silently defeats that, and — unlike a nudge cap being hit — leaves no trace and no path back.
 
 ## The platform constraint (verified, not assumed)
 
@@ -24,12 +21,9 @@ Confirmed three ways (Claude Code docs, the filesystem, and the daemon architect
 | claim | status | source |
 |---|---|---|
 | No IPC / socket / signal / file-watch injects input into a running interactive session | DOCUMENTED | CLI + hooks + sessions docs |
-| `claude --resume`/`--continue` spawn a NEW process against the transcript, not re-enter the live one | DOCUMENTED | sessions docs |
 | A hook cannot force a tool call, enqueue a turn, or inject a prompt | DOCUMENTED | hooks reference |
 | A bare OS process a hook spawns does NOT trigger re-invocation (only harness-tracked tasks do) | DOCUMENTED | tools reference |
 | `Notification`/`idle_prompt` hook fires when the session goes idle but is **output-only** | DOCUMENTED | hooks reference |
-| `tmux send-keys` is the only thing that types into the live pane — unsupported, host-specific | — | rejected as fragile |
-| The scheduler is a daemon reached over a private key-gated control socket (`~/.claude/daemon`) | OBSERVED | filesystem |
 
 The only **supported** re-invocation of an idle session is a **timer the session itself armed**:
 
@@ -41,47 +35,131 @@ The only **supported** re-invocation of an idle session is a **timer the session
 | `RemoteTrigger` | model | **cloud** | wrong — would not wake the local TUI |
 
 **Conclusion:** recovering an idle session *requires* a timer armed while the agent was still active,
-and `CronCreate` is the only model-callable primitive that provides it. This is a platform ceiling,
-not a design choice.
+and `CronCreate` is the only model-callable primitive that provides it. This is a platform ceiling.
 
-> Open validation before implementation: the "CronCreate = local, idle-firing" claim is from a
-> doc-based agent read. Run a ~2-minute spike in an **isolated** session (`CronCreate` a
-> `*/1 * * * *` task; confirm it fires a turn while the session sits idle) before building on it.
+> Open validation: the "CronCreate = local, idle-firing" claim is from a doc-based agent read. A
+> ~2-minute spike in an **isolated** session (`CronCreate` a `*/1 * * * *` task; confirm it fires a
+> turn while the session sits idle) would de-risk it. The operator has chosen to implement without
+> blocking on the spike.
 
-## Mechanism
+## Mechanism (minimal)
 
-1. **Arm a `CronCreate` loop** (interval N min → `*/N * * * *`), prompt = a watchdog sentinel.
-2. **Each fire** (a real model turn, even while idle) runs a watchdog check that decides
-   continue-vs-nothing. Most fires are no-ops.
-3. **Force arming with the Stop hook's block** (the same lever stopContinue already uses): if the
-   flag is on and the loop is not provably armed, block the stop with "arm via `CronCreate(...)`
-   now" — a **local** check needing no supervisor API. **Bounded by a cap** (reuse the
-   `max_nudges` pattern, `reviewer_stopcontinue.py:176`): after N failed attempts, stop blocking
-   and fall back to the opt-in alert. Forcing must never itself wedge the agent.
-4. **Heartbeat marker**: each watchdog fire writes a "last fired" timestamp. The Stop hook treats
-   the loop as alive only if the marker is fresh (`< ~2×interval`); missing/stale ⇒ re-force
-   arming. This catches silent loop death (`/clear`, compaction). SessionStart clears it.
+The key realization: the **existing** `stop_hook.py` already re-runs supervision and forces
+continuation at **every** turn end. So the watchdog needs **no** supervision code of its own — its
+only job is to make an idle agent **take a periodic turn**, after which the existing hook does
+exactly what it always does.
 
-### The watchdog check (`reviewer_watchdog.py`, unit-testable)
+1. When the per-project flag is on, the session arms `CronCreate('*/N * * * *', <tick prompt>)`.
+2. Each fire is a **small model turn**. At its end the existing `stop_hook.py` runs normally:
+   pending work ⇒ it blocks the stop and the agent continues; genuinely done ⇒ STOP_OK and it stops.
+   **No new supervision, markers, or check script — the Stop hook is reused verbatim.**
+3. **Arming happens in the `/stopContinueWatchdog on` turn itself.** That command runs while the
+   model is active, so its body instructs the model to call `CronCreate(...)` **then and there** —
+   the highest-compliance moment, not a passive hope. `SessionStart` re-injects the arm instruction
+   only as a **backstop**, for a new/resumed session where the flag is on but no cron is armed.
 
-The cron prompt tells the model to run this script; it:
-1. refreshes the heartbeat marker;
-2. if `has_outstanding_background_task(transcript)` is true → **no-op** (harness will wake it — the
-   same exclusion `stop_hook.py` already honors, `reviewer_manifest.py:has_outstanding_background_task`);
-3. reads the Stop hook's **last-decision marker** (`authorized` / `fail-open` / `blocked`);
-4. if the last stop was an **unsupervised fail-open** and no bg task → **re-run supervision**:
-   - keep-going ⇒ emit the directive; the model resumes the real task;
-   - STOP_OK ⇒ record authorized, no-op;
-   - still unreachable ⇒ no-op, **stay armed**, retry next interval;
-5. otherwise no-op. A no-op **never disarms the loop** — only `authorized` STOP_OK or
-   `/stopContinueWatchdog off` does.
+The tick prompt and cron identity/idempotency/cancellation are specified under **Scope and cron
+lifecycle** below.
 
 ## Command
 
 `/stopContinueWatchdog on|off [interval]` — mirrors the existing toggle family
-(`/stopContinue`, `stopcontinue_toggle.py`; `/reviewerModel … timeout`). `on` sets a per-project
-flag + interval and, in the same (active) turn, has the model arm the cron and write the "armed"
-marker — the highest-compliance arm moment.
+(`stopcontinue_toggle.py`; `/reviewerModel … timeout`).
+
+- **Interval** is in **minutes, 1–59** (default 3), encoded as `*/N` in the cron minute field.
+  Exact for divisors of 60 (2,3,5,6,10,12,15,20,30); a small jitter for other N is acceptable for a
+  watchdog. `> 59` is rejected — `*/N` in the minute field is not a general arbitrary-minute
+  interval, and a multi-hour watchdog defeats the purpose.
+- **`on` REQUIRES `stopContinue` to already be active for the project** and errors otherwise
+  (`stopContinue: enable it first with /stopContinue on acceptRisk`). This is not optional: the
+  whole mechanism leans on the existing Stop hook, and `stop_hook.py:69` returns immediately when
+  the `stopContinue` flag is off — so a watchdog without `stopContinue` would fire tick turns that
+  are never supervised. Requiring the existing flag also keeps its risk-acceptance gate
+  (`DISCLAIMER.md`) intact rather than re-minting autonomy behind a second, un-gated switch.
+- **`on`** sets the per-project flag + interval **and, in the same active turn, has the model arm
+  the cron** (see Scope and cron lifecycle). **`off`** clears the flag and has the model cancel this
+  session's cron via `CronList` → `CronDelete`-by-marker; other sessions' crons self-cancel on their
+  next tick.
+
+## Scope and cron lifecycle
+
+**One scope rule, stated once:**
+
+- **The flag and interval are per-PROJECT** (mirroring `stopcontinue_flag_file`) — "watchdog on for
+  this repo".
+- **A cron is per-SESSION** — `CronCreate` tasks are session-scoped, so each Claude session working
+  the project arms its *own* cron.
+
+There is **no persisted task id and no armed-marker file** — both were the source of the scope
+muddle and neither can prove the cron is still alive. Instead **`CronList` is the single source of
+truth**, and watchdog crons are identified by a fixed marker string in their tick prompt
+(`stopContinueWatchdog`):
+
+- **Arm** (the `on` turn, and the SessionStart backstop): the instruction has the model `CronList`
+  and **reconcile the complete set of marker-tagged tasks to exactly one** at the target schedule
+  `*/N` (N = the stored per-project interval):
+  - if one or more marker-tagged tasks are already at `*/N` → keep a single one and `CronDelete`
+    **every other** marker-tagged task (duplicates from a prior race, and any left at a stale
+    schedule);
+  - if none is at `*/N` → `CronDelete` **all** marker-tagged tasks and
+    `CronCreate('*/N * * * *', <tick prompt>)`.
+
+  So the post-condition is invariant: **exactly one marker-tagged cron, at `*/N`.** This is
+  idempotent (a lone correct cron ⇒ create nothing, delete nothing), self-healing (extras are
+  removed), liveness-correct (a dead cron is absent from `CronList` and gets re-created),
+  interval-correct (`on 5` after `on 3` reconciles `*/3`→`*/5`) — all from `CronList` as the source
+  of truth, with no marker file to go stale.
+- **Cancel `off`**: clears the per-project flag, then has the *calling* session `CronList` →
+  `CronDelete` every marker-tagged task it owns. Other sessions' crons are **self-cancelling**: the
+  tick checks the project flag (below) and deletes itself when the flag is off. So `off` in one
+  session flips the flag for all, and every other session's cron removes itself on its next fire —
+  eventually-consistent project-wide cancellation without cross-session coordination.
+
+### The tick prompt
+
+Fixed text carrying the `stopContinueWatchdog` marker, e.g.: *"stopContinueWatchdog tick — run
+`python3 <plugin>/stopcontinue_watchdog_toggle.py status`. If it prints INACTIVE, delete this
+watchdog cron (`CronDelete`) and stop. If ACTIVE: if you have unfinished work from before, resume
+it; otherwise reply briefly that you are done and stop."* Keeps each tick small, makes stale crons
+self-terminate, and leaves continue-vs-stop to the existing Stop hook.
+
+## Files (minimal)
+
+- **new** `commands/stopContinueWatchdog.md` + `stopcontinue_watchdog_toggle.py`
+  (`on|off|status` subcommands — `status` prints `ACTIVE`/`INACTIVE` for the tick's self-cancel check)
+- `reviewer_state.py` — **per-project** flag + interval accessors (mirror `is_stopcontinue_active`);
+  no task-id/marker state (CronList is authoritative)
+- `session_start_hook.py` — inject `additionalContext` to re-arm **only when the flag is on**; the
+  instruction itself checks `CronList` for idempotency/liveness
+- `reviewer_prompts.py` (or inline) — the tick prompt (carrying the `stopContinueWatchdog` marker) +
+  the CronList-guarded arm / cancel instruction text
+- `README.md` / `CHANGELOG.md`
+- **tests**:
+  - toggle on/off state; interval validation (default 3, floor 1, **reject > 59**)
+  - `status` prints `ACTIVE` when the flag is on, `INACTIVE` when off
+  - **`on` errors when `stopContinue` is inactive**; succeeds when it is active
+  - the `on` command emits the CronList-guarded `CronCreate` arm instruction (mid-session,
+    active-model path — NOT SessionStart-only) carrying the marker
+  - **`off`** clears the flag and emits the `CronList` → `CronDelete`-by-marker cancel instruction
+  - **interval change** (`on 5` after `on 3`) updates the stored interval and the arm instruction
+    reconciles the running cron (`CronDelete` old `*/3` + `CronCreate` `*/5`)
+  - `SessionStart` emits the re-arm context when the flag is on, nothing when off
+  - the tick prompt carries the marker, its self-cancel branch triggers on `INACTIVE`, and its turn
+    is subject to the existing Stop hook
+
+## Deferred refinements (explicitly NOT in the minimal feature)
+
+Each is a strict addition; none is needed for a working watchdog:
+
+- **block-until-armed + heartbeat + bounded cap** — force arming via the Stop hook's block if
+  injection proves unreliable in practice (bounded by the `max_nudges` pattern,
+  `reviewer_stopcontinue.py:176`, so forcing can never wedge the agent).
+- **`fail_open` / `authorized` / `blocked` decision markers + a watchdog check script** — let the
+  tick *skip* real work unless the last stop was a genuine unsupervised fail-open, instead of
+  taking a small turn every interval.
+- **configurable opt-in alert** (default off) — a loud notification when auto-resume can't happen.
+- **"harden"** — shorter `STOP_TIMEOUT` + in-budget retry so a *slow* supervisor still returns a
+  verdict before failing open.
 
 ## Verified surface (read, not assumed)
 
@@ -89,31 +167,17 @@ marker — the highest-compliance arm moment.
 |---|---|---|
 | fail-open rule | `stop_hook.py` `keep_going = …` | timeout/empty/nonzero ⇒ stop allowed |
 | `STOP_TIMEOUT` | `stop_hook.py:35` | 300s; hook cap 330 in `hooks/hooks.json` |
-| `has_outstanding_background_task` | `reviewer_manifest.py:829` | the bg-task exclusion to reuse verbatim |
-| `max_nudges()` | `reviewer_stopcontinue.py:176` | the bound pattern to copy for the arming cap |
-| SessionStart injects nothing to the agent | `session_start_hook.py` | only briefs the reviewer's own session; `additionalContext` must be ADDED |
+| `has_outstanding_background_task` | `reviewer_manifest.py:829` | bg-task exclusion the Stop hook already honors |
+| `max_nudges()` | `reviewer_stopcontinue.py:176` | the bound pattern for the deferred arming cap |
+| SessionStart injects nothing to the agent today | `session_start_hook.py` | only briefs the reviewer's own session; `additionalContext` must be ADDED |
 | toggle shape | `stopcontinue_toggle.py` | per-project flag + `acceptRisk`; the pattern to mirror |
 
-## Files
+## Limitations
 
-- **new** `commands/stopContinueWatchdog.md` + `stopcontinue_watchdog_toggle.py`
-- **new** `reviewer_watchdog.py` — check logic + marker I/O
-- `reviewer_state.py` — flag/interval/alert accessors; last-decision + heartbeat markers
-- `stop_hook.py` — write the last-decision marker on every decision; bounded block-until-armed (before the supervisor call)
-- `session_start_hook.py` — inject `additionalContext` to (re)arm when the flag is on
-- `reviewer_prompts.py` — arm directive + watchdog sentinel text
-- `README.md` / `CHANGELOG.md`
-- tests — toggle; decision-marker per outcome; block-until-armed (blocks unarmed / allows armed / cap→fallback / heartbeat-stale); watchdog_check (fail-open+back⇒continue, +down⇒no-op-stay-armed, authorized⇒no-op, bg-task⇒no-op, heartbeat refresh); SessionStart arm-injection
-
-## Limitations (stated up front)
-
-- **Auto-resume is best-effort.** Block-until-armed is bounded, so a session that genuinely cannot
-  arm (or where `CronCreate` is unavailable) degrades to the **opt-in alert** (default off).
-- **Arming is model-cooperative.** No hook can force a tool call; the block makes non-arming
-  *unlikely and detectable*, not *impossible*. The only "forced" alternative is unsupported
-  injection (tmux/daemon socket), rejected.
+- **Auto-resume is best-effort.** In the minimal feature no hook can force a tool call, so recovery
+  depends on the model actually calling `CronCreate`. If it does not arm (or `CronCreate` is
+  unavailable on the host), there is no recovery until the deferred *block-until-armed* refinement.
+- **The `CronCreate` "local, idle-firing" assumption** still wants the isolated spike above.
 - **Cron granularity = 1 minute** floor.
-- **The loop fires every interval while armed**, even when idle-but-done — intrusive on long
-  sessions; the interval is the dial.
-- **"Harden"** (shorter `STOP_TIMEOUT` + in-budget retry) stays a separate, optional change; added
-  only if implementation needs it.
+- **Ticks fire every interval while armed** — small turns, even when idle-but-done. The
+  decision-marker refinement removes the no-op turns; until then the interval is the dial.
