@@ -185,3 +185,84 @@ def test_a_missing_binary_is_still_reported_as_127():
 
     assert code == 127
     assert "not found" in err.lower() or "no such file" in err.lower()
+
+
+# --------------------------------------------------------------------------
+# _run_streaming: the codex --json audit path. It watches the event pipe and kills a HUNG
+# reviewer via two idle thresholds (N1 first-output, N2 between-output), with the total cap
+# checked first so a genuinely slow audit is never misread as idle.
+# (docs/plans/codex_jsonl_streaming.md, Task 2.)
+# --------------------------------------------------------------------------
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_returns_stdout_and_stderr_on_a_fast_process():
+    code, out, err = reviewer_backends._run_streaming(
+        [sys.executable, "-c",
+         "import sys; sys.stdout.write('hi'); sys.stderr.write('warn')"],
+        timeout=30, first_output_timeout=5, idle_timeout=10)
+    assert (code, out.strip(), err.strip()) == (0, "hi", "warn")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_kills_on_first_output_timeout():
+    # Silent for 300s; N1=1 must kill in ~1s. The reason carries "idle" (so it is retried) and
+    # "no output" (so an operator can see which threshold fired).
+    code, _out, err = reviewer_backends._run_streaming(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        timeout=120, first_output_timeout=1, idle_timeout=60)
+    assert code == rl.TIMEOUT_EXIT
+    assert "idle" in err and "no output" in err
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_kills_on_between_output_timeout():
+    # Emit one line immediately, then go silent; the first byte flips N1->N2, and N2=1 kills.
+    code, _out, err = reviewer_backends._run_streaming(
+        [sys.executable, "-c",
+         "import sys, time; sys.stdout.write('started\\n'); sys.stdout.flush(); "
+         "time.sleep(300)"],
+        timeout=120, first_output_timeout=30, idle_timeout=1)
+    assert code == rl.TIMEOUT_EXIT
+    assert "idle" in err and "no output" in err
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_first_byte_flips_the_threshold_from_n1_to_n2():
+    # Prints immediately (beats N1=1), then works 3s (< N2=10) and exits 0. Neither fires: with a
+    # single threshold this same run would have to trip one of them.
+    code, out, _err = reviewer_backends._run_streaming(
+        [sys.executable, "-c",
+         "import sys, time; sys.stdout.write('go\\n'); sys.stdout.flush(); "
+         "time.sleep(3); sys.stdout.write('done\\n')"],
+        timeout=120, first_output_timeout=1, idle_timeout=10)
+    assert code == 0
+    assert "go" in out and "done" in out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_records_first_event_and_max_gap():
+    reviewer_backends.reset_last_invocation()
+    code, _out, _err = reviewer_backends._run_streaming(
+        [sys.executable, "-c",
+         "import sys, time; sys.stdout.write('a\\n'); sys.stdout.flush(); "
+         "time.sleep(2); sys.stdout.write('b\\n'); sys.stdout.flush()"],
+        timeout=120, first_output_timeout=10, idle_timeout=30)
+    assert code == 0
+    rec = reviewer_backends.last_invocation()
+    assert rec["t_first_event_s"] is not None and rec["t_first_event_s"] >= 0
+    # the ~2s gap between 'a' and 'b' is the largest inter-event gap
+    assert rec["max_gap_s"] >= 1.5
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select() on pipes is POSIX-only")
+def test_streaming_total_timeout_fires_even_while_output_streams():
+    # Emits a line every 0.1s forever, so N2 never fires (output keeps resetting it); the total
+    # cap (2s) must still kill it, checked FIRST so it is NOT misclassified as an idle kill.
+    code, _out, err = reviewer_backends._run_streaming(
+        [sys.executable, "-c",
+         "import sys, time\n"
+         "while True:\n"
+         "    sys.stdout.write('tick\\n'); sys.stdout.flush(); time.sleep(0.1)\n"],
+        timeout=2, first_output_timeout=5, idle_timeout=30)
+    assert code == rl.TIMEOUT_EXIT
+    assert "timed out after" in err
+    assert "idle" not in err

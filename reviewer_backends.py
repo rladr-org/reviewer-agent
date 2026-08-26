@@ -27,6 +27,7 @@ Everything here is re-exported by `reviewer_lib` for back-compat, so existing
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -42,6 +43,8 @@ from reviewer_prompts import (
     compose_brief,
 )
 from reviewer_state import (
+    DEFAULT_FIRST_OUTPUT_TIMEOUT,
+    DEFAULT_IDLE_TIMEOUT,
     ROLE_REVIEWER,
     canonical_project_key,
     claude_bin,
@@ -112,12 +115,18 @@ def last_invocation():
     return _LAST_INVOCATION
 
 
-def _record_invocation(argv, started):
+def _record_invocation(argv, started, t_first_event_s=None, max_gap_s=None):
     global _LAST_INVOCATION
     _LAST_INVOCATION = {
         "argv": [str(a) for a in argv],
         "dur_s": round(time.monotonic() - started, 3),
     }
+    # Streaming timing, recorded only when _run_streaming supplied it, so a plain _run record is
+    # unchanged. t_first_event_s stays None on an N1 kill (no output ever arrived).
+    if t_first_event_s is not None:
+        _LAST_INVOCATION["t_first_event_s"] = round(t_first_event_s, 3)
+    if max_gap_s is not None:
+        _LAST_INVOCATION["max_gap_s"] = round(max_gap_s, 3)
 
 
 # Signals a host sends to cancel an in-flight hook. Escape in Claude Code arrives as one of
@@ -264,6 +273,201 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
         (stdout or b"").decode("utf-8", "replace"),
         (stderr or b"").decode("utf-8", "replace"),
     )
+
+
+def _run_streaming(argv, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
+                   first_output_timeout=None, idle_timeout=None):
+    """Run a codex `--json` audit while WATCHING its event pipe, so a hung reviewer is killed by
+    an idle threshold instead of only the total cap. Same process lifecycle as `_run` (guard,
+    signal handlers, tree teardown); the difference is a `select()` read loop with THREE deadline
+    checks per poll, in this order so a genuinely slow-but-alive audit is never misread as idle:
+
+      1. TOTAL      now-start >= `timeout` -> reason "review timed out after Ns" (NO "idle"
+                    substring, so run_codex_streaming_audit does NOT retry it).
+      2. N1 first   before any byte, now-start >= `first_output_timeout` -> "idle timeout: no
+                    output within Ns". Catches "codex launched but the API never responded".
+      3. N2 between after the first byte, now-last_activity >= `idle_timeout` -> "idle timeout:
+                    no output for Ns". Must exceed the longest legitimate silent item (a test run).
+
+    Any byte on stdout OR stderr resets the idle clock. `--json` emits only at item boundaries,
+    so N2 must be large; N1 can be small because `thread.started` lands ~1s in. Returns
+    `(returncode, stdout, stderr)`; on a kill, `(TIMEOUT_EXIT, partial_stdout, reason)`.
+
+    select() on pipes is POSIX-only, so on non-POSIX this delegates to `_run` (total cap only, no
+    idle detection) -- Windows keeps working, just without the two thresholds.
+    """
+    if first_output_timeout is None:
+        first_output_timeout = DEFAULT_FIRST_OUTPUT_TIMEOUT
+    if idle_timeout is None:
+        idle_timeout = DEFAULT_IDLE_TIMEOUT
+    if os.name != "posix":
+        return _run(argv, timeout=timeout, cwd=cwd, on_cancel=on_cancel)
+
+    started = time.monotonic()
+    lifecycle_read, lifecycle_write = os.pipe()
+    launch_argv = [sys.executable, _GUARD, str(lifecycle_read)] + list(argv)
+    popen_kwargs = {"pass_fds": (lifecycle_read,), "start_new_session": True}
+    if cwd is not None:
+        popen_kwargs["cwd"] = cwd
+
+    def _close(descriptor):
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    try:
+        process = subprocess.Popen(
+            launch_argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **popen_kwargs
+        )
+    except FileNotFoundError as e:
+        _close(lifecycle_read)
+        _close(lifecycle_write)
+        _record_invocation(argv, started)
+        return 127, "", "reviewer agent binary not found: {}".format(e)
+    except OSError as e:
+        _close(lifecycle_read)
+        _close(lifecycle_write)
+        _record_invocation(argv, started)
+        return 127, "", "could not start the reviewer: {}".format(e)
+    _close(lifecycle_read)  # only the guard needs the read end
+
+    previous_handlers = {}
+
+    def _cancelled(signal_number, _frame):
+        _terminate(process)
+        if on_cancel is not None:
+            try:
+                on_cancel()
+            except Exception:
+                pass
+        signal.signal(signal_number, signal.SIG_DFL)
+        os.kill(os.getpid(), signal_number)
+
+    for number in _CANCEL_SIGNALS:
+        try:
+            previous_handlers[number] = signal.signal(number, _cancelled)
+        except (OSError, ValueError):
+            pass
+
+    out = bytearray()
+    err = bytearray()
+    fd_out, fd_err = process.stdout.fileno(), process.stderr.fileno()
+    buffers = {fd_out: out, fd_err: err}
+    open_fds = {fd_out, fd_err}
+    for fd in open_fds:
+        os.set_blocking(fd, False)  # so a drain read never blocks on a pipe a grandchild holds
+
+    def _drain(fd):
+        """Read all bytes IMMEDIATELY available on `fd` (non-blocking) into its buffer; return
+        True at EOF. Never blocks: BlockingIOError just means nothing is ready right now."""
+        while True:
+            try:
+                chunk = os.read(fd, 65536)
+            except (BlockingIOError, OSError):
+                return False
+            if not chunk:
+                return True  # EOF
+            buffers[fd].extend(chunk)
+
+    last_activity = started
+    first_seen = False
+    t_first_event = None
+    max_gap = 0.0
+    kill_reason = None
+
+    try:
+        try:
+            while open_fds:
+                now = time.monotonic()
+                # Deadline checks, TOTAL first so a slow-but-alive audit is never called idle.
+                if now - started >= timeout:
+                    kill_reason = "review timed out after {}s".format(timeout)
+                    break
+                if not first_seen and now - started >= first_output_timeout:
+                    kill_reason = "idle timeout: no output within {}s".format(first_output_timeout)
+                    break
+                if first_seen and now - last_activity >= idle_timeout:
+                    kill_reason = "idle timeout: no output for {}s".format(idle_timeout)
+                    break
+                # Wake at the NEAREST deadline so none is overshot.
+                if first_seen:
+                    next_idle = last_activity + idle_timeout
+                else:
+                    next_idle = started + first_output_timeout
+                wait = max(0.0, min(started + timeout, next_idle) - now)
+                readable, _, _ = select.select(list(open_fds), [], [], wait)
+                if not readable:
+                    continue  # nothing arrived; re-check the deadlines at the top
+                for fd in readable:
+                    try:
+                        chunk = os.read(fd, 65536)
+                    except (BlockingIOError, OSError):
+                        continue
+                    if not chunk:
+                        open_fds.discard(fd)  # EOF on this pipe
+                        continue
+                    now = time.monotonic()
+                    if not first_seen:
+                        first_seen = True
+                        t_first_event = now - started
+                    else:
+                        # Only BETWEEN-output gaps feed max_gap; the start->first gap is
+                        # t_first_event (what N1, not N2, governs).
+                        max_gap = max(max_gap, now - last_activity)
+                    last_activity = now
+                    buffers[fd].extend(chunk)
+                # A completed review closes its pipes; drain any last bytes so we return promptly
+                # instead of spinning to the total cap (select reports a closed pipe as readable).
+                if process.poll() is not None:
+                    for fd in list(open_fds):
+                        if _drain(fd):
+                            open_fds.discard(fd)
+                    break
+        except BaseException:
+            _terminate(process)
+            raise
+    finally:
+        for number, handler in previous_handlers.items():
+            try:
+                signal.signal(number, handler)
+            except (OSError, ValueError):
+                pass
+        _close(lifecycle_write)
+
+    if kill_reason is not None:
+        _terminate(process)
+        for fd in (fd_out, fd_err):
+            _drain(fd)  # keep whatever partial output was already emitted
+        _close_streams(process)
+        _record_invocation(argv, started, t_first_event_s=t_first_event, max_gap_s=max_gap)
+        return TIMEOUT_EXIT, out.decode("utf-8", "replace"), kill_reason
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _terminate(process)  # pipes closed but the child somehow lingers
+    _close_streams(process)
+    _record_invocation(argv, started, t_first_event_s=t_first_event, max_gap_s=max_gap)
+    return (
+        process.returncode,
+        out.decode("utf-8", "replace"),
+        err.decode("utf-8", "replace"),
+    )
+
+
+def _close_streams(process):
+    for stream in (process.stdout, process.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except OSError:
+            pass
 
 
 # `codex exec` is non-interactive and has NO --ask-for-approval flag; the approval

@@ -11,6 +11,8 @@ config.json supplies the defaults.
 """
 import json
 
+import pytest
+
 import reviewer_lib as rl
 
 
@@ -29,7 +31,8 @@ def _isolate(tmp_path, monkeypatch):
                 "REVIEWER_ASYNC_AGENT_STALE_SECS", "REVIEWER_COMMIT_TIMEOUT_SECS",
                 "REVIEWER_STOPCONTINUE_MAX_NUDGES", "REVIEWER_STOPCONTINUE_EFFORT",
                 "REVIEWER_CODEX_BIN", "REVIEWER_CODEX_MODEL", "REVIEWER_PI_BIN",
-                "REVIEWER_SESSION_AUDIT_LIMIT"):
+                "REVIEWER_SESSION_AUDIT_LIMIT",
+                "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", "REVIEWER_IDLE_TIMEOUT_SECS"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -39,6 +42,8 @@ def test_defaults_apply_with_no_config_file(tmp_path, monkeypatch):
     assert rl._monitor_stale_secs() == 3600
     assert rl._async_agent_stale_secs() == 4 * 3600
     assert rl.commit_review_timeout() == 900
+    assert rl.first_output_timeout() == 30
+    assert rl.idle_timeout() == 600
     assert rl.max_nudges() == 10
     assert rl.stopcontinue_effort() == "low"
     assert rl.reviewer_session_audit_limit() == 3
@@ -51,6 +56,8 @@ def test_config_file_sets_every_tunable(tmp_path, monkeypatch):
         "monitorStaleSecs": 900,
         "asyncAgentStaleSecs": 8 * 3600,
         "commitReviewTimeoutSecs": 1800,
+        "firstOutputTimeoutSecs": 45,
+        "idleTimeoutSecs": 300,
         "maxNudges": 3,
         "stopContinueEffort": "medium",
         "codexBin": "/opt/codex",
@@ -62,6 +69,8 @@ def test_config_file_sets_every_tunable(tmp_path, monkeypatch):
     assert rl._monitor_stale_secs() == 900
     assert rl._async_agent_stale_secs() == 8 * 3600
     assert rl.commit_review_timeout() == 1800
+    assert rl.first_output_timeout() == 45
+    assert rl.idle_timeout() == 300
     assert rl.max_nudges() == 3
     assert rl.stopcontinue_effort() == "medium"
     assert rl.codex_bin() == "/opt/codex"
@@ -118,6 +127,75 @@ def test_commit_timeout_detail_reports_the_source_that_actually_won(tmp_path, mo
     secs, source = rl.commit_review_timeout_detail()
     assert secs == 1500
     assert "REVIEWER_COMMIT_TIMEOUT_SECS" not in source, source
+
+
+# --------------------------------------------------------------------------
+# The two codex-streaming idle thresholds resolve exactly like commit_review_timeout:
+# env > state file (/reviewerModel) > config.json > default, each candidate clamped to its own
+# floor and an unusable one skipped. Parametrised over the actual resolver FUNCTIONS (not name
+# strings, which would be an unresolvable dynamic facade access) so both knobs are held to the
+# identical contract. (docs/plans/codex_jsonl_streaming.md, Task 2.)
+# --------------------------------------------------------------------------
+# (value_fn, env var, config.json key, default, floor)
+_STREAMING_KNOBS = [
+    (rl.first_output_timeout, "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", "firstOutputTimeoutSecs",
+     30, 5),
+    (rl.idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", "idleTimeoutSecs", 600, 60),
+]
+
+
+@pytest.mark.parametrize("value_fn,env_var,config_key,default,floor", _STREAMING_KNOBS)
+def test_streaming_timeout_env_over_config_over_default(
+        tmp_path, monkeypatch, value_fn, env_var, config_key, default, floor):
+    _isolate(tmp_path, monkeypatch)
+    assert value_fn() == default
+
+    _cfg(tmp_path, monkeypatch, {config_key: default + 100})
+    assert value_fn() == default + 100
+
+    monkeypatch.setenv(env_var, str(default + 200))
+    assert value_fn() == default + 200
+
+
+@pytest.mark.parametrize("value_fn,env_var,config_key,default,floor", _STREAMING_KNOBS)
+def test_streaming_timeout_junk_falls_through_and_small_is_floored(
+        tmp_path, monkeypatch, value_fn, env_var, config_key, default, floor):
+    _isolate(tmp_path, monkeypatch)
+    _cfg(tmp_path, monkeypatch, {config_key: default + 100})
+    for junk in ("0", "-5", "abc", "90.5"):
+        monkeypatch.setenv(env_var, junk)
+        assert value_fn() == default + 100, junk
+    monkeypatch.setenv(env_var, "1")  # meaningful but below the floor
+    assert value_fn() == floor
+
+
+@pytest.mark.parametrize("detail_fn,set_fn,clear_fn,env_var,default", [
+    (rl.first_output_timeout_detail, rl.set_first_output_timeout,
+     rl.clear_first_output_timeout, "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", 30),
+    (rl.idle_timeout_detail, rl.set_idle_timeout,
+     rl.clear_idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", 600),
+])
+def test_streaming_timeout_detail_reports_the_source_that_won(
+        tmp_path, monkeypatch, detail_fn, set_fn, clear_fn, env_var, default):
+    _isolate(tmp_path, monkeypatch)
+    assert detail_fn() == (default, "default")
+
+    set_fn(default + 500)
+    assert detail_fn()[0] == default + 500
+
+    monkeypatch.setenv(env_var, str(default + 900))
+    secs, source = detail_fn()
+    assert (secs, env_var in source) == (default + 900, True), source
+
+    # invalid env -> the state file wins, and the source must NOT name the env var
+    monkeypatch.setenv(env_var, "abc")
+    secs, source = detail_fn()
+    assert secs == default + 500
+    assert env_var not in source, source
+
+    clear_fn()
+    monkeypatch.delenv(env_var, raising=False)
+    assert detail_fn() == (default, "default")
 
 
 def test_env_overrides_the_config_file(tmp_path, monkeypatch):

@@ -340,6 +340,87 @@ def clear_commit_timeout():
     commit_timeout_file().unlink(missing_ok=True)
 
 
+# --------------------------------------------------------------------------
+# Codex-streaming hang detection uses TWO idle thresholds, each resolved exactly like
+# commit_review_timeout (env > state file > config.json > default, each candidate clamped to a
+# floor and an unusable one skipped). N1 (first-output) catches a reviewer that never produced
+# any output; N2 (between-output) catches one that fell silent mid-run. Both floors matter for
+# the same reason the commit-timeout floor does: the gate is fail-CLOSED, so a 1-second threshold
+# would kill every audit before it could finish. See docs/plans/codex_jsonl_streaming.md.
+# --------------------------------------------------------------------------
+DEFAULT_FIRST_OUTPUT_TIMEOUT = 30
+FIRST_OUTPUT_TIMEOUT_FLOOR = 5
+DEFAULT_IDLE_TIMEOUT = 600
+IDLE_TIMEOUT_FLOOR = 60
+
+
+def _timeout_detail(env_var, state_file, config_key, default, floor):
+    """(seconds, source) for a timeout knob, mirroring commit_review_timeout_detail's precedence
+    and clamping verbatim -- factored out because the two streaming thresholds share it exactly."""
+    for source, candidate in (
+        ("env " + env_var, os.environ.get(env_var)),
+        (str(state_file), _read_state_text(state_file)),
+        ("config.json " + config_key, config_get(config_key)),
+    ):
+        n = _positive_int(candidate) if candidate not in (None, "") else None
+        if n is not None:
+            return max(floor, n), source
+    return default, "default"
+
+
+def first_output_timeout_file():
+    return reviewer_home() / "state" / "first_output_timeout"
+
+
+def first_output_timeout_detail():
+    """(seconds, source) for N1, the first-output timeout: no byte on stdout/stderr within this
+    many seconds of launch means the reviewer never started, so it is killed and retried once."""
+    return _timeout_detail(
+        "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", first_output_timeout_file(),
+        "firstOutputTimeoutSecs", DEFAULT_FIRST_OUTPUT_TIMEOUT, FIRST_OUTPUT_TIMEOUT_FLOOR)
+
+
+def first_output_timeout():
+    return first_output_timeout_detail()[0]
+
+
+def set_first_output_timeout(seconds):
+    f = first_output_timeout_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(int(seconds)) + "\n", encoding="utf-8")
+
+
+def clear_first_output_timeout():
+    first_output_timeout_file().unlink(missing_ok=True)
+
+
+def idle_timeout_file():
+    return reviewer_home() / "state" / "idle_timeout"
+
+
+def idle_timeout_detail():
+    """(seconds, source) for N2, the between-output timeout: after the first byte, a gap longer
+    than this means the reviewer fell silent mid-run. Must exceed the longest legitimate silent
+    item (a full test run), which is why its default and floor are much larger than N1's."""
+    return _timeout_detail(
+        "REVIEWER_IDLE_TIMEOUT_SECS", idle_timeout_file(),
+        "idleTimeoutSecs", DEFAULT_IDLE_TIMEOUT, IDLE_TIMEOUT_FLOOR)
+
+
+def idle_timeout():
+    return idle_timeout_detail()[0]
+
+
+def set_idle_timeout(seconds):
+    f = idle_timeout_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(int(seconds)) + "\n", encoding="utf-8")
+
+
+def clear_idle_timeout():
+    idle_timeout_file().unlink(missing_ok=True)
+
+
 def reviewer_session_audit_limit_file():
     return reviewer_home() / "state" / "reviewer_session_audit_limit"
 
