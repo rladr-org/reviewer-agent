@@ -164,7 +164,8 @@ def _terminate(process):
             pass
 
 
-def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None):
+def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
+         scratch_dir=None):
     """Run one reviewer call, and make sure nothing it started outlives it.
 
     Three cleanup paths, because a review ends early in three different ways:
@@ -201,6 +202,11 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
         popen_kwargs["start_new_session"] = True
     if cwd is not None:
         popen_kwargs["cwd"] = cwd
+    if scratch_dir is not None:
+        # Scope the reviewer subprocess's TMPDIR to this generation's scratch dir, so scratch that
+        # honors $TMPDIR lands where rotation/orphan-sweep can reclaim it. Copy the environ so the
+        # host process's own TMPDIR is untouched.
+        popen_kwargs["env"] = {**os.environ, "TMPDIR": str(scratch_dir)}
 
     def _close(descriptor):
         if descriptor is not None:
@@ -286,7 +292,7 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
 
 
 def _run_streaming(argv, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
-                   first_output_timeout=None, idle_timeout=None):
+                   first_output_timeout=None, idle_timeout=None, scratch_dir=None):
     """Run a codex `--json` audit while WATCHING its event pipe, so a hung reviewer is killed by
     an idle threshold instead of only the total cap. Same process lifecycle as `_run` (guard,
     signal handlers, tree teardown); the difference is a `select()` read loop with THREE deadline
@@ -311,7 +317,7 @@ def _run_streaming(argv, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
     if idle_timeout is None:
         idle_timeout = DEFAULT_IDLE_TIMEOUT
     if os.name != "posix":
-        return _run(argv, timeout=timeout, cwd=cwd, on_cancel=on_cancel)
+        return _run(argv, timeout=timeout, cwd=cwd, on_cancel=on_cancel, scratch_dir=scratch_dir)
 
     started = time.monotonic()
     lifecycle_read, lifecycle_write = os.pipe()
@@ -319,6 +325,9 @@ def _run_streaming(argv, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
     popen_kwargs = {"pass_fds": (lifecycle_read,), "start_new_session": True}
     if cwd is not None:
         popen_kwargs["cwd"] = cwd
+    if scratch_dir is not None:
+        # Scope TMPDIR to this generation's scratch dir (see _run); copy so the host env is untouched.
+        popen_kwargs["env"] = {**os.environ, "TMPDIR": str(scratch_dir)}
 
     def _close(descriptor):
         if descriptor is not None:
@@ -777,6 +786,7 @@ def run_codex_resume_by_id(
 def run_codex_streaming_audit(
     session_id, proj, sandbox, prompt, timeout=DEFAULT_TIMEOUT,
     first_output_timeout=None, idle_timeout=None, extra_config=None, on_cancel=None,
+    scratch_dir=None,
 ):
     """Run the codex COMMIT audit as a schema-constrained, streamed call, and return
     `(code, verdict_text, stderr)` where `verdict_text` is the CANONICAL APPROVED/REJECTED text
@@ -818,7 +828,8 @@ def run_codex_streaming_audit(
                 reset_last_invocation()
             code, out, err = _run_streaming(
                 argv, timeout=remaining, on_cancel=on_cancel,
-                first_output_timeout=first_output_timeout, idle_timeout=idle_timeout)
+                first_output_timeout=first_output_timeout, idle_timeout=idle_timeout,
+                scratch_dir=scratch_dir)
             # Retry ONLY an idle kill (its reason carries "idle"; the total cap does NOT), and only
             # while budget remains -- so a genuine total timeout is never retried.
             if (code == TIMEOUT_EXIT and "idle" in (err or "")

@@ -256,6 +256,14 @@ def main():
         # AFTER ensure_session: briefing is its own `_run`, and without the reset the audit
         # would be recorded with the brief's argv and duration.
         rl.reset_last_invocation()
+        # Per-generation scratch dir for THIS reviewer session: TMPDIR is scoped to it so the
+        # reviewer's tree-copies land where rotation/orphan-sweep can reclaim them.
+        scratch_dir = rl.commit_scratch_dir(sid, create=True)
+        # WARN-ONLY disk reporting: never blocks a commit and is strictly inert to the verdict.
+        disk_warning = rl.low_disk_warning()
+        if disk_warning:
+            rl.log(disk_warning)
+            sys.stderr.write(disk_warning + "\n")
         # Streaming, schema-constrained audit: codex emits a --json event stream (watched for the
         # N1/N2 idle thresholds) and a strict JSON verdict, which the call reconstructs into the
         # canonical APPROVED/REJECTED text -- so `is_approved`/`completed` below are unchanged. A
@@ -266,6 +274,7 @@ def main():
             first_output_timeout=rl.first_output_timeout(),
             idle_timeout=rl.idle_timeout(),
             on_cancel=_record_cancellation,
+            scratch_dir=str(scratch_dir) if scratch_dir else None,
         )
 
     # A review COUNTS only if it exited cleanly AND returned something. Exit 0 with empty output

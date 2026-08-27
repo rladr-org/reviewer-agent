@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -1159,6 +1160,138 @@ def clear_session_id(proj, claude_session_id, role=ROLE_REVIEWER):
         f.unlink(missing_ok=True)
 
 
+# --------------------------------------------------------------------------
+# reviewer scratch: per-generation temp dirs for the codex audit, keyed by reviewer_session_id
+# --------------------------------------------------------------------------
+# The codex commit reviewer copies the staged tree out to audit it, leaving 1.6-1.8 GB scratch dirs
+# behind that were never cleaned up. We scope each reviewer GENERATION's scratch to one dir under the
+# system temp base (writable by the `workspace-write` sandbox, unlike the state home which sits
+# outside the `-C` workspace), set TMPDIR to it on the audit subprocess, and reclaim it at rotation
+# plus a mtime-lease sweep at SessionStart. Keyed by the reviewer_session_id -- known at audit time,
+# stable across a session's audits (so scratch is reused within a session), and unique per generation
+# (so rotation never deletes a path the NEXT reviewer would reuse). See
+# docs/plans/temp_scratch_rotation_cleanup.md.
+
+DEFAULT_REVIEWER_SCRATCH_TTL_S = 12 * 3600         # 12 h lease; a live session renews it each audit
+DEFAULT_REVIEWER_DISK_WARN_BYTES = 2 * 1024 ** 3   # 2 GiB
+
+
+def commit_scratch_root():
+    """Root under which every reviewer generation's scratch dir lives. Under the system temp base
+    (writable by the codex `workspace-write` sandbox), NOT the state home (outside the `-C`
+    workspace). `REVIEWER_SCRATCH_ROOT` overrides it wholesale for tests/operators."""
+    env = os.environ.get("REVIEWER_SCRATCH_ROOT")
+    if env:
+        return Path(env)
+    return Path(tempfile.gettempdir()) / "reviewer-agent-scratch"
+
+
+def scratch_key(reviewer_session_id):
+    """Filesystem-safe key for one reviewer session id, or None for a falsy id. Session ids are
+    globally unique, so the sanitized id alone keys the dir (the `pi:`/`claude:` prefixes sanitize
+    to a safe name)."""
+    sid = str(reviewer_session_id or "").strip()
+    if not sid:
+        return None
+    return _sanitize(sid)
+
+
+def commit_scratch_dir(reviewer_session_id, create=False):
+    """`<root>/<scratch_key>` for this reviewer generation, or None for a falsy id. `create=True`
+    makes the dir AND renews its mtime lease, so every audit stamps the dir as recently used."""
+    key = scratch_key(reviewer_session_id)
+    if key is None:
+        return None
+    d = commit_scratch_root() / key
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
+        try:
+            os.utime(d, None)           # renew the lease
+        except OSError:
+            pass
+    return d
+
+
+def remove_commit_scratch_dir(reviewer_session_id):
+    """Best-effort removal of one reviewer generation's scratch dir. Never raises; a falsy id or an
+    absent dir is a no-op."""
+    d = commit_scratch_dir(reviewer_session_id, create=False)
+    if d is not None:
+        shutil.rmtree(str(d), ignore_errors=True)
+
+
+def reviewer_scratch_ttl_s():
+    raw = os.environ.get("REVIEWER_SCRATCH_TTL_S")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_REVIEWER_SCRATCH_TTL_S
+
+
+def sweep_orphan_scratch_dirs(max_age_s=None, protect_keys=()):
+    """Reclaim scratch dirs whose mtime LEASE is older than `max_age_s`. Liveness is the dir mtime
+    (renewed on each audit), deliberately NOT the backend session-id files -- those persist after a
+    session ends (only rotation unlinks them), so a session-file signal would keep dead scratch
+    forever. `protect_keys` are never removed regardless of age. Best-effort; never raises."""
+    if max_age_s is None:
+        max_age_s = reviewer_scratch_ttl_s()
+    protect = set(protect_keys or ())
+    try:
+        entries = list(commit_scratch_root().iterdir())
+    except OSError:
+        return                          # root absent/unreadable: nothing to sweep
+    cutoff = time.time() - max_age_s
+    for entry in entries:
+        if entry.name in protect:
+            continue
+        try:
+            if not entry.is_dir() or entry.stat().st_mtime >= cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(str(entry), ignore_errors=True)
+
+
+def reviewer_disk_warn_bytes():
+    raw = os.environ.get("REVIEWER_DISK_WARN_BYTES")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_REVIEWER_DISK_WARN_BYTES
+
+
+def _human_bytes(n):
+    n = float(n)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024:
+            return "{} B".format(int(n)) if unit == "B" else "{:.1f} {}".format(n, unit)
+        n /= 1024.0
+    return "{:.1f} TiB".format(n)
+
+
+def low_disk_warning():
+    """A one-line `[reviewerAgent] low disk ...` string when free space on the scratch root's
+    nearest EXISTING ancestor is below the threshold, else None. Never raises -- disk reporting must
+    never be able to affect a commit verdict. A threshold of 0 disables the check."""
+    try:
+        threshold = reviewer_disk_warn_bytes()
+        if threshold <= 0:
+            return None
+        path = commit_scratch_root()
+        while not path.exists():
+            parent = path.parent
+            if parent == path:
+                return None
+            path = parent
+        free = shutil.disk_usage(str(path)).free
+        if free < threshold:
+            return ("[reviewerAgent] low disk: {} free on {} -- reviewer temp scratch may "
+                    "fail".format(_human_bytes(free), path))
+        return None
+    except Exception:
+        return None
+
+
 def rotate_session(proj, claude_session_id):
     """Retire THIS project's reviewer for THIS Claude session: the next gated action briefs a
     fresh one.
@@ -1200,6 +1333,11 @@ def rotate_session(proj, claude_session_id):
     if not sid or not str(proj or "").strip():
         return []
     cleared = []
+    # Reclaim this reviewer's scratch BEFORE its session files are unlinked -- removal is keyed by the
+    # reviewer id, which we must read while it is still on disk. Covers whichever backend is live; a
+    # bare/None id is a no-op, so this is safe for all three readers.
+    for _reader in (read_session_id, read_pi_session, read_claude_session):
+        remove_commit_scratch_dir(_reader(proj, sid, ROLE_REVIEWER))
     targets = [
         session_id_file(proj, sid, ROLE_REVIEWER),
         session_id_file(proj, sid, ROLE_STOP),
@@ -1291,6 +1429,7 @@ def retire_commit_reviewer_session(
     for f in targets:
         if f is not None:
             f.unlink(missing_ok=True)
+    remove_commit_scratch_dir(reviewer_session_id)      # reclaim this generation's scratch
     return True
 
 

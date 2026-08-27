@@ -69,6 +69,13 @@ def main():
     raw = sys.stdin.read()
     data = json.loads(raw) if raw.strip() else {}
     cwd = data.get("cwd") or rl.project_dir()
+    # Reclaim abandoned reviewer scratch on EVERY session start -- unconditional, so it also runs for
+    # inactive, Pi and Claude sessions (unlike the codex-only brief below). Liveness is the mtime
+    # lease, so a live session's dir is within the TTL and kept. Never blocks the session.
+    try:
+        rl.sweep_orphan_scratch_dirs()
+    except Exception as e:
+        rl.log("[session_start] scratch sweep EXCEPTION {}: {}".format(type(e).__name__, e))
     try:
         _brief_if_active(data, cwd)
     except Exception as e:
