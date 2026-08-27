@@ -134,6 +134,24 @@ rm -rf ~/.claude/reviewerAgent
 **Check:** the operator's preflight/approval hook is intact (a normal Bash command is not blocked by a
 missing-script fail-closed error), and `rg reviewerAgent ~/.claude/settings.json` is empty.
 
+**e. Remove the standalone's user-scoped skill and command shortcuts.** The installer drops
+copies under `~/.claude/commands/` and `~/.claude/skills/` that keep appearing in the slash-command
+completion menu after `~/.claude/reviewerAgent/` is gone, each pointing at the now-deleted
+`toggle.py` (they error on invocation, and they duplicate every entry the plugin registers
+after a later reinstall):
+
+```bash
+rm -f ~/.claude/commands/reviewerAgent.md \
+      ~/.claude/commands/reviewerDirective.md \
+      ~/.claude/commands/reviewerModel.md \
+      ~/.claude/commands/stopContinue.md \
+      ~/.claude/commands/stopContinueWatchdog.md
+rm -rf ~/.claude/skills/reviewerAgent
+```
+
+**Check:** `rg reviewerAgent ~/.claude/commands ~/.claude/skills 2>/dev/null` is empty. Do NOT
+touch anything else under those directories — they hold the operator's own skills and commands.
+
 ## Step 3 — remove leftovers (optional; the operator's call)
 
 Uninstalling the code does not remove these. Do each only if the operator wants it gone.

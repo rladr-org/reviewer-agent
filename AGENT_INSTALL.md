@@ -333,7 +333,15 @@ paths* above — the operator first invokes:
 /reviewerAgent on
 ```
 
-It must refuse without enabling and display:
+**If Claude Code's auto mode is on, the toggle may be blocked** with a *"Permission for this
+action was denied by the Claude Code auto mode classifier"* error before the toggle script ever
+runs — the classifier reads the `on` argument as state-changing. **Turn auto mode off** for the
+enablement invocation (in `/config`, or set `permissions.defaultMode` to `default` in
+`~/.claude/settings.json`), invoke `/reviewerAgent on` (then `on acceptRisk`), and re-enable auto
+mode afterward if you want it back. The same applies to `/stopContinue on [acceptRisk]` and
+`/stopContinueWatchdog on`.
+
+Without auto mode blocking it, the plain `on` invocation must refuse without enabling and display:
 
 ```text
 Before enabling reviewerAgent you must accept the risk as described in DISCLAIMER.md by invoking:
