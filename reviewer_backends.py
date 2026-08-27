@@ -105,6 +105,13 @@ TIMEOUT_EXIT = 124
 SCHEMA_VERDICT_MISSING = 65
 
 
+# Runaway backstop for the codex commit-audit's idle-kill retry loop. The primary bound is the
+# absolute total budget (`commit_review_timeout`); this cap only fires when a pathologically
+# tight custom `idle_timeout` would otherwise let many retries flap inside a large budget. A cap
+# of 8 leaves ample room to recover a genuinely transient hang while preventing unbounded loops.
+MAX_IDLE_RETRIES = 8
+
+
 # What the most recent `_run` actually executed. Recorded HERE because `_run` is the single
 # point BOTH backends execute through: capturing argv at the two call sites instead would mean
 # rebuilding it, and the rebuilt copy is what would silently drift from the real one. It also
@@ -796,8 +803,9 @@ def run_codex_streaming_audit(
     reused, so a retry can never read the previous attempt's verdict), while `_run_streaming`
     watches the `--json` event pipe and kills a hung reviewer on the N1/N2 idle thresholds. The
     whole audit shares ONE absolute deadline (start + total budget); an N1/N2 idle kill is retried
-    ONCE with the REMAINING budget (a hang may be transient), but the total cap is not -- so total
-    wall time is bounded by `timeout`, then the gate fails closed.
+    while budget remains AND retries < MAX_IDLE_RETRIES (a hang may be transient), but the total
+    cap is never retried -- so total wall time is bounded by `timeout`, then the gate fails
+    closed.
 
     Fail-CLOSED return contract: on `code == 0` with a missing/malformed verdict (reconstruction is
     ""), return `(SCHEMA_VERDICT_MISSING, "", <reason>)` -- a NONZERO code with an EMPTY verdict,
@@ -812,8 +820,13 @@ def run_codex_streaming_audit(
     tmp_paths = []
     try:
         attempts = 0
+        idle_retries = 0
         code, out, err = TIMEOUT_EXIT, "", "review not run"
-        while attempts < 2:
+        # Retry any idle kill while budget remains AND retries stay under MAX_IDLE_RETRIES. The
+        # budget is the primary bound; the count cap is a runaway backstop for pathological
+        # tight-idle_timeout configurations. Total-cap timeouts (reason carries "review timed
+        # out", NO "idle") are never retried -- their remedy is a bigger budget, not a fresh run.
+        while True:
             attempts += 1
             fd, tmp = tempfile.mkstemp(prefix="codex_verdict_", suffix=".json")
             os.close(fd)
@@ -830,10 +843,10 @@ def run_codex_streaming_audit(
                 argv, timeout=remaining, on_cancel=on_cancel,
                 first_output_timeout=first_output_timeout, idle_timeout=idle_timeout,
                 scratch_dir=scratch_dir)
-            # Retry ONLY an idle kill (its reason carries "idle"; the total cap does NOT), and only
-            # while budget remains -- so a genuine total timeout is never retried.
             if (code == TIMEOUT_EXIT and "idle" in (err or "")
-                    and (deadline - time.monotonic()) > 0):
+                    and (deadline - time.monotonic()) > 0
+                    and idle_retries < MAX_IDLE_RETRIES):
+                idle_retries += 1
                 continue
             break
 
@@ -848,10 +861,12 @@ def run_codex_streaming_audit(
             inv = last_invocation()
             if inv is not None and usage is not None:
                 inv["turn_usage"] = usage
-        if attempts > 1:
-            inv = last_invocation()
-            if inv is not None:
-                inv["idle_retried"] = True
+        # idle_retried is the integer count of idle-kill retries that actually ran (0 when no
+        # retry was made). Downstream truthiness checks continue to work because bool(0) is False
+        # and bool(N>0) is True.
+        inv = last_invocation()
+        if inv is not None:
+            inv["idle_retried"] = idle_retries
 
         if code == 0 and not verdict_text.strip():
             # codex succeeded but produced no schema-conforming verdict: fail CLOSED with a NONZERO

@@ -562,7 +562,7 @@ def record_commit_attempt(proj, claude_session, reviewer_session, backend, promp
             # event, the largest between-event gap, and whether an idle kill forced one retry.
             "t_first_event_s": invocation.get("t_first_event_s"),
             "max_gap_s": invocation.get("max_gap_s"),
-            "idle_retried": bool(invocation.get("idle_retried")),
+            "idle_retried": int(invocation.get("idle_retried") or 0),
             "tokens_cumulative": tokens,
             "tokens_delta": (tokens - previous)
                             if (tokens is not None and previous is not None) else None,

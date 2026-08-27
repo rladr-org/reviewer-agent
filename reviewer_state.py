@@ -351,7 +351,7 @@ def clear_commit_timeout():
 # --------------------------------------------------------------------------
 DEFAULT_FIRST_OUTPUT_TIMEOUT = 30
 FIRST_OUTPUT_TIMEOUT_FLOOR = 5
-DEFAULT_IDLE_TIMEOUT = 600
+DEFAULT_IDLE_TIMEOUT = 900
 IDLE_TIMEOUT_FLOOR = 60
 
 

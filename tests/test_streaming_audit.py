@@ -156,8 +156,12 @@ def test_streaming_audit_max_idle_retries_caps_pathological_loop(tmp_path, monke
     monkeypatch.setenv("FAKE_CODEX_COUNTER_FILE", str(counter))
     monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")
     monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
-    budget = (rl.MAX_IDLE_RETRIES + 2) * 0.3   # ~3 s at MAX_IDLE_RETRIES=8, N1=0.2
-    code, _v, _e = _audit(tmp_path, timeout=budget, first_output_timeout=0.2, idle_timeout=30)
+    # Per attempt: N1 kill at 1 s + subprocess spawn overhead ≈ 1.5 s. Budget must cover
+    # MAX_IDLE_RETRIES+1 attempts with slack, but stay small enough that a missing cap does not
+    # let the test run for minutes. N1 is kept ≥ 1 s so a slow interpreter startup still lets the
+    # fake_codex process reach its counter-file write before it is killed.
+    budget = (rl.MAX_IDLE_RETRIES + 1) * 2.0   # ~18 s at MAX_IDLE_RETRIES=8
+    code, _v, _e = _audit(tmp_path, timeout=budget, first_output_timeout=1, idle_timeout=30)
     assert code == rl.TIMEOUT_EXIT
     assert int(counter.read_text()) == rl.MAX_IDLE_RETRIES + 1  # initial + N retries
     assert rl.last_invocation().get("idle_retried") == rl.MAX_IDLE_RETRIES

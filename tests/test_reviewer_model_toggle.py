@@ -200,7 +200,7 @@ def test_streaming_thresholds_clear_revert_to_their_defaults(tmp_path, monkeypat
     assert run_toggle(["firstOutputTimeout", "clear"], home).returncode == 0
     assert run_toggle(["idleTimeout", "clear"], home).returncode == 0
     assert _effective_first_output(home, monkeypatch) == 30
-    assert _effective_idle(home, monkeypatch) == 600
+    assert _effective_idle(home, monkeypatch) == 900
 
 
 def test_streaming_thresholds_below_floor_are_rejected_and_write_nothing(tmp_path, monkeypatch):
@@ -212,7 +212,7 @@ def test_streaming_thresholds_below_floor_are_rejected_and_write_nothing(tmp_pat
     p2 = run_toggle(["idleTimeout", "30"], home)
     assert p2.returncode == 2 and "floor" in p2.stderr.lower()
     assert _effective_first_output(home, monkeypatch) == 30
-    assert _effective_idle(home, monkeypatch) == 600
+    assert _effective_idle(home, monkeypatch) == 900
 
 
 def test_streaming_threshold_non_integer_is_rejected(tmp_path):

@@ -6,7 +6,8 @@
 
 **Goal.** Make the codex commit-audit path (a) return a **strict-JSON, schema-constrained verdict**
 so parsing is deterministic, and (b) detect a hung reviewer via a **JSONL event stream** with two
-separate idle thresholds, killing and retrying once before the fail-closed cap. Active by default.
+separate idle thresholds, killing and retrying while budget and the `MAX_IDLE_RETRIES` cap allow
+before the fail-closed total-cap. Active by default.
 Only the codex **commit-audit** path changes; pi, claude, stop, and askq paths are untouched.
 
 **Tech stack.** Python stdlib only (select, subprocess, json, os, signal). No new dependencies.
@@ -62,26 +63,29 @@ and all properties listed in `required`.
   - **N1 — first-output timeout (default 30s, floor 5s).** No byte on stdout OR stderr within N1 of
     launch ⇒ kill, reason `"idle timeout: no output within Ns"`. Catches "codex launched but the API never
     responded" (the observed empty-output 1200s strand); `thread.started` normally lands ~1s.
-  - **N2 — between-output timeout (default 600s, floor 60s).** After the first byte, a gap between
+  - **N2 — between-output timeout (default 900s, floor 60s).** After the first byte, a gap between
     consecutive bytes longer than N2 ⇒ kill, reason `"idle timeout: no output for Ns"`. Must exceed the longest
-    legitimate silent item (a test run); 600s clears the ~328s suite with margin.
+    legitimate silent item (a test run); 900s clears the observed ~300-370s healthy gaps on a large
+    project with ~2.4x headroom (see `docs/plans/codex_audit_retry_budget.md`).
   - One timer whose allowed gap is N1 before the first byte, N2 after; any byte on either stream
     resets it.
 - **EOF / child-exit handling (required for correctness).** `select()` reports a closed pipe as
   readable, so without this a completed review spins to the total cap. A read returning empty bytes
   = EOF ⇒ drop that fd from the watch set; when both fds are EOF OR `process.poll()` is not None,
   DRAIN any remaining readable bytes, then return promptly with the process return code.
-- **One automatic retry** on an N1/N2 idle kill only (a hang may be transient), NOT on the total
-  cap. The whole audit shares **one absolute deadline** = start + total budget; the retry runs with
-  the REMAINING budget and `_run_streaming` checks that cap first — so total wall time (retry
-  included) is bounded by the single total timeout, then fail-closed.
+- **Retry any N1/N2 idle kill while budget remains AND retries < MAX_IDLE_RETRIES** (default 8);
+  never retry the total cap. The whole audit shares **one absolute deadline** = start + total
+  budget; each retry runs with the REMAINING budget and `_run_streaming` checks that cap first —
+  so total wall time is bounded by the single total timeout, then fail-closed. See
+  `docs/plans/codex_audit_retry_budget.md` for the observation-driven rationale that replaced the
+  earlier single-retry design.
 - **Active by default.** `commit_hook` uses the streaming audit for codex unconditionally — no flag.
   `run_codex_resume_by_id` is left in place for the stop and askq paths.
 - **Configurable three ways**, resolved env > state file > config.json > default, clamped to the
   floor (mirrors `commit_review_timeout_detail`):
   - N1: `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS` > state `first_output_timeout` > config
     `firstOutputTimeoutSecs` > 30.
-  - N2: `REVIEWER_IDLE_TIMEOUT_SECS` > state `idle_timeout` > config `idleTimeoutSecs` > 600.
+  - N2: `REVIEWER_IDLE_TIMEOUT_SECS` > state `idle_timeout` > config `idleTimeoutSecs` > 900.
   - Slash commands: `/reviewerModel firstOutputTimeout <secs>|clear` and
     `/reviewerModel idleTimeout <secs>|clear`.
 - **Instrumentation** for later calibration: record `t_first_event_s`, `max_gap_s` (largest
@@ -185,7 +189,7 @@ test `tests/test_process_cancellation.py`.
   `commit_review_timeout_detail` exactly (env > state file > config.json > default, clamped):
   `DEFAULT_FIRST_OUTPUT_TIMEOUT=30`, `FIRST_OUTPUT_TIMEOUT_FLOOR=5`, keys
   `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS` / state `first_output_timeout` / `firstOutputTimeoutSecs`;
-  `DEFAULT_IDLE_TIMEOUT=600`, `IDLE_TIMEOUT_FLOOR=60`, keys `REVIEWER_IDLE_TIMEOUT_SECS` / state
+  `DEFAULT_IDLE_TIMEOUT=900`, `IDLE_TIMEOUT_FLOOR=60`, keys `REVIEWER_IDLE_TIMEOUT_SECS` / state
   `idle_timeout` / `idleTimeoutSecs`. Plus `set_*`/`clear_*`/`*_file` for both.
 - [ ] **Step 2: Failing tests** in `tests/test_process_cancellation.py`: returns stdout+stderr on a
   fast process; **kills on first-output timeout** (`sleep 300`, `first_output_timeout=1` →
@@ -259,13 +263,15 @@ verdict_text is the reconstructed canonical string; callers use `is_approved` un
   any event (exercises **N1**).
 - [ ] **Step 3: Implement `run_codex_streaming_audit`** — resolve N1/N2 (params or resolvers) and
   the total via `commit_review_timeout`. Compute ONE absolute `deadline = monotonic() + timeout` for
-  the whole audit. Per attempt (max 2): create a **FRESH `-o` temp file** (unlink+recreate, so a
-  retry can never read the previous attempt's verdict — the stale-`-o` finding); build argv via
-  `resume_by_id_argv(..., json_mode=True, output_schema=codex_verdict_schema_path(),
-  output_last_message=tmp)`; call `_run_streaming` with `timeout = max(0, deadline - monotonic())`.
-  **Retry once ONLY on an idle kill** (`code == TIMEOUT_EXIT and "idle" in err`, which the N1/N2
-  reasons carry and the total cap does NOT) and only if budget remains: `reset_last_invocation`, and
-  mark `idle_retried` on the new invocation. On `code == 0`: read the fresh `-o` file →
+  the whole audit. Per attempt (unbounded except by budget and MAX_IDLE_RETRIES): create a
+  **FRESH `-o` temp file** (unlink+recreate, so a retry can never read the previous attempt's
+  verdict — the stale-`-o` finding); build argv via `resume_by_id_argv(..., json_mode=True,
+  output_schema=codex_verdict_schema_path(), output_last_message=tmp)`; call `_run_streaming` with
+  `timeout = max(0, deadline - monotonic())`. **Retry on an idle kill** (`code == TIMEOUT_EXIT
+  and "idle" in err`, which the N1/N2 reasons carry and the total cap does NOT) as long as budget
+  remains AND retries so far are below `MAX_IDLE_RETRIES = 8`: `reset_last_invocation` on each
+  retry, and set `idle_retried` on the invocation to the retry count (integer, not boolean; see
+  `docs/plans/codex_audit_retry_budget.md`). On `code == 0`: read the fresh `-o` file →
   `parse_codex_verdict_json` → `codex_verdict_to_text`; attach `turn_usage`. **Fail-closed return
   contract:** if `code == 0` but the verdict is missing/malformed (reconstruction is `""`), return
   `(NONZERO, "", "codex --json produced no schema-conforming verdict")` — a NONZERO code with an
@@ -318,9 +324,9 @@ tests `tests/test_audit_record.py`, `tests/test_commit_hook.py`.
    `t_first=<~1-6s>` and `max_gap=<seconds>`; `~/.claude/reviewer-agent/logs/reviewer.log` records
    the timing and `turn_*` tokens.
 4. **First-output hang (N1):** `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS=5` + `FAKE_CODEX_FIRST_DELAY=30`
-   (silent before any event) fires N1 in ~5s and retries once.
+   (silent before any event) fires N1 in ~5s and retries while budget/cap allow.
 5. **Between-output hang (N2):** `REVIEWER_IDLE_TIMEOUT_SECS=5` + `FAKE_CODEX_MID_DELAY=30` (emits
-   `thread.started`, THEN goes silent) fires N2 and retries once — a first-output delay would
-   instead trip N1.
+   `thread.started`, THEN goes silent) fires N2 and retries while budget/cap allow — a
+   first-output delay would instead trip N1.
 6. **Calibration:** collect `t_first_event_s` / `max_gap_s` from real audits; lower N2 toward the
    observed max legitimate gap (keeping headroom above the slowest test suite) and keep N1 small.
