@@ -37,6 +37,14 @@ def _audit(tmp_path, **kw):
 
 
 # --------------------------------------------------------------------------
+# Defaults: the N2 built-in was raised from 600 to 900 s to clear observed healthy gaps of
+# 300-370 s in large-repo audits with ~2.4x margin instead of the earlier ~1.6x.
+# --------------------------------------------------------------------------
+def test_default_idle_timeout_is_900():
+    assert rl.DEFAULT_IDLE_TIMEOUT == 900
+
+
+# --------------------------------------------------------------------------
 # Verdict reconstruction: the strict JSON on the -o file becomes canonical APPROVED/REJECTED text.
 # --------------------------------------------------------------------------
 def test_streaming_audit_approves(tmp_path, monkeypatch):
@@ -95,7 +103,8 @@ def test_streaming_audit_empty_verdict_file_fails_closed(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# Idle thresholds: a hung attempt is killed and retried ONCE; a persistent hang fails closed.
+# Idle thresholds: a hung attempt is killed and retried while budget remains and
+# MAX_IDLE_RETRIES has room. A total-cap timeout is never retried.
 # --------------------------------------------------------------------------
 @pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")
 def test_streaming_audit_first_output_timeout_retries_then_succeeds(tmp_path, monkeypatch):
@@ -106,7 +115,8 @@ def test_streaming_audit_first_output_timeout_retries_then_succeeds(tmp_path, mo
     monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
     code, verdict, _err = _audit(tmp_path, timeout=30, first_output_timeout=1, idle_timeout=30)
     assert (code, verdict) == (0, "APPROVED")
-    assert rl.last_invocation().get("idle_retried") is True
+    # idle_retried is now an integer count, not True/False.
+    assert rl.last_invocation().get("idle_retried") == 1
     assert int(counter.read_text()) == 2  # two attempts ran
 
 
@@ -119,20 +129,78 @@ def test_streaming_audit_between_output_timeout_retries_then_succeeds(tmp_path, 
     monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
     code, verdict, _err = _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=1)
     assert (code, verdict) == (0, "APPROVED")
-    assert rl.last_invocation().get("idle_retried") is True
+    assert rl.last_invocation().get("idle_retried") == 1
 
 
 @pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")
-def test_streaming_audit_persistent_idle_fails_closed_without_a_third_attempt(tmp_path,
-                                                                              monkeypatch):
+def test_streaming_audit_multiple_idle_kills_retry_until_success(tmp_path, monkeypatch):
+    """Attempts 0 AND 1 hang; attempt 2 lands the verdict. The single-retry cap is gone —
+    the loop retries any idle kill while budget remains and MAX_IDLE_RETRIES has room."""
     counter = tmp_path / "attempts"
     monkeypatch.setenv("FAKE_CODEX_COUNTER_FILE", str(counter))
-    monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")         # EVERY attempt hangs
+    monkeypatch.setenv("FAKE_CODEX_DELAY_ONLY_ATTEMPT", "0,1")
+    monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")
     monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
-    code, verdict, err = _audit(tmp_path, timeout=20, first_output_timeout=1, idle_timeout=30)
+    code, verdict, _err = _audit(tmp_path, timeout=60, first_output_timeout=1, idle_timeout=30)
+    assert (code, verdict) == (0, "APPROVED")
+    assert rl.last_invocation().get("idle_retried") == 2
+    assert int(counter.read_text()) == 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")
+def test_streaming_audit_max_idle_retries_caps_pathological_loop(tmp_path, monkeypatch):
+    """Every attempt hangs and the budget is generous — MAX_IDLE_RETRIES stops the loop, not the
+    budget. Budget is picked at MAX_IDLE_RETRIES+2 x N1 so a broken cap only over-runs by ~1 s
+    per missing bound rather than the ~1 hour the earlier draft risked."""
+    counter = tmp_path / "attempts"
+    monkeypatch.setenv("FAKE_CODEX_COUNTER_FILE", str(counter))
+    monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")
+    monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
+    budget = (rl.MAX_IDLE_RETRIES + 2) * 0.3   # ~3 s at MAX_IDLE_RETRIES=8, N1=0.2
+    code, _v, _e = _audit(tmp_path, timeout=budget, first_output_timeout=0.2, idle_timeout=30)
+    assert code == rl.TIMEOUT_EXIT
+    assert int(counter.read_text()) == rl.MAX_IDLE_RETRIES + 1  # initial + N retries
+    assert rl.last_invocation().get("idle_retried") == rl.MAX_IDLE_RETRIES
+
+
+@pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")
+def test_streaming_audit_retries_stop_when_budget_exhausts_before_cap(tmp_path, monkeypatch):
+    """The total-budget deadline is unchanged: when it runs out before MAX_IDLE_RETRIES, the loop
+    stops on budget. Each attempt takes ~1 s (killed at N1=1); 4 s budget yields > 2 attempts (so
+    the old single-retry cap of n=2 is not enough to pass) and < MAX_IDLE_RETRIES+1 (so it did
+    not cap-out either). The window guards against both regressions at once."""
+    counter = tmp_path / "attempts"
+    monkeypatch.setenv("FAKE_CODEX_COUNTER_FILE", str(counter))
+    monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")
+    monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
+    code, _v, err = _audit(tmp_path, timeout=4, first_output_timeout=1, idle_timeout=30)
+    assert code == rl.TIMEOUT_EXIT
+    n = int(counter.read_text())
+    # n must be > 2 (the old single-retry cap) AND < MAX_IDLE_RETRIES+1 (the count cap).
+    assert n > 2, "single-retry regression: n=%d" % n
+    assert n < rl.MAX_IDLE_RETRIES + 1, "cap did not fire before budget: n=%d" % n
+    assert "idle" in err or "review timed out" in err
+
+
+def test_streaming_audit_total_cap_timeout_is_never_retried(tmp_path, monkeypatch):
+    """A total-cap kill's reason string carries 'review timed out after Ns' (no 'idle'). The retry
+    loop must recognise this and exit after the FIRST attempt. Uses a monkeypatched
+    _run_streaming so the reason string is deterministic — a fake-codex process cannot itself
+    produce the total-cap reason on demand."""
+    import reviewer_backends as rb
+    calls = []
+
+    def fake_run_streaming(argv, timeout=None, on_cancel=None,
+                          first_output_timeout=None, idle_timeout=None,
+                          scratch_dir=None):
+        calls.append(argv)
+        return rl.TIMEOUT_EXIT, "", "review timed out after 1.0s"
+
+    monkeypatch.setattr(rb, "_run_streaming", fake_run_streaming)
+    code, verdict, err = _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=10)
     assert code == rl.TIMEOUT_EXIT and verdict == ""
-    assert "idle" in err
-    assert int(counter.read_text()) == 2  # exactly one retry, never a third attempt
+    assert "idle" not in err
+    assert len(calls) == 1, "total-cap timeout must not retry (attempts=%d)" % len(calls)
 
 
 @pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")

@@ -43,7 +43,7 @@ def test_defaults_apply_with_no_config_file(tmp_path, monkeypatch):
     assert rl._async_agent_stale_secs() == 4 * 3600
     assert rl.commit_review_timeout() == 900
     assert rl.first_output_timeout() == 30
-    assert rl.idle_timeout() == 600
+    assert rl.idle_timeout() == 900
     assert rl.max_nudges() == 10
     assert rl.stopcontinue_effort() == "low"
     assert rl.reviewer_session_audit_limit() == 3
@@ -140,7 +140,7 @@ def test_commit_timeout_detail_reports_the_source_that_actually_won(tmp_path, mo
 _STREAMING_KNOBS = [
     (rl.first_output_timeout, "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", "firstOutputTimeoutSecs",
      30, 5),
-    (rl.idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", "idleTimeoutSecs", 600, 60),
+    (rl.idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", "idleTimeoutSecs", 900, 60),
 ]
 
 
@@ -173,7 +173,7 @@ def test_streaming_timeout_junk_falls_through_and_small_is_floored(
     (rl.first_output_timeout_detail, rl.set_first_output_timeout,
      rl.clear_first_output_timeout, "REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS", 30),
     (rl.idle_timeout_detail, rl.set_idle_timeout,
-     rl.clear_idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", 600),
+     rl.clear_idle_timeout, "REVIEWER_IDLE_TIMEOUT_SECS", 900),
 ])
 def test_streaming_timeout_detail_reports_the_source_that_won(
         tmp_path, monkeypatch, detail_fn, set_fn, clear_fn, env_var, default):

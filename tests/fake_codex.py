@@ -110,7 +110,12 @@ if "--json" in argv and "resume" in argv:
         with open(_counter, "w") as _fh:
             _fh.write(str(attempt + 1))
     _only = os.environ.get("FAKE_CODEX_DELAY_ONLY_ATTEMPT")
-    _delays_apply = _only is None or (attempt is not None and attempt == int(_only))
+    if _only is None:
+        _delays_apply = True
+    else:
+        # Comma-separated list so a test can make attempts 0 AND 1 hang while attempt 2 succeeds.
+        _wanted = {int(s) for s in _only.split(",") if s.strip()}
+        _delays_apply = attempt is not None and attempt in _wanted
 
     _first = os.environ.get("FAKE_CODEX_FIRST_DELAY")
     if _first and _delays_apply:
