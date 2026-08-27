@@ -19,6 +19,8 @@ codex success/failure without invoking the real reviewer:
   FAKE_CODEX_STDIN_FILE  if set, write this invocation's STDIN to that file. The brief is piped
                          (`-`), not passed in argv, so this is the only place a test can prove
                          WHICH brief text reached codex.
+  FAKE_CODEX_DUMP_TMPDIR if set, write this invocation's TMPDIR env value to that file, so a test
+                         can prove the audit subprocess ran with a scratch-scoped TMPDIR.
 
 The STREAMING COMMIT AUDIT (`--json ... resume <id> <prompt>`) is driven by these extra knobs:
 
@@ -70,6 +72,11 @@ _dump = os.environ.get("FAKE_CODEX_ARGV_FILE")
 if _dump:
     with open(_dump, "a", encoding="utf-8") as _fh:
         _fh.write(json.dumps(argv) + "\n")
+
+_tmpdir_dump = os.environ.get("FAKE_CODEX_DUMP_TMPDIR")
+if _tmpdir_dump:
+    with open(_tmpdir_dump, "w", encoding="utf-8") as _fh:
+        _fh.write(os.environ.get("TMPDIR", ""))
 
 
 def _emit(event):
