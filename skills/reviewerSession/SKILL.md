@@ -1,7 +1,9 @@
 ---
+name: reviewerSession
 description: "Show or rotate this Claude session's reviewerAgent session, or configure automatic rotation. Usage: /reviewerSession [rotate | limit <N|off|clear>]"
-allowed-tools: Bash(python3:*)
+argument-hint: rotate | limit <N|off|clear>
 disable-model-invocation: true
+allowed-tools: Bash(python3:*)
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_session_toggle.py" $ARGUMENTS`

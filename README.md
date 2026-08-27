@@ -133,7 +133,7 @@ conversation is kept per project, developer session and role, briefed with that 
 `reviewerAgent.md` when it is created. It persists through rejected commit attempts, so when the
 developer agent fixes its findings and tries again, it remembers what it asked for. By default it
 rotates after three completed non-retry audits; every attempt after a rejection is a retry until approval and
-does not advance that counter. `/reviewerSession rotate` retires it immediately.
+does not advance that counter. `/reviewer-agent:reviewerSession rotate` retires it immediately.
 
 **Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
 no supported configuration, no supported platform, and no supported host version — "supported"
@@ -305,33 +305,35 @@ verify `/hooks` after the restart.
 In each repository to protect:
 
 1. Copy `reviewerAgent.md.template` to `reviewerAgent.md` at the repository root and edit it for
-   that project. `/reviewerAgent on` refuses to enable a repository without this brief.
+   that project. `/reviewer-agent:reviewerAgent on` refuses to enable a repository without this
+   brief.
 2. Select and verify the backend as described in [Claude Code backends](#claude-code-backends).
 3. Enable the commit gate and timed-out question answering:
 
    ```text
-   /reviewerAgent on
+   /reviewer-agent:reviewerAgent on
    ```
 
    The first invocation does not enable anything. Read [`DISCLAIMER.md`](DISCLAIMER.md), then
    accept its risks explicitly and enable:
 
    ```text
-   /reviewerAgent on acceptRisk
+   /reviewer-agent:reviewerAgent on acceptRisk
    ```
 
 4. Optionally enable stop supervision:
 
    ```text
-   /stopContinue on
+   /reviewer-agent:stopContinue on
    ```
 
    The acceptance receipt is shared by both features in this repository. If stopContinue is the
    first one enabled, its plain `on` invocation gives the corresponding
-   `/stopContinue on acceptRisk` instruction.
+   `/reviewer-agent:stopContinue on acceptRisk` instruction.
 
 The flags are stored by canonical repository root, apply to linked worktrees, and persist across
-Claude Code restarts. `/reviewerAgent off` and `/stopContinue off` disable them independently.
+Claude Code restarts. `/reviewer-agent:reviewerAgent off` and `/reviewer-agent:stopContinue off`
+disable them independently.
 
 The successful reviewerAgent enabling invocation also adds `askUserQuestionTimeout: 60s` to the
 user’s `~/.claude/settings.json` when the setting is absent. It never replaces an existing value.
@@ -405,8 +407,8 @@ Restart Claude Code afterwards so the reloaded hooks take effect.
 **Disable per repository**, keeping everything installed — this is the usual thing to want:
 
 ```text
-/reviewerAgent off
-/stopContinue off
+/reviewer-agent:reviewerAgent off
+/reviewer-agent:stopContinue off
 ```
 
 **Disable the plugin entirely** without removing it:
@@ -433,7 +435,7 @@ Then, optionally and in your own time:
   named after sanitized reviewer session ids and can't be told apart automatically from other contents.
 - **State.** `rm -rf ~/.claude/reviewer-agent` removes every project's flags, reviewer session
   ids, retained verdicts and logs. To purge one project's review record instead, use
-  `/reviewerHistory clear` before uninstalling. If you relocated state with `REVIEWER_STATE_DIR`
+  `/reviewer-agent:reviewerHistory clear` before uninstalling. If you relocated state with `REVIEWER_STATE_DIR`
   (or the legacy `REVIEWER_HOME` alias), remove that path instead.
 - **The Pi extension**, if you installed it: `rm -rf ~/.pi/agent/extensions/git-read-only`.
   Nothing else uses it.
@@ -481,7 +483,7 @@ reviewer.
 The current commit-review invocation omits a shell and supplies Git access through the bundled
 `git_read` extension, which constructs fixed arguments with `shell:false`. This design is intended
 to keep the reviewer read-only and does not provide a way to run a test suite during an audit. Question answering
-and stop supervision do not require a staged read, but `/reviewerAgent on` also enables the commit
+and stop supervision do not require a staged read, but `/reviewer-agent:reviewerAgent on` also enables the commit
 gate, so a functional Pi installation must include the extension.
 
 Pi prerequisites:
@@ -537,7 +539,7 @@ applicable to the user's account, which may change.
 > [`DISCLAIMER.md`](DISCLAIMER.md).
 
 Set a nonstandard binary with `REVIEWER_CLAUDE_BIN`. Choose the reviewing model with
-`/reviewerModel <model>` and the depth with `/reviewerModel effort <level>`; levels are `low`,
+`/reviewer-agent:reviewerModel <model>` and the depth with `/reviewer-agent:reviewerModel effort <level>`; levels are `low`,
 `medium`, `high`, `xhigh` and `max`, defaulting to `medium`.
 
 Three properties of the child process are deliberate, and each was established by running the CLI
@@ -602,27 +604,30 @@ is chosen explicitly or not at all.
 
 ## Claude Code commands
 
+All Claude Code plugin commands are invoked with the `/reviewer-agent:` prefix (Claude Code plugin
+convention for namespaced commands).
+
 | Command | Purpose |
 |---|---|
-| `/reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
-| `/stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
-| `/stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-invokes an idle session so the Stop hook can recover an unsupervised fail-open strand. Interval 1–59 min (default 7). Requires `stopContinue` active. |
-| `/reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
-| `/reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
-| `/reviewerModel <model>` | Set the model for the selected backend. |
-| `/reviewerModel effort <level>` | Set reasoning effort for the selected backend. |
-| `/reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
-| `/reviewerModel firstOutputTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit — how long to wait for the reviewer's first event before treating it as hung. Default 30 s (floor 5). |
-| `/reviewerModel idleTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit — the longest silent gap allowed between reviewer events; must exceed the longest legitimate silence (e.g. a test run). Default 600 s (floor 60). |
-| `/reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
-| `/reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
-| `/reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
-| `/reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
-| `/reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
+| `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
+| `/reviewer-agent:stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
+| `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-invokes an idle session so the Stop hook can recover an unsupervised fail-open strand. Interval 1–59 min (default 7). Requires `stopContinue` active. |
+| `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
+| `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
+| `/reviewer-agent:reviewerModel <model>` | Set the model for the selected backend. |
+| `/reviewer-agent:reviewerModel effort <level>` | Set reasoning effort for the selected backend. |
+| `/reviewer-agent:reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
+| `/reviewer-agent:reviewerModel firstOutputTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit — how long to wait for the reviewer's first event before treating it as hung. Default 30 s (floor 5). |
+| `/reviewer-agent:reviewerModel idleTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit — the longest silent gap allowed between reviewer events; must exceed the longest legitimate silence (e.g. a test run). Default 600 s (floor 60). |
+| `/reviewer-agent:reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
+| `/reviewer-agent:reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
+| `/reviewer-agent:reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
+| `/reviewer-agent:reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
+| `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
 
 > These manual commands intentionally use Claude Code `!` shell preprocessing. Because command
 > arguments are processed by the shell, avoid shell syntax and do not paste untrusted text into
-> `/reviewerDirective`.
+> `/reviewer-agent:reviewerDirective`.
 
 Codex reasoning levels are `none` through `ultra`. Pi levels are `off`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, and `max`. Claude levels are `low`, `medium`, `high`, `xhigh` and
@@ -640,11 +645,11 @@ The project brief adds repository-specific requirements and takes precedence whe
 The full brief is sent once when each role session is created. A compact capsule containing the
 non-negotiable rules, project-brief path, directives, and current context is sent on every commit,
 question, and stop call. Changes to the capsule apply on the next call. Changes to the full brief
-require `/reviewerSession rotate`.
+require `/reviewer-agent:reviewerSession rotate`.
 
 The commit reviewer automatically rotates after three completed non-retry audits. Configure the
 default with `reviewerSessionAuditLimit` in `~/.claude/reviewer-agent/config.json` (`0` disables
-it), or override it live with `/reviewerSession limit <N|off|clear>`. A retry is any commit attempt
+it), or override it live with `/reviewer-agent:reviewerSession limit <N|off|clear>`. A retry is any commit attempt
 after a rejection until the next approval; retries never advance the rotation counter. A
 first-pass rejection itself counts once; only the later attempts in its retry chain are excluded.
 Automatic rotation leaves the separate stop-supervisor session untouched.
@@ -707,8 +712,8 @@ environment override; the Codex package uses `REVIEWER_CODEX_REVIEW_HISTORY_KEEP
 read when an entry is written, so changing it does not require reinstalling the plugin.
 
 Retained verdicts quote the staged diffs they judged, so the history is a plaintext record of
-reviewed code as well as of reviews. `/reviewerHistory` reports what is retained for the current
-project and `/reviewerHistory clear` deletes it -- retained reviews and saved rulings, for that
+reviewed code as well as of reviews. `/reviewer-agent:reviewerHistory` reports what is retained for the current
+project and `/reviewer-agent:reviewerHistory clear` deletes it -- retained reviews and saved rulings, for that
 project only -- without uninstalling anything. The Codex package exposes the same two actions as
 `$reviewer-agent-codex:reviewer-history status|clear`.
 
@@ -746,7 +751,7 @@ the diagnostic says so when one is in play.
 
 | | Show the selection | Change it |
 |---|---|---|
-| Claude Code | `/reviewerModel` | `/reviewerModel <model>`, `/reviewerModel effort <level>` |
+| Claude Code | `/reviewer-agent:reviewerModel` | `/reviewer-agent:reviewerModel <model>`, `/reviewer-agent:reviewerModel effort <level>` |
 | Codex | `$reviewer-agent-codex:reviewer-model` | `$reviewer-agent-codex:reviewer-model <model> [<effort>]` |
 
 **A commit is blocked with "TIMED OUT".** A timeout carries no verdict, so it cannot approve.
@@ -754,7 +759,7 @@ Retry the identical commit first; if the diff is genuinely too large for the bud
 The two hosts recover differently:
 
 - **Claude Code** resumes the reviewer session by id, so a retry keeps what the reviewer already
-  read and often lands second time. Raise the budget with `/reviewerModel timeout <seconds>`
+  read and often lands second time. Raise the budget with `/reviewer-agent:reviewerModel timeout <seconds>`
   (default 900s).
 - **Codex** *retires* the timed-out reviewer automatically and says so in the tool result: the
   retry starts a fresh reviewer, and rotating by hand afterwards is unnecessary. Raise the budget
@@ -770,11 +775,11 @@ backend can produce this: it runs on your own Claude subscription quota, and the
 fail-closed, so an exhausted allowance blocks commits until it resets. Changing the model does not
 help. Wait and retry the identical commit -- the reviewer session resumes by id, so it keeps what
 it had already read -- or, to keep working meanwhile, switch this repository to another backend
-(`REVIEWER_BACKEND`, or `backend` in `config.json`) or run `/reviewerAgent off`.
+(`REVIEWER_BACKEND`, or `backend` in `config.json`) or run `/reviewer-agent:reviewerAgent off`.
 
 **A commit is blocked with "EMPTY verdict".** The reviewer session is wedged; retiring it makes
 the next gated action brief a fresh one, at the cost of one cold start. In Claude Code that is
-`/reviewerSession rotate`; in Codex it is `$reviewer-agent-codex:reviewer-session rotate`.
+`/reviewer-agent:reviewerSession rotate`; in Codex it is `$reviewer-agent-codex:reviewer-session rotate`.
 
 **The reviewer answers as if it were reviewing a different repository.** Current state files are
 keyed by project as well as by session to prevent the previously observed collision. If this
@@ -855,7 +860,7 @@ warning is the backstop for the rest.
 
 These are the oldest versions this release was actually *exercised* on, not a minimum anyone
 undertakes to support, and not the oldest that can work. Older hosts are a caveat rather than a
-refusal: a successful `/reviewerAgent on` and the Codex installer both detect the host version and print a
+refusal: a successful `/reviewer-agent:reviewerAgent on` and the Codex installer both detect the host version and print a
 warning below these floors, then continue. Newer versions are equally untested — a host that
 changes underneath this project can break it at any time, and nothing here promises otherwise.
 
@@ -977,7 +982,7 @@ The Codex and Pi backends are external dependencies and neither is bundled; the 
 .claude-plugin/                        Claude Code plugin metadata
 plugins/reviewer-agent-codex/          self-contained Codex plugin and guide
 hooks/hooks.json                       Claude Code hook registration
-commands/                              Claude Code slash commands
+skills/<name>/SKILL.md                 Claude Code slash commands (invoked as /reviewer-agent:<name>)
 reviewer_*.py                          Claude Code runtime layers
 commit_hook.py                         Claude Code commit gate
 askq_answer_hook.py                    Claude Code timed-out question handler

@@ -1,7 +1,9 @@
 ---
+name: stopContinue
 description: Toggle stopContinue completion supervision for this project. It may direct the agent to continue unfinished work already authorized by the operator. Separate from /reviewerAgent. Usage: /stopContinue on [acceptRisk]|off
-allowed-tools: Bash(python3:*)
+argument-hint: on [acceptRisk] | off
 disable-model-invocation: true
+allowed-tools: Bash(python3:*)
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/stopcontinue_toggle.py" $ARGUMENTS`

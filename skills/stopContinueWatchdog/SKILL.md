@@ -1,7 +1,9 @@
 ---
+name: stopContinueWatchdog
 description: Toggle the stopContinueWatchdog for this project. Arms a CronCreate loop that re-invokes an idle session so the existing Stop hook can recover an unsupervised fail-open strand. Requires stopContinue active. Usage: /stopContinueWatchdog on [interval]|off|status
-allowed-tools: Bash(python3:*), CronList, CronCreate, CronDelete
+argument-hint: on [interval] | off | status
 disable-model-invocation: true
+allowed-tools: Bash(python3:*), CronList, CronCreate, CronDelete
 ---
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/stopcontinue_watchdog_toggle.py" $ARGUMENTS`

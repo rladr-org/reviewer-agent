@@ -85,17 +85,14 @@ def test_claude_hooks_resolve_python_from_path_in_exec_form():
 
 def test_claude_commands_do_not_hardcode_the_python_install_path():
     """Slash commands are markdown, but this is not a prose check: the frontmatter and the `!`
-    line are what Claude Code executes, so a hardcoded interpreter breaks the command."""
-    command_paths = tuple(sorted((ROOT / "commands").glob("*.md")))
+    line are what Claude Code executes, so a hardcoded interpreter breaks the command. Every
+    toggle now ships as a skill under skills/<name>/SKILL.md; the same three invariants apply."""
+    skill_paths = tuple(sorted((ROOT / "skills").glob("*/SKILL.md")))
+    assert skill_paths, "expected at least one skills/<name>/SKILL.md"
 
-    for path in command_paths:
+    for path in skill_paths:
         text = path.read_text(encoding="utf-8")
         assert "/usr/bin/python3" not in text, path
         assert "Bash(python3:*)" in text, path
         assert "disable-model-invocation: true" in text, path
         assert "!`python3 " in text, path
-
-    skill = (ROOT / "skills" / "reviewerAgent" / "SKILL.md").read_text(encoding="utf-8")
-    assert "/usr/bin/python3" not in skill
-    assert "Bash(python3:*)" in skill
-    assert "!`python3 " in skill
