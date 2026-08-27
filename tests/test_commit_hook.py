@@ -173,6 +173,60 @@ def test_active_commit_approved_allows_the_commit_to_proceed(tmp_path, monkeypat
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_audit_runs_with_tmpdir_scoped_to_the_session_scratch_dir(tmp_path, monkeypatch):
+    # INTEGRATION for the scratch-cleanup change: the real hook must create a per-generation scratch
+    # dir keyed by the reviewer session id AND launch the audit subprocess with TMPDIR scoped to it.
+    # Proven end-to-end by the fake codex dumping the TMPDIR value it was actually launched with.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    scratch_root = tmp_path / "scratch"
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    rl.write_session_id(repo, "claude-tmp", "sid-tmp")   # pre-set -> audit resumes, no brief
+    seen = tmp_path / "seen_tmpdir.txt"
+    p = run_hook(
+        {"cwd": repo, "session_id": "claude-tmp", "tool_name": "Bash",
+         "tool_input": {"command": "git commit -m 'x'"}},
+        {
+            "REVIEWER_HOME": home,
+            "REVIEWER_CODEX_BIN": FAKE,
+            "REVIEWER_SCRATCH_ROOT": str(scratch_root),
+            "FAKE_CODEX_DUMP_TMPDIR": str(seen),
+            "FAKE_CODEX_VERDICT": "APPROVED",
+        },
+    )
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
+    expected = scratch_root / rl.scratch_key("sid-tmp")
+    assert seen.read_text().strip() == str(expected)   # audit ran under the scoped TMPDIR
+    assert expected.is_dir()                            # the hook created the scratch dir
+
+
+def test_low_disk_warning_surfaces_on_stderr_without_blocking_the_commit(tmp_path, monkeypatch):
+    # INTEGRATION for warn-only disk reporting: an impossibly high threshold forces the warning,
+    # which must appear on stderr yet NEVER change the allow verdict.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    scratch_root = tmp_path / "scratch"
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    rl.write_session_id(repo, "claude-disk", "sid-disk")
+    p = run_hook(
+        {"cwd": repo, "session_id": "claude-disk", "tool_name": "Bash",
+         "tool_input": {"command": "git commit -m 'x'"}},
+        {
+            "REVIEWER_HOME": home,
+            "REVIEWER_CODEX_BIN": FAKE,
+            "REVIEWER_SCRATCH_ROOT": str(scratch_root),
+            "REVIEWER_DISK_WARN_BYTES": str(10 ** 18),   # ~1 EB free required -> always warns
+            "FAKE_CODEX_VERDICT": "APPROVED",
+        },
+    )
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "low disk" in p.stderr.lower()               # warned, but the commit still proceeded
+
+
 def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
     tmp_path, monkeypatch
 ):
