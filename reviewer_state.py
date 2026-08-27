@@ -961,7 +961,7 @@ def clear_stopcontinue_active(proj):
 # REQUIRES stopContinue to be active (the tick is inert otherwise). The flag file's
 # CONTENT is the interval in minutes. See docs/plans/stopcontinue_watchdog.md.
 # --------------------------------------------------------------------------
-WATCHDOG_DEFAULT_INTERVAL = 3
+WATCHDOG_DEFAULT_INTERVAL = 7
 WATCHDOG_MIN_INTERVAL = 1
 WATCHDOG_MAX_INTERVAL = 59  # `*/N` in the cron minute field is not a general >1h interval
 

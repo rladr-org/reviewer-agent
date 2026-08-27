@@ -606,7 +606,7 @@ is chosen explicitly or not at all.
 |---|---|
 | `/reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
 | `/stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
-| `/stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-invokes an idle session so the Stop hook can recover an unsupervised fail-open strand. Interval 1–59 min (default 3). Requires `stopContinue` active. |
+| `/stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-invokes an idle session so the Stop hook can recover an unsupervised fail-open strand. Interval 1–59 min (default 7). Requires `stopContinue` active. |
 | `/reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
 | `/reviewerModel <model>` | Set the model for the selected backend. |

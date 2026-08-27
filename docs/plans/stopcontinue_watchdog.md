@@ -66,7 +66,7 @@ lifecycle** below.
 `/stopContinueWatchdog on|off [interval]` — mirrors the existing toggle family
 (`stopcontinue_toggle.py`; `/reviewerModel … timeout`).
 
-- **Interval** is in **minutes, 1–59** (default 3), encoded as `*/N` in the cron minute field.
+- **Interval** is in **minutes, 1–59** (default 7), encoded as `*/N` in the cron minute field.
   Exact for divisors of 60 (2,3,5,6,10,12,15,20,30); a small jitter for other N is acceptable for a
   watchdog. `> 59` is rejected — `*/N` in the minute field is not a general arbitrary-minute
   interval, and a multi-hour watchdog defeats the purpose.
@@ -135,7 +135,7 @@ self-terminate, and leaves continue-vs-stop to the existing Stop hook.
   the CronList-guarded arm / cancel instruction text
 - `README.md` / `CHANGELOG.md`
 - **tests**:
-  - toggle on/off state; interval validation (default 3, floor 1, **reject > 59**)
+  - toggle on/off state; interval validation (default 7, floor 1, **reject > 59**)
   - `status` prints `ACTIVE` when the flag is on, `INACTIVE` when off
   - **`on` errors when `stopContinue` is inactive**; succeeds when it is active
   - the `on` command emits the CronList-guarded `CronCreate` arm instruction (mid-session,
