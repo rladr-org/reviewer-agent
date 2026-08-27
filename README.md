@@ -390,6 +390,10 @@ For the minimal-human delegated route, use
 
 ## Update, disable and uninstall (Claude Code)
 
+*Agents performing an unattended uninstall should follow
+[`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md), which has per-step checks and the fail-closed
+`bash_gate.py` caution below.*
+
 **Update**:
 
 ```bash
@@ -420,10 +424,17 @@ claude plugin marketplace remove reviewer-agent      # optional: only if nothing
 
 Then, optionally and in your own time:
 
+- **Reviewer scratch (codex backend).** Session rotation and the `SessionStart` sweep normally
+  reclaim it, but once the plugin is gone neither runs again, so leftover scratch persists and keeps
+  using disk. With no other reviewer session active (a running audit owns a live scratch dir), delete
+  the dedicated `reviewer-agent-scratch` directory under the system temp base (`$TMPDIR`, else `/tmp`).
+  If you pointed `REVIEWER_SCRATCH_ROOT` at a directory of your own: remove it if it was dedicated to
+  the reviewer; if it is shared, remove the reviewer's per-session subdirectories by hand — they are
+  named after sanitized reviewer session ids and can't be told apart automatically from other contents.
 - **State.** `rm -rf ~/.claude/reviewer-agent` removes every project's flags, reviewer session
   ids, retained verdicts and logs. To purge one project's review record instead, use
-  `/reviewerHistory clear` before uninstalling. Nothing outside that directory is written,
-  unless you set `REVIEWER_STATE_DIR` — in which case remove that path instead.
+  `/reviewerHistory clear` before uninstalling. If you relocated state with `REVIEWER_STATE_DIR`
+  (or the legacy `REVIEWER_HOME` alias), remove that path instead.
 - **The Pi extension**, if you installed it: `rm -rf ~/.pi/agent/extensions/git-read-only`.
   Nothing else uses it.
 - **The question timeout.** Enabling the reviewer set `askUserQuestionTimeout` in
@@ -433,7 +444,15 @@ Then, optionally and in your own time:
   behaviour.
 - **Legacy standalone hooks.** If you ever ran the pre-plugin install, its hook entries are
   still in `~/.claude/settings.json` and will keep firing after the plugin is gone. Remove the
-  `reviewerAgent/` entries there and delete `~/.claude/reviewerAgent/`.
+  `SessionStart`, `Stop` and `PostToolUse` entries that point under `~/.claude/reviewerAgent/`, then
+  delete `~/.claude/reviewerAgent/`. **One caution:** the standalone often registers a single
+  `PreToolUse` (Bash) wrapper `~/.claude/hooks/bash_gate.py` that chains a general preflight hook —
+  frequently your **own** bash-approval hook — and then the fail-closed reviewer `commit_hook.py`. Do
+  not delete the directory while that wrapper still references `commit_hook.py`: it would then exec a
+  missing script (fail-closed) on every Bash command and can block all of them. First edit
+  `bash_gate.py` to drop the `commit_hook.py` link while keeping your preflight (or repoint the hook
+  directly at your preflight script), then restart Claude Code and check `/hooks`. For an
+  agent-driven teardown of any of this, see [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md).
 
 ## Claude Code backends
 

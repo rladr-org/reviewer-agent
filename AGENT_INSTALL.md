@@ -21,7 +21,7 @@ full list is here, before the first command rather than buried in a step:
 
 | path | what happens | reversible? |
 |---|---|---|
-| Claude Code's plugin directory | the plugin is installed | yes, `/plugin uninstall reviewer-agent` |
+| Claude Code's plugin directory | the plugin is installed | yes, `/plugin uninstall reviewer-agent` (full teardown: [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md)) |
 | `~/.claude/settings.json` | `askUserQuestionTimeout` is **added if absent**; an existing value is never overwritten | yes, remove the key |
 | `~/.claude/reviewer-agent/` | created for flags, session ids, logs, verdicts | yes, delete the directory |
 | system temp base `reviewer-agent-scratch/` | **codex backend only:** per-reviewer-session scratch for the streamed codex audit (`REVIEWER_SCRATCH_ROOT` relocates it) | yes, auto-reclaimed at rotation / by a lease sweep; safe to delete |
