@@ -24,6 +24,7 @@ full list is here, before the first command rather than buried in a step:
 | Claude Code's plugin directory | the plugin is installed | yes, `/plugin uninstall reviewer-agent` |
 | `~/.claude/settings.json` | `askUserQuestionTimeout` is **added if absent**; an existing value is never overwritten | yes, remove the key |
 | `~/.claude/reviewer-agent/` | created for flags, session ids, logs, verdicts | yes, delete the directory |
+| system temp base `reviewer-agent-scratch/` | **codex backend only:** per-reviewer-session scratch for the streamed codex audit (`REVIEWER_SCRATCH_ROOT` relocates it) | yes, auto-reclaimed at rotation / by a lease sweep; safe to delete |
 | `~/.pi/agent/extensions/git-read-only/` | **only if** the backend is `pi` | yes, delete the directory |
 | `<PLUGIN_DIR>/pi-extensions/git-read-only/node_modules/` | **only if** the backend is `pi` (~131 MB, gitignored) | yes, delete the directory |
 | `<TARGET_REPO>/reviewerAgent.md` | created at step 5 **if absent** | yes, delete the file |

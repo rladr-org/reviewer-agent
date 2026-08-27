@@ -60,6 +60,37 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
   design ships the minimal feature (toggle, interval, mid-session and SessionStart arming); a
   block-until-armed cap, fail-open decision markers, and an opt-in alert are documented as deferred
   refinements in `docs/plans/stopcontinue_watchdog.md`.
+- Streamed, schema-constrained commit audits (Claude Code, `codex` backend only — not the `pi` or
+  `claude` backends, and not the separate native-Codex host plugin). The codex backend runs the
+  commit audit as `codex exec … resume --json --output-schema`, so the reviewer returns a strict JSON verdict
+  (`verdict`/`findings`/`suggestions`) that the hook reconstructs into the canonical
+  `APPROVED`/`REJECTED` text (`is_approved` is unchanged). The `--json` event stream is watched
+  against two idle thresholds — first-output (default 30 s) and between-output (default 600 s, which
+  must exceed the longest legitimate silence such as a test run) — so a hung reviewer is killed and
+  retried once instead of only hitting the total timeout, while a missing or malformed verdict fails
+  closed (nonzero, empty), preserving any saved ruling. Set with
+  `/reviewerModel firstOutputTimeout|idleTimeout <secs>|clear`,
+  `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS`/`REVIEWER_IDLE_TIMEOUT_SECS`, or `firstOutputTimeoutSecs`/
+  `idleTimeoutSecs` in `config.json`.
+- Session-scoped reviewer scratch with automatic cleanup (Claude Code, `codex` backend only). Each
+  codex-backend audit runs with `TMPDIR` scoped to a per-reviewer-generation scratch dir under the
+  system temp base (`REVIEWER_SCRATCH_ROOT`); the dir is removed when the reviewer session rotates,
+  and an unconditional `SessionStart` sweep reclaims dirs whose mtime lease is older than
+  `REVIEWER_SCRATCH_TTL_S` (default 12 h) for sessions that ended without rotating. This contains and
+  reclaims scratch that honors `$TMPDIR` (e.g. `mktemp` with no explicit path). It does **not** reach
+  scratch a reviewer or its tooling writes to a hardcoded absolute path outside `$TMPDIR` (for example
+  under `/tmp` directly) — that is not under `REVIEWER_SCRATCH_ROOT` and is not reclaimed by the sweep.
+  The commit-audit prompt asks the reviewer to keep its scratch under `$TMPDIR` to mitigate that, and
+  the low-disk warning is the backstop for whatever still escapes.
+- Warn-only low-disk reporting (Claude Code, `codex` backend only). Before each codex-backend audit
+  the hook checks free space on the scratch volume and prints a `[reviewerAgent] low disk …` line
+  below `REVIEWER_DISK_WARN_BYTES` (default
+  2 GiB; `0` disables). It never blocks a commit or changes a verdict.
+- Automatic reviewer-session rotation (Claude Code, all backends) after a configured number of
+  completed non-retry audits, so a long-lived reviewer thread is periodically re-briefed with the
+  current standing brief. Set with
+  `/reviewerSession limit <N|off|clear>` or `REVIEWER_SESSION_AUDIT_LIMIT` (the stop-supervisor
+  session is left untouched).
 
 ### Changed
 

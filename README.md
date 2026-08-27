@@ -593,6 +593,8 @@ is chosen explicitly or not at all.
 | `/reviewerModel <model>` | Set the model for the selected backend. |
 | `/reviewerModel effort <level>` | Set reasoning effort for the selected backend. |
 | `/reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
+| `/reviewerModel firstOutputTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit — how long to wait for the reviewer's first event before treating it as hung. Default 30 s (floor 5). |
+| `/reviewerModel idleTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit — the longest silent gap allowed between reviewer events; must exceed the longest legitimate silence (e.g. a test run). Default 600 s (floor 60). |
 | `/reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
 | `/reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
 | `/reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
@@ -796,9 +798,32 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
 | `REVIEWER_MONITOR_STALE_SECS` | `3600` | Live monitor marker window. |
 | `REVIEWER_COMMIT_TIMEOUT_SECS` | `900` | Commit-audit timeout. |
+| `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS` | `30` (floor 5) | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit. Also `firstOutputTimeoutSecs` in `config.json`. |
+| `REVIEWER_IDLE_TIMEOUT_SECS` | `600` (floor 60) | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit; must exceed the longest legitimate silence. Also `idleTimeoutSecs` in `config.json`. |
+| `REVIEWER_SCRATCH_ROOT` | `<system temp>/reviewer-agent-scratch` | Codex backend: root for per-reviewer-session scratch dirs. `TMPDIR` is scoped to one on each codex audit; the dir is reclaimed at rotation and by a lease sweep. |
+| `REVIEWER_SCRATCH_TTL_S` | `43200` (12 h) | Codex backend: orphan-sweep lease — at SessionStart, scratch dirs whose mtime is older than this are reclaimed (covers sessions that ended without rotating). |
+| `REVIEWER_DISK_WARN_BYTES` | `2147483648` (2 GiB) | Codex backend: warn-only free-space threshold; below it the audit prints a low-disk warning and never blocks the commit. `0` disables. |
 
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
 The question and stop paths each use a separate 300-second limit and fail open.
+
+The streaming, scratch, and idle-threshold behavior below is specific to **this Claude Code plugin
+running its `codex` reviewer backend** (Claude Code as the host, codex as the reviewer). It does not
+apply to this plugin's `pi` or `claude` backends, and it is unrelated to the separate native-Codex
+host plugin (`plugins/reviewer-agent-codex/`), which has its own review implementation.
+
+With the codex backend, the commit audit is streamed and schema-constrained: it runs `codex exec …
+resume --json --output-schema`, so the reviewer returns a strict JSON verdict that the hook
+reconstructs into the canonical `APPROVED`/`REJECTED` text. The `--json` event stream is watched
+against the two idle thresholds above; a hung reviewer is killed and retried once, and a missing or
+malformed verdict fails closed (blocking the commit, preserving any saved ruling) rather than passing.
+Each such audit also runs with `TMPDIR` scoped to a per-reviewer-generation scratch dir under
+`REVIEWER_SCRATCH_ROOT`, which is removed when the reviewer session rotates and otherwise reclaimed by
+the SessionStart lease sweep. This contains and reclaims scratch that honors `$TMPDIR`; it does **not**
+reach scratch the reviewer or its tooling writes to a hardcoded absolute path outside `$TMPDIR` (for
+example under `/tmp` directly), which is not under `REVIEWER_SCRATCH_ROOT` and is not reclaimed. The
+audit prompt asks the reviewer to keep its scratch under `$TMPDIR` to mitigate that, and the low-disk
+warning is the backstop for the rest.
 
 ## Host versions it has been run against
 
