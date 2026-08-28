@@ -319,6 +319,16 @@ tool is worth having.
 
 **Check:** `<TARGET_REPO>/reviewerAgent.md` exists and describes that repository specifically.
 
+**Optional for data-heavy repositories:** if the repository routinely commits large volumes
+of auto-generated data (dataset rows, generated manifests, captured HTML), consider adding a
+`<TARGET_REPO>/reviewerAgent-ignore.md` at the same location. It names paths the reviewer
+should skim instead of judging record-by-record — the reviewer still audits schema and
+placement, but per-record content correctness is left to the pipeline that produced them.
+This reduces prompt tokens on codex retries and can lower the likelihood of timeout
+failures on large data commits — the initial audit still runs on the full staged patch,
+and codex may fetch a matched path on demand, so it is a mitigation rather than a guarantee. See the "Skimmed paths" section of the README for the fenced-block format. The file
+is optional; a missing file matches today's behavior (no exclusions).
+
 ## Step 6 — human acceptance and enablement, per repository
 
 This step is operator-only. The installing agent must stop here, point the operator to
