@@ -90,7 +90,8 @@ def main():
         )
         return 0
 
-    if not rl.staged_files(cwd):
+    staged = rl.staged_files(cwd)
+    if not staged:
         reason = (
             "reviewerAgent: nothing is staged, so there is nothing to review or commit. "
             "Stage the change(s) you want to commit (e.g. `git add <files>`), then run the "
@@ -103,6 +104,24 @@ def main():
             )
         )
         return 0
+
+    # reviewerAgent-ignore.md: parse before any backend runs so a malformed staged file
+    # fails-closed without consuming a review turn. See docs/plans/reviewer_ignore_guidance.md.
+    ignore_matcher, ignore_prose, ignore_err = rl.parse_reviewer_ignore(cwd, staged)
+    if ignore_err:
+        reason = (
+            "reviewerAgent: {} — fix or remove it and try again.".format(ignore_err)
+        )
+        rl.log("[commit] key={} reviewer_ignore parse FAILED: {} -> denied".format(
+            key, rl.short(ignore_err, 200)))
+        print(json.dumps(rl.deny_output(
+            reason, "[reviewerAgent] commit blocked: {}".format(rl.short(ignore_err, 200))
+        )))
+        return 0
+    # `_ignore_matcher` is passed to `staged_change_block` on the codex retry path (Channel B):
+    # matched paths are dropped from the delta candidate set so their diff bytes never reach
+    # the retry prompt. Non-codex branches get Channel A only. `channel_a_block` is per-backend
+    # below (codex/pi/claude have different fetch capabilities).
 
     # Operator context (their own typed words + any /reviewerDirective) rides on the PROMPT,
     # not the brief -- the brief was read once when the reviewer session was created, so it
@@ -166,6 +185,7 @@ def main():
             + "```diff\n" + patch + "\n```\n\n"
             + rl.apply_context(rl.CLAUDE_COMMIT_PROMPT, cwd, transcript_path, claude_sid,
                                commit_audit=True)
+            + rl.channel_a_block(ignore_prose, backend="claude")
         )
         rl.reset_last_invocation()
         code, out, err = rl.run_claude_review(
@@ -190,6 +210,7 @@ def main():
             change_block
             + rl.apply_context(rl.PI_COMMIT_PROMPT, cwd, transcript_path, claude_sid,
                                commit_audit=True)
+            + rl.channel_a_block(ignore_prose, backend="pi")
         )
         rl.reset_last_invocation()
         code, out, err = rl.run_pi_review(
@@ -247,11 +268,14 @@ def main():
             print(json.dumps(rl.deny_output(reason, msg)))
             return 0
         session_known = True  # ensure_session returns a real id or the hook already denied
-        change_block = rl.staged_change_block(cwd, claude_sid, sid)
+        change_block = rl.staged_change_block(
+            cwd, claude_sid, sid, ignore_matcher=ignore_matcher
+        )
         prompt = (
             change_block
             + rl.apply_context(rl.COMMIT_PROMPT, cwd, transcript_path, claude_sid,
                                commit_audit=True)
+            + rl.channel_a_block(ignore_prose, backend="codex")
         )
         # AFTER ensure_session: briefing is its own `_run`, and without the reset the audit
         # would be recorded with the brief's argv and duration.

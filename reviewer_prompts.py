@@ -1041,14 +1041,19 @@ def _reread_source(backend):
     return _CLAUDE_REREAD if backend == "claude" else _PI_REREAD
 
 
-def staged_change_block(proj, claude_session_id, codex_session_id):
+def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matcher=None):
     """What moved in the staged set since this reviewer session's last audit, or "" when no
     annotation may be sent.
 
     Silent (full review) when: there is no prior record, the record is corrupt, the reviewer
     session differs (a re-briefed reviewer holds no prior findings, so asking it to restate
     them would leave unchanged files unreviewed), or HEAD moved (the previous audit's commit
-    landed, so whatever is staged now is fresh work)."""
+    landed, so whatever is staged now is fresh work).
+
+    `ignore_matcher` (Channel B, docs/plans/reviewer_ignore_guidance.md): when supplied,
+    paths matched by it are dropped from the delta candidate set before commands or inline
+    bytes are attached. Codex retains fetch authority via `git diff --cached -- <path>`;
+    what's removed is only the hook-attached hint and the retry-inlined bytes."""
     prev = read_audited_stage(proj, claude_session_id)
     if not prev:
         return ""
@@ -1061,6 +1066,26 @@ def staged_change_block(proj, claude_session_id, codex_session_id):
     if not now:
         return ""
     changed = sorted(p for p, sha in now.items() if p in before and before[p] != sha)
+    unchanged = sorted(p for p, sha in now.items() if before.get(p) == sha)
+    added = sorted(p for p in now if p not in before)
+    removed = sorted(p for p in before if p not in now)
+    # Channel B: reviewerAgent-ignore.md matched paths are dropped from `changed` and `added`
+    # at the source. Just filtering `candidates` would demote them from "inlined bytes" to
+    # "not_shown -> mandatory `git show :<path>`", which is strictly worse than the pre-
+    # filter behavior; leaving them in `changed`/`added` while filtering `candidates` alone
+    # also lets the `elif deltas` and `elif changed or added` fallback branches emit
+    # mandatory fetches for them. Dropping them at the source makes them invisible to every
+    # downstream branch — no fetch instruction, no inline attempt, no delta command. Channel
+    # A's prose already told the reviewer WHY those paths are being skimmed on this audit.
+    #
+    # `_raw_moved` snapshots pre-filter movement so the no-movement branch below can
+    # distinguish "the index really is byte-identical" from "only skimmed paths changed."
+    # The two states are visibly different -- restating findings while a data file changed
+    # would be honest under the true no-movement branch and misleading under the second.
+    _raw_moved = bool(changed or added or removed)
+    if ignore_matcher is not None:
+        changed = [p for p in changed if not ignore_matcher.matches(p)]
+        added = [p for p in added if not ignore_matcher.matches(p)]
     backend = reviewer_backend(proj)
     # Skipped entirely when nothing can consume it: `_delta_candidates` runs one `git cat-file`
     # per changed path, and with inlining disabled on a backend that gets no commands either,
@@ -1072,12 +1097,24 @@ def staged_change_block(proj, claude_session_id, codex_session_id):
     else:
         candidates = []
     deltas = _delta_commands(proj, candidates, before)
-    unchanged = sorted(p for p, sha in now.items() if before.get(p) == sha)
-    added = sorted(p for p in now if p not in before)
-    removed = sorted(p for p in before if p not in now)
     round_no = prev.get("round", 1)
 
     if not (changed or added or removed):
+        if _raw_moved:
+            # The index did move but every moved path was skimmed per reviewerAgent-ignore.md.
+            # Non-skimmed paths are byte-identical to what the reviewer already audited, so
+            # prior findings on them still stand -- but claiming NOTHING MOVED here would be
+            # false and would confuse a reviewer who staged a data-file change.
+            return (
+                "STAGED SET vs YOUR LAST AUDIT (re-review #{}): only skimmed paths (per "
+                "reviewerAgent-ignore.md) changed since your last audit. Every NON-skimmed "
+                "staged path is byte-identical to what you already reviewed, and HEAD has "
+                "not moved. If the agent reports having fixed a NON-skimmed finding, it "
+                "did not stage the fix -- editing a file after `git add` leaves the index "
+                "untouched. Your previous findings on non-skimmed paths therefore all still "
+                "stand: restate them and reject again, and tell the agent to stage its "
+                "changes before retrying.\n\n".format(round_no + 1)
+            )
         return (
             "STAGED SET vs YOUR LAST AUDIT (re-review #{}): NOTHING MOVED. Every staged "
             "path is byte-identical to the content you already reviewed, and HEAD has not "

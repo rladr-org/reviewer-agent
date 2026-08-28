@@ -104,3 +104,17 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
   shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
   two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
   `docs/plans/watchdog_tick_visibility.md`.
+
+### Added — reviewer skim mechanism
+
+- `reviewerAgent-ignore.md` at a repository's root now names paths whose content is
+  auto-generated data (dataset rows, generated manifests, captured HTML) so the reviewer
+  skims their diffs rather than judging individual records. Optional — no file means today's
+  baseline. Fenced blocks tagged ```reviewer-ignore``` carry the glob patterns; free-form
+  prose around them explains the rationale to the reviewer. Two delivery channels: prompt
+  guidance for all backends, and (codex only in v1) byte-level exclusion from the retry
+  inline set. Loaded from git objects, never the working tree; delayed application means
+  new ignore rules take effect on the next commit, not the one that introduces them; the
+  root ignore file is always self-exempted from its own patterns; parse errors block the
+  commit fail-closed. See `docs/plans/reviewer_ignore_guidance.md` and the "Skimmed paths"
+  section of README.md.

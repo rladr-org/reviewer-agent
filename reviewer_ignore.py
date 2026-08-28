@@ -22,6 +22,54 @@ from reviewer_ignore_match import IgnoreMatcher, PatternError
 IGNORE_FILE_NAME = "reviewerAgent-ignore.md"
 
 
+_CHANNEL_A_PREAMBLE = (
+    "The following block is the operator's reviewerAgent-ignore.md for this repository "
+    "-- it names paths whose content is auto-generated data. You MAY judge: whether "
+    "changes to those paths match the commit's stated intent; whether their schema "
+    "(header line / first-record structure) has changed unexpectedly; whether their "
+    "presence, naming, or location is appropriate. You may NOT judge the correctness "
+    "of individual records."
+)
+
+# Per-backend guidance for fetching a skimmed path's content on demand. Backend-specific
+# because reviewer capabilities differ: codex has shell + git; pi has a read-only git_read
+# tool; claude has neither, only the staged patch already inlined in this message.
+_CHANNEL_A_FOLLOWUP = {
+    "codex": (
+        "If a change on a skimmed path looks suspicious, run `git diff --cached -- <path>` "
+        "yourself and audit; you have not been forbidden anything."
+    ),
+    "pi": (
+        "If a change on a skimmed path looks suspicious, fetch it through your "
+        "git_read tool (the same one used for the staged patch) and audit."
+    ),
+    "claude": (
+        "You have no shell or git tool; the staged patch is already included in this "
+        "message. If a change on a skimmed path looks suspicious, read that path's "
+        "hunks in the included patch and flag it in your response."
+    ),
+}
+
+
+def channel_a_block(prose, backend="codex"):
+    """Wrap the ignore file's markdown in a labelled block for appending to the per-commit
+    audit prompt. Empty string when `prose` is empty (no effective ignore file), so callers
+    can unconditionally splice this into the prompt without a conditional at the call site.
+
+    `backend` selects backend-specific follow-up instructions (codex has shell + git; pi
+    has git_read; claude has neither and reads the inlined patch). See
+    docs/plans/reviewer_ignore_guidance.md Channel A."""
+    if not prose:
+        return ""
+    followup = _CHANNEL_A_FOLLOWUP.get(backend, _CHANNEL_A_FOLLOWUP["codex"])
+    return (
+        "[reviewerAgent-ignore.md]\n"
+        + _CHANNEL_A_PREAMBLE + " " + followup + "\n\n"
+        + prose.rstrip() + "\n"
+        + "[/reviewerAgent-ignore.md]\n"
+    )
+
+
 class _SelfExemptedMatcher:
     """Wraps an IgnoreMatcher so the root reviewerAgent-ignore.md is never matched,
     regardless of compiled patterns. Principle 3 of the plan."""

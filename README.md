@@ -691,6 +691,58 @@ commit.
 Inlining is bounded by `deltaInlineMax` (48,000 bytes per path) and `deltaInlineTotalMax` (96,000
 bytes total). Either may be set to `0` to disable inlining. Withheld content is explicitly marked.
 
+Paths matched by `reviewerAgent-ignore.md` are dropped from this retry inline set on the codex
+backend (Channel B), so an auto-generated data file's diff bytes do not consume retry-prompt
+tokens. Codex retains full fetch authority — it can still run `git diff --cached -- <path>`
+itself if a matched change looks suspicious. See the "Skimmed paths" section below.
+
+### Skimmed paths (`reviewerAgent-ignore.md`)
+
+A per-repository `reviewerAgent-ignore.md` at the repo root can name paths whose content is
+auto-generated data (dataset rows, captured HTML, generated manifests) so the reviewer skims
+their diffs instead of judging individual records. The file is optional — a missing file is
+today's baseline, no exclusions.
+
+Format: free-form markdown with one or more fenced blocks tagged ```reviewer-ignore``` whose
+lines are glob patterns:
+
+    ```reviewer-ignore
+    data/**/*.jsonl
+    sources/*.txt
+    **/*.pdf
+    ```
+
+Supported globs: `*` (within one segment), `**` (zero-or-more full segments, only as
+leading/trailing/standalone form), `?`, `[abc]`/`[a-z]`, leading `/` for repo-root anchoring,
+`#` comments. Explicitly not supported (fail-closed): `!` negation, backslash escapes,
+embedded `**` like `**foo`, negated character classes.
+
+Two delivery channels:
+- **Channel A** — the file's full markdown (prose + fences) is appended to the per-commit
+  audit prompt in a labelled block, so the reviewer reads the operator's rationale
+  alongside the patterns. Backend-specific follow-up guidance is included: codex is told
+  to fetch on demand with `git diff --cached`; pi via its `git_read` tool; claude via the
+  inlined patch already in the message.
+- **Channel B** — on retries, codex drops matched paths from the delta candidate set so
+  their diff bytes do not reach the retry prompt (pi and claude are Channel A only in v1).
+
+Security rules the parser enforces:
+- The file is read from git objects (index or HEAD), never the working tree. An unstaged
+  or untracked working-tree copy has no effect.
+- Delayed application: when the ignore file itself is one of the paths being changed by
+  this commit, the audit uses the **HEAD** version (patterns and prose) — the staged
+  changes to the ignore file only take effect on the *next* commit. This guards against
+  a trojan commit that simultaneously loosens the ignore rules and hides malicious
+  changes under the newly-permitted paths.
+- Self-exemption: no pattern (not even `**`) can hide the root
+  `reviewerAgent-ignore.md`'s own diff from review.
+- Staged validation: parse errors in the staged version fail the commit closed, even
+  when the effective source is HEAD or absent — so an operator learns at commit time
+  that their new content is malformed, not on the next commit.
+- Fail-closed on parse error: any unsupported syntax blocks the commit BEFORE any
+  backend runs, with the pattern and line number surfaced in the operator-visible
+  reason.
+
 ### Verdict retention
 
 Both host packages keep two copies of commit-review results outside the reviewed repository: a

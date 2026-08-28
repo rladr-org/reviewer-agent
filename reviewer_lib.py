@@ -67,6 +67,7 @@ from reviewer_git import (  # noqa: F401
 )
 from reviewer_ignore import (  # noqa: F401
     IGNORE_FILE_NAME,
+    channel_a_block,
     parse_reviewer_ignore,
 )
 # `_MIGRATED_CONTROL_STEMS` is shared MUTABLE state, mutated via .add(); it must never
