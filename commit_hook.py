@@ -322,6 +322,7 @@ def main():
         proj=cwd, claude_session=claude_sid, reviewer_session=audit_sid, backend=backend,
         prompt=prompt, code=code, out=out, err=err, completed=completed, approved=approved,
         verdict_file=review_path if completed else None, change_block=change_block,
+        ignore_matcher=ignore_matcher,
     ) or {}
 
     # The capsule NAMES this file to the reviewer as its own prior findings, so writing an empty
@@ -369,7 +370,8 @@ def main():
     rl.log(
         "[commit] key={} cwd={} backend={} sid={} exit={} approved={} effort={} fixes={} "
         "dur_s={} t_first={} max_gap={} idle_retried={} tokens={} "
-        "staged_files={} staged_lines={} delta_diffs={} full_reads={} test_runs={} "
+        "staged_files={} staged_lines={} ignore_matched_files={} ignore_matched_lines={} "
+        "delta_diffs={} full_reads={} test_runs={} "
         "test_runs_failed={} exec_failed={} cmd={!r} "
         "verdict_tail={!r} stderr_tail={!r}{}".format(
             key, cwd, backend, sid, code, approved,
@@ -377,6 +379,7 @@ def main():
             audit.get("dur_s"), audit.get("t_first_event_s"), audit.get("max_gap_s"),
             audit.get("idle_retried"), audit.get("tokens_cumulative"),
             audit.get("staged_files"), audit.get("staged_lines"),
+            audit.get("ignore_matched_files"), audit.get("ignore_matched_lines"),
             audit.get("exec_delta_diffs"), audit.get("exec_full_reads"),
             audit.get("exec_test_runs"), audit.get("exec_test_runs_failed"),
             audit.get("exec_failed"), rl.short(command, 120),

@@ -508,7 +508,7 @@ def _session_brief(proj, reviewer_session, backend):
 
 def record_commit_attempt(proj, claude_session, reviewer_session, backend, prompt,
                           code, out, err, completed, approved, verdict_file,
-                          change_block=""):
+                          change_block="", ignore_matcher=None):
     """Append one record for this commit-review attempt and return it (None if it could not be
     built or written).
 
@@ -533,6 +533,10 @@ def record_commit_attempt(proj, claude_session, reviewer_session, backend, promp
         trace = parse_exec_trace(err)
         staged = rl.staged_blob_shas(proj)
         files, lines = staged_size(proj)
+        # Counters for reviewerAgent-ignore.md exclusions -- 0 when no ignore file or no
+        # staged path matches. Surfaced in the reviewer log line so an operator can see the
+        # exclusion mechanism working.
+        ignore_matched_files, ignore_matched_lines = rl.matched_counts(proj, ignore_matcher)
         invocation = rl.last_invocation() or {}
         # The codex streaming audit records per-turn usage on the invocation (there is no stdout
         # "tokens used" footer in --json mode). These are PER-TURN counts, kept alongside the
@@ -574,6 +578,8 @@ def record_commit_attempt(proj, claude_session, reviewer_session, backend, promp
             "staged": staged,
             "staged_files": files,
             "staged_lines": lines,
+            "ignore_matched_files": ignore_matched_files,
+            "ignore_matched_lines": ignore_matched_lines,
             "exec_trace": [e["cmd"] for e in trace],
             # Failures only. exec_trace already lists every command, so repeating the
             # successes here would just be a second copy of it; what is not recoverable

@@ -51,6 +51,38 @@ _CHANNEL_A_FOLLOWUP = {
 }
 
 
+def matched_counts(proj, matcher):
+    """Return (files, lines) for staged paths in `proj` that `matcher.matches`. `lines`
+    is the sum of added + deleted (from `git diff --cached --numstat`). Returns (0, 0)
+    for a None matcher or if git can't be reached. Binary files (numstat prints `-`)
+    contribute 1 file and 0 lines. Used by the audit record to surface how much of a
+    staged commit was excluded per reviewerAgent-ignore.md."""
+    if matcher is None:
+        return (0, 0)
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(proj), "diff", "--cached", "--numstat"],
+            capture_output=True, text=True,
+        )
+    except (OSError, FileNotFoundError):
+        return (0, 0)
+    if r.returncode != 0:
+        return (0, 0)
+    files = lines = 0
+    for row in r.stdout.splitlines():
+        parts = row.split("\t")
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if not matcher.matches(path):
+            continue
+        files += 1
+        for n in parts[:2]:
+            if n.isdigit():
+                lines += int(n)
+    return (files, lines)
+
+
 def channel_a_block(prose, backend="codex"):
     """Wrap the ignore file's markdown in a labelled block for appending to the per-commit
     audit prompt. Empty string when `prose` is empty (no effective ignore file), so callers
