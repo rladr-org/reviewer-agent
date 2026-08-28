@@ -65,6 +65,10 @@ from reviewer_git import (  # noqa: F401
     staged_patch,
     staged_patch_max,
 )
+from reviewer_ignore import (  # noqa: F401
+    IGNORE_FILE_NAME,
+    parse_reviewer_ignore,
+)
 # `_MIGRATED_CONTROL_STEMS` is shared MUTABLE state, mutated via .add(); it must never
 # be rebound (LIB_SPLIT_PLAN.md 5.6, pinned by tests/test_split_shared_state.py).
 from reviewer_state import (  # noqa: F401
