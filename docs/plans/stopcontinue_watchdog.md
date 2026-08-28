@@ -117,11 +117,15 @@ truth**, and watchdog crons are identified by a fixed marker string in their tic
 
 ### The tick prompt
 
-Fixed text carrying the `stopContinueWatchdog` marker, e.g.: *"stopContinueWatchdog tick — run
-`python3 <plugin>/stopcontinue_watchdog_toggle.py status`. If it prints INACTIVE, delete this
-watchdog cron (`CronDelete`) and stop. If ACTIVE: if you have unfinished work from before, resume
-it; otherwise reply briefly that you are done and stop."* Keeps each tick small, makes stale crons
-self-terminate, and leaves continue-vs-stop to the existing Stop hook.
+Per-project text carrying the `stopContinueWatchdog` marker, built by
+`watchdog_tick_prompt(proj)` in `reviewer_prompts.py`, e.g.: *"stopContinueWatchdog tick -- Read
+`<state_dir>/<proj>.stopcontinue_watchdog.active` and `<state_dir>/<proj>.stopcontinue.active`;
+if either is missing, CronDelete this cron and stop. Else: if you have unfinished work from
+before, resume it; otherwise reply `ok` and stop."* Keeps each tick small (the model reads two
+short flag files with the Read tool rather than shelling out to a status subprocess), makes
+stale crons self-terminate on either flag being cleared, and leaves continue-vs-stop to the
+existing Stop hook. See `docs/plans/watchdog_tick_visibility.md` for the visibility reduction
+that produced this shape.
 
 ## Files (minimal)
 

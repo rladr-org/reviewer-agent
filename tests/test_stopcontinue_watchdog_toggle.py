@@ -468,6 +468,9 @@ def test_arm_instruction_and_sessionstart_produce_identical_tick_prompts(tmp_pat
     p = run_session_start(proj, home)
     ctx = json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
 
+    # Resolve `expected_tick` under the SAME REVIEWER_HOME the two subprocesses saw, so the
+    # embedded flag-file paths match theirs.
+    monkeypatch.setenv("REVIEWER_HOME", home)
     expected_tick = rl.watchdog_tick_prompt(proj)
     assert expected_tick in toggle_out
     assert expected_tick in ctx

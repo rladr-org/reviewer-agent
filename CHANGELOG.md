@@ -99,3 +99,8 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
 - Unscoped legacy session files are retired rather than resumed. A thread whose originating
   repository cannot be established is not adopted; the next gated action briefs a fresh reviewer.
 - The retention cap applies to all history entries, verdicts and outcomes alike.
+- `stopContinueWatchdog` tick prompt is smaller and Read-based. The tick now names the two
+  per-project flag files by absolute path and directs the model to Read them, instead of
+  shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
+  two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
+  `docs/plans/watchdog_tick_visibility.md`.

@@ -50,6 +50,8 @@ from reviewer_state import (
     config_get,
     last_review_file,
     reviewer_backend,
+    stopcontinue_flag_file,
+    stopcontinue_watchdog_flag_file,
 )
 from reviewer_transcript import (
     _event_text,
@@ -230,21 +232,21 @@ The agent's proposed final message:
 # --------------------------------------------------------------------------
 WATCHDOG_MARKER = "stopContinueWatchdog"
 
-# ABSOLUTE path, resolved where this module actually lives, NOT `${CLAUDE_PLUGIN_ROOT}`: the tick
-# runs as an ordinary model Bash call, whose shell does not carry the hook/command env, so the
-# variable would expand to empty and the status check would fail open (INACTIVE -> self-delete).
-_WATCHDOG_TOGGLE_PATH = str(Path(__file__).resolve().parent / "stopcontinue_watchdog_toggle.py")
 
-WATCHDOG_TICK_PROMPT = (
-    "stopContinueWatchdog tick -- run "
-    '`python3 "{}" status`. '
-    "If it prints INACTIVE, delete THIS watchdog cron (CronDelete) and stop. If it prints "
-    "ACTIVE: if you have unfinished work from before, resume it; otherwise reply briefly "
-    "that you are done and stop.".format(_WATCHDOG_TOGGLE_PATH)
-)
+def watchdog_tick_prompt(proj):
+    """The tick prompt embedded in the CronCreate schedule for `proj`. Names the two flag
+    files by absolute path so the model checks them with Read, not by shelling into
+    stopcontinue_watchdog_toggle.py. See docs/plans/watchdog_tick_visibility.md."""
+    wd = str(stopcontinue_watchdog_flag_file(proj))
+    sc = str(stopcontinue_flag_file(proj))
+    return (
+        "stopContinueWatchdog tick -- Read {wd} and {sc}; if either is missing, "
+        "CronDelete this cron and stop. Else: if you have unfinished work from "
+        "before, resume it; otherwise reply `ok` and stop."
+    ).format(wd=wd, sc=sc)
 
 
-def watchdog_arm_instruction(interval):
+def watchdog_arm_instruction(proj, interval):
     """The instruction the model follows (in the `/stopContinueWatchdog on` turn and the
     SessionStart backstop) to reconcile the marker-tagged crons to exactly one at `*/N`."""
     cron = "*/{} * * * *".format(interval)
@@ -258,7 +260,7 @@ def watchdog_arm_instruction(interval):
         "prompt below>).\n"
         "Post-condition: exactly one marker-tagged cron at \"{cron}\". Tick prompt to use "
         "verbatim:\n{tick}"
-    ).format(marker=WATCHDOG_MARKER, cron=cron, tick=WATCHDOG_TICK_PROMPT)
+    ).format(marker=WATCHDOG_MARKER, cron=cron, tick=watchdog_tick_prompt(proj))
 
 
 WATCHDOG_CANCEL_INSTRUCTION = (

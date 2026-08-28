@@ -44,7 +44,7 @@ def _on(proj, interval):
         )
     rl.set_stopcontinue_watchdog_active(root, interval)
     print("stopContinueWatchdog: ON for {} (interval {} min).".format(root, interval))
-    print(rl.watchdog_arm_instruction(interval))
+    print(rl.watchdog_arm_instruction(root, interval))
     return 0
 
 

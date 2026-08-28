@@ -90,11 +90,12 @@ FACADE_NAMES = (
     "staged_blob_shas", "staged_change_block", "staged_files",
     "staged_patch", "staged_patch_max", "stop_block_output",
     "stopcontinue_effort", "stopcontinue_effort_config", "stopcontinue_flag_file",
-    "subprocess", "sweep_orphan_scratch_dirs", "tail",
-    "terminate_process_tree", "usage_limit_detail", "usage_limit_message",
-    "watchdog_arm_instruction", "watchdog_interval", "write_claude_session",
-    "write_operator_watermark", "write_pi_session", "write_pi_session_if_absent",
-    "write_session_id", "write_session_id_if_absent",
+    "stopcontinue_watchdog_flag_file", "subprocess", "sweep_orphan_scratch_dirs",
+    "tail", "terminate_process_tree", "usage_limit_detail",
+    "usage_limit_message", "watchdog_arm_instruction", "watchdog_interval",
+    "watchdog_tick_prompt", "write_claude_session", "write_operator_watermark",
+    "write_pi_session", "write_pi_session_if_absent", "write_session_id",
+    "write_session_id_if_absent",
 )
 
 
@@ -108,4 +109,4 @@ def test_the_facade_exports_every_name_its_callers_reach_for():
 def test_the_contract_list_is_not_silently_emptied():
     # A regeneration bug that produced a short or empty tuple would make the test above
     # vacuous while still passing. tests/test_facade_generator.py pins the generator itself.
-    assert len(FACADE_NAMES) >= 233
+    assert len(FACADE_NAMES) >= 235

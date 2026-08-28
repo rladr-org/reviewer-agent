@@ -62,7 +62,7 @@ def _watchdog_rearm_context(cwd):
     Independent of the main reviewer flag -- the watchdog is its own opt-in."""
     if not rl.is_stopcontinue_watchdog_effective(cwd):
         return None
-    return rl.watchdog_arm_instruction(rl.watchdog_interval(cwd))
+    return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd))
 
 
 def main():
