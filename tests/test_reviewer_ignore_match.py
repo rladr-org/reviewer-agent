@@ -178,6 +178,20 @@ def test_backslash_escape_rejected():
         IgnoreMatcher([(1, "path\\ with\\ spaces")])
 
 
+def test_negated_character_class_rejected():
+    """`[^a]` in a regex would match '/' and cross segment boundaries, silently mis-scoping
+    the pattern. Reject explicitly rather than passing through."""
+    with pytest.raises(PatternError):
+        IgnoreMatcher([(1, "x[^a]y")])
+
+
+def test_gitignore_style_negated_character_class_rejected():
+    """`[!a]` is gitignore's negation-in-class syntax. Regex would treat it as a literal
+    class matching '!', 'a' — surprising to gitignore users. Reject in v1."""
+    with pytest.raises(PatternError):
+        IgnoreMatcher([(1, "file[!abc].txt")])
+
+
 def test_pattern_error_carries_lineno_and_pattern():
     with pytest.raises(PatternError) as ei:
         IgnoreMatcher([(42, "!bad")])
