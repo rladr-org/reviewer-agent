@@ -179,7 +179,10 @@ def test_changed_files_are_marked_as_needing_rederivation(repo):
     _write(repo, "a.py", "x = 2\n")
     _stage(repo, "a.py")
     low = rl.staged_change_block(repo, "claude-1", SID).lower()
-    assert "stale" in low and "re-derive" in low
+    # "OUT OF DATE" is the anti-stuck-reviewer reframe of "STALE" (2026-08-28); either wording
+    # satisfies the assertion because both express "the earlier round's line numbers no longer
+    # bind." See docs/plans/reviewer_anti_stuck.md, measure 1.
+    assert ("stale" in low or "out of date" in low) and "re-derive" in low
 
 
 def test_findings_on_unchanged_files_are_kept_alive(repo):
@@ -357,8 +360,12 @@ def test_the_reviewer_is_told_to_diff_first_and_re_read_only_if_needed(repo):
     _write(repo, "a.py", "x = 2\n")
     _stage(repo, "a.py")
     low = rl.staged_change_block(repo, "claude-1", SID).lower()
-    assert "stale" in low                      # the old warning survives
-    assert "since your last audit" in low
+    # "OUT OF DATE" is the anti-stuck-reviewer reframe of "STALE" (2026-08-28); either satisfies
+    # the "warning survives" invariant. See docs/plans/reviewer_anti_stuck.md, measure 1.
+    assert "stale" in low or "out of date" in low     # the old warning survives
+    # "since your last audit" was reframed to "since the earlier audit round" as part of the
+    # same reframe (dropping the self-anchoring pronoun); either satisfies the invariant.
+    assert "since your last audit" in low or "since the earlier audit round" in low
     assert "git show :" in low                 # full re-read is still available as the fallback
 
 

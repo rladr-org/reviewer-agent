@@ -330,18 +330,22 @@ REVIEWER_STANDING_BRIEF = (
     "and the effect of the changes on other parts of the codebase, if this is germane.\n\n"
     "REPEAT ATTEMPTS. A commit you reject comes back once the agent has fixed it. When the "
     "request carries a block headed 'STAGED SET vs YOUR LAST AUDIT', that block lists what moved "
-    "since the version you already read, and you are CONTINUING that review rather than starting "
-    "a new one:\n"
+    "since the version already read in an earlier audit round, and you are CONTINUING that "
+    "review rather than starting a new one. Treat the earlier audit's concerns as CLAIMS TO "
+    "VERIFY against the current content, not as conclusions to defend -- the earlier round may "
+    "have been a different reviewer entirely (scheduled rotation), and even if it was you, the "
+    "staged content is what governs, not what was said before.\n"
     "  - CHANGED and ADDED paths: read this content now and derive your findings from it. Any "
-    "line numbers you cited earlier for these paths are STALE; cite only what you can see in the "
-    "current content.\n"
-    "  - UNCHANGED paths: byte-identical to what you already reviewed. Do NOT re-derive them. "
-    "Carry any findings you raised on them into the disposition step below, which may retire "
-    "one; if you raised none, do not invent any.\n"
-    "  - REMOVED paths: no longer staged. Drop any findings you raised on them.\n"
-    "Give every finding from your previous verdict an explicit DISPOSITION -- fixed, not fixed, "
-    "superseded, or WITHDRAWN -- so the agent can tell which of its changes landed. A finding you "
-    "silently omit reads as fixed.\n"
+    "line numbers cited in an earlier audit round for these paths are OUT OF DATE; cite only "
+    "what you can see in the current content.\n"
+    "  - UNCHANGED paths: byte-identical to what was already reviewed. Do NOT re-derive them. "
+    "Carry any concerns raised on them into the disposition step below, which may retire one; "
+    "if none were raised, do not invent any.\n"
+    "  - REMOVED paths: no longer staged. Drop any concerns raised on them.\n"
+    "For every concern raised in an earlier audit round, decide against the CURRENT inlined "
+    "content whether it still applies, then record an explicit DISPOSITION -- fixed, not fixed, "
+    "superseded, or WITHDRAWN -- so the agent can tell which of its changes landed. A concern "
+    "silently omitted reads as fixed.\n"
     "WITHDRAWN is for a finding you have established was itself incorrect, or one resting on a "
     "fact you have not established, which belongs in SUGGESTIONS instead. It is available on an "
     "UNCHANGED path too, and that is the case it exists for: a finding that was wrong cannot be "
@@ -1166,15 +1170,17 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
         no_fetch = "You do not need to fetch anything, and a" if not not_shown else "A"
         lines.append(
             "\nCHANGED/ADDED: this commit is a RE-ATTEMPT -- the agent changed these files "
-            "after your last audit, so your earlier findings and line numbers for them are "
-            "STALE.\n"
-            "  The exact diff since your last audit is BELOW{}, read from the index so unstaged "
-            "edits are excluded. Derive your findings from it, and re-derive every earlier "
-            "conclusion it touches. {}nswering from what "
-            "you remember of an earlier draft is how an already-fixed finding gets re-raised. "
-            "{} only if the diff does not settle it.\n"
-            "  Cite only line numbers you can see now; the hunk headers carry them.".format(
-                scope, no_fetch, _reread_clause(backend))
+            "after the earlier audit round, so any concerns and line numbers from that round "
+            "for these paths are OUT OF DATE and must not be reused.\n"
+            "  The exact diff since the earlier audit round is BELOW{}, read from the index so "
+            "unstaged edits are excluded. Treat the earlier round's concerns as CLAIMS TO "
+            "VERIFY against this diff, not as conclusions to defend. Derive your findings from "
+            "the current content, and re-derive every earlier conclusion it touches. "
+            "{}nswering from a remembered earlier draft is how an already-fixed finding gets "
+            "re-raised. {} only if the diff does not settle it.\n"
+            "  Cite only line numbers you can see in the current staged content -- the hunk "
+            "headers carry them for inlined paths, and any path you re-read gives you them "
+            "too.".format(scope, no_fetch, _reread_clause(backend))
         )
         for p in sorted(inlined):
             lines.append("\n----- delta: {} -----\n{}".format(p, inlined[p].rstrip("\n")))
@@ -1210,19 +1216,20 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
         run_these = "\n".join("      {}".format(deltas[p]) for p in sorted(deltas))
         lines.append(
             "\nCHANGED/ADDED: this commit is a RE-ATTEMPT -- the agent changed these files "
-            "after your last audit, so your earlier findings and line numbers for them are "
-            "STALE.\n"
-            "  BEFORE you form a judgement or restate any earlier finding, run:\n"
+            "after the earlier audit round, so any concerns and line numbers from that round "
+            "for these paths are OUT OF DATE and must not be reused.\n"
+            "  BEFORE you form a judgement or restate any earlier concern, run:\n"
             "{}\n"
-            "  That shows exactly what moved since your last audit, read from the index, so "
-            "unstaged edits are excluded. Derive your findings from it, and read the whole "
-            "staged file (`git show :<path>`) only if it does not settle them. Answering from "
-            "what you remember of the earlier draft is how an already-fixed finding gets "
-            "re-raised.\n"
+            "  That shows exactly what moved since the earlier audit round, read from the "
+            "index, so unstaged edits are excluded. Treat the earlier round's concerns as "
+            "CLAIMS TO VERIFY against the current staged content, not as conclusions to defend. "
+            "Derive your findings from that content, and read the whole staged file "
+            "(`git show :<path>`) only if it does not settle them. Answering from a remembered "
+            "earlier draft is how an already-fixed finding gets re-raised.\n"
             "  For any path above without a command, re-read its staged content first "
             "(`git show :<path>`) and re-derive from scratch.\n"
-            "  Cite only line numbers you can see now; the hunk headers carry them.".format(
-                run_these)
+            "  Cite only line numbers you can see in the current staged content; the hunk "
+            "headers carry them.".format(run_these)
         )
         if enabled and any(v == "too-large" for v in skipped.values()):
             lines.append(
@@ -1245,22 +1252,26 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
         # be the ONLY thing it was given.
         routes = [_reread_route(backend, p) for p in sorted(set(changed) | set(added))]
         if all(routes):
-            order = ("  BEFORE you form a judgement or restate any earlier finding, run:\n"
+            order = ("  BEFORE you form a judgement or restate any earlier concern, run:\n"
                      "{}\n"
-                     "  and re-derive from scratch.".format("\n".join("      " + r
-                                                                      for r in routes)))
+                     "  and re-derive from scratch. Treat the earlier round's concerns as "
+                     "CLAIMS TO VERIFY against the fetched content, not as conclusions to "
+                     "defend.".format("\n".join("      " + r for r in routes)))
         else:
-            order = ("  BEFORE you form a judgement or restate any earlier finding, re-read "
-                     + _reread_source(backend) + " and re-derive from scratch.")
+            order = ("  BEFORE you form a judgement or restate any earlier concern, re-read "
+                     + _reread_source(backend)
+                     + " and re-derive from scratch. Treat the earlier round's concerns as "
+                     "CLAIMS TO VERIFY against the current staged content, not as conclusions "
+                     "to defend.")
         lines.append(
             "\nCHANGED/ADDED: this commit is a RE-ATTEMPT -- the agent changed these files "
-            "after your last audit, so your earlier findings and line numbers for them are "
-            "STALE. No delta is shown for them, so what moved is not derivable from this "
-            "prompt.\n"
+            "after the earlier audit round, so any concerns and line numbers from that round "
+            "for these paths are OUT OF DATE and must not be reused. No delta is shown for "
+            "them, so what moved is not derivable from this prompt.\n"
             "{}"
-            " Answering from what you remember of the earlier "
-            "draft is how an already-fixed finding gets re-raised.\n"
-            "  Cite only line numbers you can see in it now.".format(order)
+            " Answering from a remembered earlier draft is how an already-fixed finding gets "
+            "re-raised.\n"
+            "  Cite only line numbers you can see in the current staged content.".format(order)
         )
     if unchanged:
         lines.append(
@@ -1438,18 +1449,18 @@ _CAPSULE_COMMIT_CHANGED = {
 
 
 _CAPSULE_COMMIT_REPEAT_TAIL = (
-    "     UNCHANGED -- byte-identical to what you already reviewed. Do not re-derive it. Carry "
-    "your findings on it into the disposition step below, which may retire one; if you raised "
-    "none, do not invent any. Re-open it only when a "
-    "change you just read plausibly affects it -- a signature, contract, shared constant, or data "
-    "shape it depends on. What is avoided is re-deriving settled content, never following a real "
-    "lead.\n"
-    "     REMOVED -- no longer staged. Drop the findings you raised on it.\n"
-    "   Then give EVERY finding from your previous verdict an explicit disposition: fixed, not "
-    "fixed, superseded, or WITHDRAWN -- you have established the finding was itself incorrect, "
-    "or it rests on a fact you have not established and belongs in SUGGESTIONS. This applies on "
-    "an UNCHANGED path too: a wrong finding cannot be cleared by editing correct code. A finding "
-    "you silently omit reads as fixed.\n"
+    "     UNCHANGED -- byte-identical to what an earlier audit round reviewed. Do not re-derive "
+    "it. Carry any concerns raised on it into the disposition step below, which may retire one; "
+    "if none were raised, do not invent any. Re-open it only when a change you just read "
+    "plausibly affects it -- a signature, contract, shared constant, or data shape it depends "
+    "on. What is avoided is re-deriving settled content, never following a real lead.\n"
+    "     REMOVED -- no longer staged. Drop any concerns raised on it.\n"
+    "   Then, for EVERY concern raised in an earlier audit round, decide against the current "
+    "inlined content whether it still applies and record a disposition: fixed, not fixed, "
+    "superseded, or WITHDRAWN. WITHDRAWN is for a concern established as itself incorrect, or "
+    "one resting on a fact you have not established and belonging in SUGGESTIONS. This applies "
+    "on an UNCHANGED path too. Treat prior concerns as CLAIMS TO VERIFY, not conclusions to "
+    "defend. A concern silently omitted reads as fixed.\n"
 )
 
 # There is deliberately no item 5. It read "A change in one file can invalidate a conclusion you
@@ -1503,8 +1514,8 @@ def reviewer_capsule(proj, commit_audit=False, claude_session_id=None):
     prior = last_review_file(proj, claude_session_id) if claude_session_id else None
     if prior is not None and prior.exists():
         repeat += (
-            "   The previous commit-review verdict for this repository is saved at {} -- read it if you need "
-            "its exact wording.\n".format(prior)
+            "   An earlier audit round's verdict is saved at {} -- read it for the exact prior "
+            "wording, but decide against the current inlined content.\n".format(prior)
         )
     return (
         text + "\n" + _CAPSULE_COMMIT_HEAD

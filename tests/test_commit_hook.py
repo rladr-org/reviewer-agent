@@ -323,7 +323,12 @@ def test_rejection_at_limit_rotates_and_keeps_findings_for_the_fresh_retry(
     capsule = rl.reviewer_capsule(
         repo, commit_audit=True, claude_session_id="claude-reject"
     )
-    assert "previous commit-review verdict" in capsule
+    # 2026-08-28 anti-stuck-reviewer reframe (measure 1 of docs/plans/reviewer_anti_stuck.md
+    # once it lands): the pointer wording changed from "previous commit-review verdict" to
+    # "earlier audit round's verdict" to drop the self-anchoring pronoun. The saved-verdict
+    # file path itself is still named -- that is the load-bearing invariant this test guards.
+    assert "earlier audit round's verdict" in capsule or "previous commit-review verdict" in capsule
+    assert str(saved) in capsule
 
 
 def test_rejected_findings_are_echoed_in_systemmessage(tmp_path, monkeypatch):

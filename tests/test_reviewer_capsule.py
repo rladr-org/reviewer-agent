@@ -397,7 +397,18 @@ def test_both_capsule_forms_stay_short(tmp_path, home, monkeypatch, backend):
     # between the two. MEASURED: claude 3,177 of 3,200, pi 3,263 of 3,300, codex 2,973 of 3,000.
     # Every guard keeps 20-40 characters of headroom, which is the point: none of the three has
     # room to drift into, and a wording change that needs more has to move a number deliberately.
-    COMMIT_CEILING = {"codex": 3000, "pi": 3300, "claude": 3200}
+    #
+    # RAISED AGAIN 2026-08-28 for the anti-stuck-reviewer reframe (measure 1 of
+    # docs/plans/reviewer_anti_stuck.md when that ships): +150 across all three backends, paid
+    # for by the 2026-08-28T10:38:11 deadlock rather than an estimate -- reviewer sid 01a04967
+    # produced `DISPOSITION: not fixed` on a substantially-changed doc for the second commit in
+    # a row, citing stale line numbers, because the capsule's REPEAT tail told it to disposition
+    # "your previous verdict" (self-anchoring pronoun). The tail now reframes prior findings as
+    # third-party CLAIMS TO VERIFY against the current inlined content, and the saved-verdict
+    # pointer sentence carries the same reframing. Both cost words. MEASURED after the change:
+    # codex 3,117 of 3,150, pi 3,407 of 3,450, claude 3,321 of 3,350 -- each backend keeps
+    # 29-43 characters of headroom, matching the original invariant.
+    COMMIT_CEILING = {"codex": 3150, "pi": 3450, "claude": 3350}
     universal = rl.reviewer_capsule(str(repo), claude_session_id=sid)
     commit = rl.reviewer_capsule(str(repo), commit_audit=True, claude_session_id=sid)
     assert len(universal) - len(brief) <= 900
