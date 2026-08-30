@@ -207,6 +207,116 @@ def test_streaming_audit_total_cap_timeout_is_never_retried(tmp_path, monkeypatc
     assert len(calls) == 1, "total-cap timeout must not retry (attempts=%d)" % len(calls)
 
 
+# --------------------------------------------------------------------------
+# Opaque --json failure recovery: codex 0.149.1 exits nonzero SILENTLY on a provider rejection
+# (bad model, refused effort, exhausted quota) under `--json` -- nothing on stdout OR stderr,
+# verified live. The human-readable error is emitted only in NON-json mode. So an opaque,
+# non-timeout failure is re-probed once without --json to recover the provider's own sentence,
+# which the model-rejection / usage-limit diagnostic downstream then matches.
+# --------------------------------------------------------------------------
+def test_streaming_audit_opaque_json_failure_reprobes_without_json(tmp_path, monkeypatch):
+    import reviewer_backends as rb
+
+    def opaque_json_failure(argv, timeout=None, on_cancel=None,
+                            first_output_timeout=None, idle_timeout=None, scratch_dir=None):
+        return 1, "", ""  # nonzero; nothing on either stream -- the --json silent failure
+
+    provider_error = (
+        "OpenAI Codex v0.149.1\nmodel: bad-model-xyz\n"
+        'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error",'
+        '"message":"The \'bad-model-xyz\' model is not supported when using Codex with a '
+        'ChatGPT account."}}'
+    )
+    probe_argvs = []
+
+    def non_json_probe(argv, input_bytes=None, timeout=None, cwd=None, on_cancel=None,
+                       scratch_dir=None):
+        probe_argvs.append(argv)
+        return 1, "", provider_error
+
+    monkeypatch.setattr(rb, "_run_streaming", opaque_json_failure)
+    monkeypatch.setattr(rb, "_run", non_json_probe)
+
+    code, verdict, err = _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=10)
+
+    assert code == 1 and verdict == ""
+    assert probe_argvs, "an opaque --json failure must trigger a non-json diagnostic probe"
+    assert "--json" not in probe_argvs[-1], "the diagnostic probe must run WITHOUT --json"
+    assert rl.model_rejection_detail("codex", err), "the recovered stderr must be diagnosable"
+    assert "is not supported" in err
+
+
+def test_streaming_audit_timeout_is_not_reprobed(tmp_path, monkeypatch):
+    """A TIMEOUT_EXIT kill (idle/total) is NOT re-probed: its remedy is a bigger budget, and a
+    second run would only waste more of it."""
+    import reviewer_backends as rb
+
+    def timed_out(argv, timeout=None, on_cancel=None,
+                  first_output_timeout=None, idle_timeout=None, scratch_dir=None):
+        return rl.TIMEOUT_EXIT, "", "review timed out after 1.0s"
+
+    probe_calls = []
+
+    def probe(argv, input_bytes=None, timeout=None, cwd=None, on_cancel=None, scratch_dir=None):
+        probe_calls.append(argv)
+        return 1, "", "should not be called"
+
+    monkeypatch.setattr(rb, "_run_streaming", timed_out)
+    monkeypatch.setattr(rb, "_run", probe)
+    code, _v, err = _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=10)
+    assert code == rl.TIMEOUT_EXIT
+    assert not probe_calls, "a timeout must not be re-probed"
+    assert "timed out" in err
+
+
+def test_streaming_audit_diagnosable_stderr_is_not_reprobed(tmp_path, monkeypatch):
+    """If the streaming failure already carries a diagnosable provider sentence, don't waste a
+    second codex call re-probing for what is already in hand."""
+    import reviewer_backends as rb
+
+    def has_error(argv, timeout=None, on_cancel=None,
+                  first_output_timeout=None, idle_timeout=None, scratch_dir=None):
+        return 1, "", "ERROR: model_not_found: no such model 'x'"
+
+    probe_calls = []
+
+    def probe(argv, input_bytes=None, timeout=None, cwd=None, on_cancel=None, scratch_dir=None):
+        probe_calls.append(argv)
+        return 1, "", "unused"
+
+    monkeypatch.setattr(rb, "_run_streaming", has_error)
+    monkeypatch.setattr(rb, "_run", probe)
+    code, _v, err = _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=10)
+    assert code == 1
+    assert not probe_calls, "an already-diagnosable failure must not be re-probed"
+    assert "model_not_found" in err
+
+
+def test_streaming_audit_reprobe_preserves_audit_invocation(tmp_path, monkeypatch):
+    """The diagnostic re-probe runs through `_run`, which rebinds `_LAST_INVOCATION` to the
+    probe's own argv and duration. The audit record must still describe the FAILED AUDIT, so
+    the audit saves and restores the invocation around the probe."""
+    import reviewer_backends as rb
+
+    def opaque_audit(argv, timeout=None, on_cancel=None,
+                     first_output_timeout=None, idle_timeout=None, scratch_dir=None):
+        rb._record_invocation(["codex", "AUDIT", "--json"], 0.0)
+        return 1, "", ""  # opaque --json failure -> triggers the probe
+
+    def probe(argv, input_bytes=None, timeout=None, cwd=None, on_cancel=None, scratch_dir=None):
+        rb._record_invocation(["codex", "PROBE"], 0.0)
+        return 1, "", "ERROR: the 'x' model is not supported"
+
+    monkeypatch.setattr(rb, "_run_streaming", opaque_audit)
+    monkeypatch.setattr(rb, "_run", probe)
+    _audit(tmp_path, timeout=30, first_output_timeout=5, idle_timeout=10)
+
+    inv = rb.last_invocation()
+    assert inv is not None and "AUDIT" in inv["argv"], (
+        "the re-probe overwrote the audit's invocation record: %r" % inv)
+    assert "PROBE" not in inv["argv"], "probe argv leaked into the audit record"
+
+
 @pytest.mark.skipif(os.name != "posix", reason="select()-based idle detection is POSIX-only")
 def test_streaming_audit_uses_a_fresh_o_file_per_attempt(tmp_path, monkeypatch):
     # finding 6: a retry must NEVER read the previous attempt's -o file. Prove the two attempts

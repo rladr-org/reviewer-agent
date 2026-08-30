@@ -51,6 +51,24 @@ python3 tools/release_versions.py         # every declared version agrees
 python3 tools/scan_release.py             # nothing private is about to be published
 ```
 
+The **live host×backend matrix** drives every listed combination against real hosts and real
+backends in throwaway state (it installs, uninstalls and reconfigures nothing):
+
+```bash
+python3 tools/release_matrix.py --list                          # scenarios + the human-only ones
+python3 tools/release_matrix.py --all --stub                    # fast, no model calls
+python3 tools/release_matrix.py --all --report /tmp/matrix.md   # real reviewer calls (spends quota)
+python3 tools/release_matrix.py --scenario claude-pi --scenario claude-claude   # a subset
+```
+
+The five scenarios are `claude-codex`, `claude-pi`, `claude-claude`, `codex-native` and
+`distribution` (the last builds the public export and runs both suites from it). Three —
+`claude-pi`, `claude-claude`, `codex-native` — cannot be stubbed, and `claude-claude` spends the
+operator's own Claude subscription quota; prefer `--stub` for a smoke check and reserve `--all`
+(real) for validating a release. The runner also prints six scenarios that require a person in a
+real host (Escape mid-review, restart-persistence, clean-profile install, native-Codex shell-commit
+redirection, a real timed-out `AskUserQuestion`, uninstall-survival) — report those by hand.
+
 ## How changes are expected to arrive
 
 - **A test first.** Every behavioural change lands with the smallest regression test that fails
@@ -94,3 +112,26 @@ the Codex plugin needs the local marketplace name, which `python3 tools/read_mar
 prints. Both wrappers prefer the plugin-creator tooling when it is installed and otherwise
 perform the same documented transform, so the procedure works in CI and on a contributor's
 machine.
+
+To cut a new version:
+
+1. Edit `RELEASE` and `PEP440_RELEASE` in `tools/release_versions.py` (`TAG` derives from
+   `RELEASE`). This is the single source of truth; the matrix runner reads `RELEASE` directly, so
+   there is no separate version literal to bump there.
+2. Update every declared version to match — the checker enumerates all seven:
+   `.claude-plugin/plugin.json`, both `.claude-plugin/marketplace.json` entries
+   (`metadata.version` **and** the plugin entry), and in `plugins/reviewer-agent-codex/`:
+   `.codex-plugin/plugin.json` (base only), `pyproject.toml` and `reviewer_codex/__init__.py`
+   (PEP 440 form), and `reviewer_codex/mcp_server.py` (SemVer).
+3. `python3 tools/release_cachebuster.py` to refresh the Codex `+codex.<timestamp>`.
+4. `python3 tools/release_versions.py` must print `PASS`, and
+   `python3 -m pytest tests/test_release_metadata.py -q` must be green.
+5. Add a `## [<version>] — unreleased` section to `CHANGELOG.md`.
+6. Commit before publishing, so a directory-source install's recorded `gitCommitSha` matches the
+   files it copies.
+
+Bumping the version is also what lets an **installed** copy pick the change up: a local
+directory-source plugin (Claude Code) and the Codex host both resolve an installed local plugin by
+version string, so `claude plugin update` / a Codex reinstall does nothing until the version
+changes. See [`AGENT_UPDATE.md`](AGENT_UPDATE.md) for updating an existing installation, and
+[*Running the suites*](#running-the-suites) for the live backend matrix that validates a release.

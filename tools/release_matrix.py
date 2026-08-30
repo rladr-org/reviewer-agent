@@ -42,6 +42,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+import release_versions  # noqa: E402  (single source of truth for the release identity)
+
 CODEX_PLUGIN = ROOT / "plugins" / "reviewer-agent-codex"
 STUB = ROOT / "tests" / "fake_codex.py"
 
@@ -245,11 +248,14 @@ def claude_scenario(workspace, backend, stub):
             extra["REVIEWER_PI_BIN"] = str(recorder)
     env = hook_env(state, extra, stub=stub, codex_recorder=recorder)
 
-    # enable BOTH repositories, exactly as `/reviewerAgent on` does. Both, because the
-    # cross-repository check below is meaningless if the second one is never gated.
+    # enable BOTH repositories, exactly as `/reviewerAgent on acceptRisk` does -- the plain `on`
+    # refuses without a receipt, so the accept token is required to actually gate the repo (the
+    # receipt it records is per-repository root and is shared with stopContinue below). Both
+    # repositories, because the cross-repository check below is meaningless if the second one is
+    # never gated.
     for repo in (repo_a, repo_b):
         toggle = subprocess.run(
-            [sys.executable, str(ROOT / "toggle.py"), "on"],
+            [sys.executable, str(ROOT / "toggle.py"), "on", "acceptRisk"],
             capture_output=True, text=True, cwd=str(repo),
             env=dict(env, CLAUDE_PROJECT_DIR=str(repo)),
         )
@@ -263,6 +269,15 @@ def claude_scenario(workspace, backend, stub):
         call_env = dict(env, **overrides)
         if stub:
             call_env["FAKE_CODEX_STDOUT"] = stub_output or ""
+            # The streaming codex commit audit reads its verdict from FAKE_CODEX_VERDICT (written
+            # to the -o schema file), not from stdout, so the stub must be told which verdict to
+            # give. Derive it from the same string the caller already passes: anything that begins
+            # "REJECTED" is a rejection, everything else (including "APPROVED") an approval.
+            # FAKE_CODEX_FINDINGS is left to the fixture's default (one item when REJECTED).
+            call_env["FAKE_CODEX_VERDICT"] = (
+                "REJECTED" if (stub_output or "").strip().upper().startswith("REJECTED")
+                else "APPROVED"
+            )
             if stub_exit is not None:
                 call_env["FAKE_CODEX_EXIT"] = str(stub_exit)
             if stub_stderr is not None:
@@ -549,7 +564,7 @@ def _codex_scenario_body(result, repo, workspace, state, env, codex_state):
         initialized = client.call("initialize", {"protocolVersion": "2024-11-05"}, timeout=60)
         version = ((initialized.get("result") or {}).get("serverInfo") or {}).get("version")
         result.check("the MCP server advertises the release version",
-                     version == "1.2.0-beta.1", str(version))
+                     version == release_versions.RELEASE, str(version))
 
         listed = client.call("tools/list", {}, timeout=60)
         names = {tool["name"] for tool in (listed.get("result") or {}).get("tools", [])}

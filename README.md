@@ -38,6 +38,47 @@ Various methods have been used to prevent this, including Ralph Loops and Claude
 So one separately controllable feature of this package is stop-continue which does exactly that, using the same model 
 as reviewer-agent but a separate session. 
 
+# Features
+
+Everything below is optional, enabled **per repository** and **per feature**; nothing acts until you turn it on, and it is easy to remove.
+
+**Two gates you control independently**
+
+- **Commit review** — every `git commit` is held while a *separate* reviewer agent audits the staged diff. If it finds problems, the commit is blocked with a numbered fix list the coding agent must resolve, and it re-reviews on each retry until the diff passes. Fail-closed: a reviewer error, timeout, unparseable verdict, or empty response also blocks the commit. Turn on with `/reviewer-agent:reviewerAgent on acceptRisk`. → [What the reviewer actually does](#what-the-reviewer-actually-does)
+- **Stop-continue supervision** — when the coding agent tries to stop, pauses on an already-decided question, or asks permission you already granted, a separate supervisor weighs the plan, the task list, and what you said this session, then either allows the stop or tells the agent what to do next (it can answer a question or grant permission on your behalf). Turn on with `/reviewer-agent:stopContinue on acceptRisk`. → [Background work and stop supervision](#background-work-and-stop-supervision)
+- **Stop-continue watchdog** — Claude Code can hit an API failure that makes the agent stop dead and stay stopped until it receives another prompt. The watchdog notices a stalled/idle session and re-prompts it automatically, so stop-supervision — and the run — recovers on its own instead of waiting for you to nudge it. `/reviewer-agent:stopContinueWatchdog on`. → [Commands](#claude-code-commands)
+
+**Pick any model as the reviewer**
+
+- Host on **Claude Code** or **Codex**. On the Claude Code host, back the reviewer with **Codex**, **Pi** (any model), or the **Claude Code** CLI itself; the Codex host reviews with its own Codex child. Either way the reviewer is a session separate from the coding agent, so a second perspective catches what the author missed. → [Selecting and verifying a backend](#selecting-and-verifying-a-backend)
+- A small, cheap reviewer (e.g. `gpt-5.6-luna` at xhigh) routinely flags real bugs even against frontier coding agents. Set model, reasoning effort, and timeouts per backend with `/reviewer-agent:reviewerModel …`. → [Commands](#claude-code-commands)
+
+**Smarter reviews**
+
+- **Agentic Codex review** — reads the staged patch, opens the files it touches and their dependencies, reads tests, and, when relevant, can run your tests in a `workspace-write` sandbox with `.git` read-only. (Pi and Claude backends do a read-only static review with no shell.)
+- **Delta re-review on retries** — after a rejection, the next audit is told exactly which staged paths changed since the last review, with diffs inlined from the index so unstaged edits can't be passed off as reviewed. → [Re-attempted commits](#re-attempted-commits)
+- **Skimmed paths (`reviewerAgent-ignore.md`)** — mark auto-generated data (dataset rows, captured HTML, generated manifests) so the reviewer skims those diffs instead of judging individual records; anti-trojan delayed application, self-exemption, and fail-closed parsing keep it from being abused. → [Skimmed paths](#skimmed-paths-revieweragent-ignoremd)
+- **Per-project reviewer brief** — tailor what the reviewer enforces in each repo: copy `reviewerAgent.md.template` to `reviewerAgent.md` at the root and edit it; it becomes the reviewer's standing instructions (`/reviewer-agent:reviewerAgent on` requires it). → [Project brief and capsule](#project-brief-and-capsule)
+- **Persistent directives** — add a standing fact or authorization to every reviewer prompt: `/reviewer-agent:reviewerDirective <text>`.
+
+**Fits your workflow**
+
+- **Timed-out question answering** — an `AskUserQuestion` you leave unanswered (and the host auto-closes) can be answered by the reviewer on your behalf, so an idle prompt doesn't stall a run.
+- **Verdict history** — approvals, rejections, and no-verdict outcomes (timeouts, cancellations) are recorded per project, outside the repo, so you can see what happened: `/reviewer-agent:reviewerHistory`. → [Verdict retention](#verdict-retention)
+- Settings persist across restarts and apply to linked worktrees.
+
+# Documentation
+
+Everything you might need, in one place:
+
+- **Install** — [Claude Code](#claude-code-installation) · [Codex](#codex-installation) · hands-off/agent-driven: [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md) → [`AGENT_INSTALL.md`](AGENT_INSTALL.md)
+- **Update / uninstall** — [README section](#update-disable-and-uninstall-claude-code) · unattended: [`AGENT_UPDATE.md`](AGENT_UPDATE.md), [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md)
+- **Choose & verify a reviewer** — [Backends](#selecting-and-verifying-a-backend) · [Commands](#claude-code-commands)
+- **Tune the reviewer** — [Per-project brief](#project-brief-and-capsule) · [Skimmed paths (`reviewerAgent-ignore.md`)](#skimmed-paths-revieweragent-ignoremd) · [Persistent directives](#claude-code-commands)
+- **Codex-native package** — [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md)
+- **Risk & data handling** — [`DISCLAIMER.md`](DISCLAIMER.md) · [`SECURITY.md`](SECURITY.md) · [`PRIVACY.md`](PRIVACY.md) · [`LICENSE`](LICENSE)
+- **Project** — [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`BACKLOG.md`](BACKLOG.md)
+
 # Project state
 
 These are tools I have been using, debugging, and improving for a couple of months, and they generally work well for me.
@@ -284,24 +325,6 @@ Install from the marketplace:
 Restart Claude Code after installation. Claude Code snapshots hooks when a session starts; an
 existing session may otherwise keep the previous hook set.
 
-### Upgrading from the standalone Claude Code install
-
-Do not keep legacy standalone hooks and plugin hooks enabled together. Claude Code runs additive
-hook registrations, so both copies will handle every matching event.
-In particular, older standalone `SessionStart` hooks always launch Codex and therefore defeat a Pi-only configuration.
-
-Before enabling the plugin, inspect `~/.claude/settings.json` for commands pointing to
-`~/.claude/reviewerAgent/` or `~/.claude/hooks/bash_gate.py`:
-
-```bash
-rg 'reviewerAgent|bash_gate\.py' ~/.claude/settings.json
-```
-
-Remove the standalone reviewer entries before restarting Claude Code. Inspect `bash_gate.py`
-before replacing it: older installations may chain a separate preflight hook through that wrapper,
-which should be preserved as its own hook if it is still wanted. Keep a settings-file backup and
-verify `/hooks` after the restart.
-
 In each repository to protect:
 
 1. Copy `reviewerAgent.md.template` to `reviewerAgent.md` at the repository root and edit it for
@@ -393,8 +416,7 @@ For the minimal-human delegated route, use
 ## Update, disable and uninstall (Claude Code)
 
 *Agents performing an unattended uninstall should follow
-[`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md), which has per-step checks and the fail-closed
-`bash_gate.py` caution below.*
+[`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md), which has per-step checks.*
 
 **Update**:
 
@@ -456,17 +478,6 @@ Then, optionally and in your own time:
   `AskUserQuestion` when that key is present. Uninstalling does not remove it: it is a host
   setting you may now want for other reasons. Delete the key by hand to restore the previous
   behaviour.
-- **Legacy standalone hooks.** If you ever ran the pre-plugin install, its hook entries are
-  still in `~/.claude/settings.json` and will keep firing after the plugin is gone. Remove the
-  `SessionStart`, `Stop` and `PostToolUse` entries that point under `~/.claude/reviewerAgent/`, then
-  delete `~/.claude/reviewerAgent/`. **One caution:** the standalone often registers a single
-  `PreToolUse` (Bash) wrapper `~/.claude/hooks/bash_gate.py` that chains a general preflight hook —
-  frequently your **own** bash-approval hook — and then the fail-closed reviewer `commit_hook.py`. Do
-  not delete the directory while that wrapper still references `commit_hook.py`: it would then exec a
-  missing script (fail-closed) on every Bash command and can block all of them. First edit
-  `bash_gate.py` to drop the `commit_hook.py` link while keeping your preflight (or repoint the hook
-  directly at your preflight script), then restart Claude Code and check `/hooks`. For an
-  agent-driven teardown of any of this, see [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md).
 
 ## Claude Code backends
 
@@ -623,7 +634,7 @@ convention for namespaced commands).
 |---|---|
 | `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
 | `/reviewer-agent:stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
-| `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-invokes an idle session so the Stop hook can recover an unsupervised fail-open strand. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. |
+| `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. |
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
 | `/reviewer-agent:reviewerModel <model>` | Set the model for the selected backend. |

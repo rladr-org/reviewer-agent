@@ -3,9 +3,71 @@
 All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the Python package inside the Codex
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
-(`1.2.0-beta.1` and `1.2.0b1` are the same release).
+(`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
-## [1.2.0-beta.1] — unreleased
+## [1.2.1-beta.1] — unreleased
+
+Opens the `1.2.1` pre-release line. Every declared version across both packages moves to
+`1.2.1-beta.1` in lockstep (checked by `tools/release_versions.py`); the Codex plugin's
+`+codex.<timestamp>` build metadata is refreshed so the Codex host notices the reinstall. The
+version bump is what lets an installed copy pick the changes up: a local (directory-source) plugin
+is compared by version *string*, so `claude plugin update` is a no-op until the version changes.
+
+### Changed
+
+- `stopContinueWatchdog` tick prompt is smaller and Read-based. The tick now names the two
+  per-project flag files by absolute path and directs the model to Read them, instead of
+  shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
+  two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
+  `docs/plans/watchdog_tick_visibility.md`.
+- `stopContinueWatchdog` now auto-shuts-off on idle and auto-rearms on the next prompt (Claude
+  Code), so an idle session goes quiet instead of ticking every N minutes indefinitely. When a
+  session genuinely stops (a STOP_OK verdict), the Stop hook records a session-scoped disarm
+  timestamp; after a full interval of idle ticks it writes a `teardown_ready` marker and the tick
+  — now a pure, fail-safe presence check that never does clock arithmetic — deletes its own cron.
+  The next operator prompt re-arms via a new `UserPromptSubmit` hook. All timing is decided in
+  Python (never by the tick model); disarm is written only on a genuine completion, so an
+  incomplete or background-parked strand keeps the watchdog armed to recover it. The arm/reconcile
+  is prompt-aware so a changed tick replaces a stale cron. See
+  `docs/plans/watchdog_auto_shutoff.md`.
+- Re-review prompts reframe the prior verdict's language across every re-review branch, so a
+  reviewer that already ruled is less likely to anchor on its own previous wording on the next
+  pass (measure 1 of the anti-stuck reviewer work).
+
+### Added — reviewer skim mechanism
+
+- `reviewerAgent-ignore.md` at a repository's root now names paths whose content is
+  auto-generated data (dataset rows, generated manifests, captured HTML) so the reviewer
+  skims their diffs rather than judging individual records. Optional — no file means today's
+  baseline. Fenced blocks tagged ```reviewer-ignore``` carry the glob patterns; free-form
+  prose around them explains the rationale to the reviewer. Two delivery channels: prompt
+  guidance for all backends, and (codex only in v1) byte-level exclusion from the retry
+  inline set. Loaded from git objects, never the working tree; delayed application means
+  new ignore rules take effect on the next commit, not the one that introduces them; the
+  root ignore file is always self-exempted from its own patterns; parse errors block the
+  commit fail-closed. See `docs/plans/reviewer_ignore_guidance.md` and the "Skimmed paths"
+  section of README.md.
+
+### Fixed
+
+- Actionable model-rejection and usage-limit diagnostics now fire for the streaming `codex` commit
+  audit, not only the brief. codex (0.149.x) exits nonzero **silently** under `--json` when the
+  provider refuses the configured model or reasoning effort, or the account is out of quota —
+  nothing on stdout or stderr — so the audit saw an empty error and reported a bare "review failed
+  (exit N)" for the one case the diagnostic exists to name. On an opaque, non-timeout audit failure
+  carrying no diagnosable stderr, the audit now re-probes the same turn **once without `--json`**
+  (read-only, trivial prompt, short timeout) to recover the provider's own sentence, which the
+  `/reviewerModel` rejection/usage-limit diagnostics then surface. Best-effort: the commit is
+  already blocked fail-closed, and a probe that yields nothing leaves the previous generic message.
+  Surfaced and verified by the live release matrix (`claude-codex`).
+- The live release matrix (`tools/release_matrix.py`) exercises the Claude Code scenarios again.
+  They enabled the reviewer with `toggle.py on` (which the acceptance gate refuses without a
+  receipt) and drove the stubbed codex verdict through the pre-streaming `FAKE_CODEX_STDOUT`
+  instead of `FAKE_CODEX_VERDICT`, so every Claude scenario failed at setup; the runner now enables
+  with `acceptRisk`, derives the stub verdict knob, and reads the release identity from
+  `release_versions.RELEASE` instead of a hard-coded literal.
+
+## [1.2.0-beta.1]
 
 **First public release.** Earlier versions were developed privately, so this tag points at a
 repository with no public ancestry: there are no `1.0.x` or `1.1.x` tags to compare against, and
@@ -99,32 +161,3 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
 - Unscoped legacy session files are retired rather than resumed. A thread whose originating
   repository cannot be established is not adopted; the next gated action briefs a fresh reviewer.
 - The retention cap applies to all history entries, verdicts and outcomes alike.
-- `stopContinueWatchdog` tick prompt is smaller and Read-based. The tick now names the two
-  per-project flag files by absolute path and directs the model to Read them, instead of
-  shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
-  two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
-  `docs/plans/watchdog_tick_visibility.md`.
-- `stopContinueWatchdog` now auto-shuts-off on idle and auto-rearms on the next prompt (Claude
-  Code), so an idle session goes quiet instead of ticking every N minutes indefinitely. When a
-  session genuinely stops (a STOP_OK verdict), the Stop hook records a session-scoped disarm
-  timestamp; after a full interval of idle ticks it writes a `teardown_ready` marker and the tick
-  — now a pure, fail-safe presence check that never does clock arithmetic — deletes its own cron.
-  The next operator prompt re-arms via a new `UserPromptSubmit` hook. All timing is decided in
-  Python (never by the tick model); disarm is written only on a genuine completion, so an
-  incomplete or background-parked strand keeps the watchdog armed to recover it. The arm/reconcile
-  is prompt-aware so a changed tick replaces a stale cron. See
-  `docs/plans/watchdog_auto_shutoff.md`.
-
-### Added — reviewer skim mechanism
-
-- `reviewerAgent-ignore.md` at a repository's root now names paths whose content is
-  auto-generated data (dataset rows, generated manifests, captured HTML) so the reviewer
-  skims their diffs rather than judging individual records. Optional — no file means today's
-  baseline. Fenced blocks tagged ```reviewer-ignore``` carry the glob patterns; free-form
-  prose around them explains the rationale to the reviewer. Two delivery channels: prompt
-  guidance for all backends, and (codex only in v1) byte-level exclusion from the retry
-  inline set. Loaded from git objects, never the working tree; delayed application means
-  new ignore rules take effect on the next commit, not the one that introduces them; the
-  root ignore file is always self-exempted from its own patterns; parse errors block the
-  commit fail-closed. See `docs/plans/reviewer_ignore_guidance.md` and the "Skimmed paths"
-  section of README.md.

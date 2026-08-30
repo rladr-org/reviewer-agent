@@ -58,12 +58,14 @@ from reviewer_state import (
     codex_model_config,
     config_get,
     legacy_session_files,
+    model_rejection_detail,
     read_claude_session,
     read_pi_session,
     read_session_id,
     record_session_brief,
     reviewer_model,
     reviewer_effort,
+    usage_limit_detail,
     write_claude_session_if_absent,
     write_pi_session_if_absent,
     write_session_id_if_absent,
@@ -110,6 +112,16 @@ SCHEMA_VERDICT_MISSING = 65
 # tight custom `idle_timeout` would otherwise let many retries flap inside a large budget. A cap
 # of 8 leaves ample room to recover a genuinely transient hang while preventing unbounded loops.
 MAX_IDLE_RETRIES = 8
+
+
+# When the streaming `--json` commit audit fails opaquely, a single NON-json probe re-runs the
+# same turn to recover codex's human-readable error. codex 0.149.1 exits nonzero writing NOTHING
+# to stdout or stderr on a provider rejection under `--json` (a refused model or effort, an
+# exhausted quota, an auth failure), but prints the provider's own sentence in non-json mode
+# (both verified live). The probe is read-only with a trivial prompt: it only needs codex to
+# attempt the turn and reject it, never to produce a verdict.
+DIAGNOSTIC_PROBE_PROMPT = "Configuration check: reply with the single word OK."
+DIAGNOSTIC_PROBE_TIMEOUT = 120
 
 
 # What the most recent `_run` actually executed. Recorded HERE because `_run` is the single
@@ -790,6 +802,38 @@ def run_codex_resume_by_id(
     )
 
 
+def _reprobe_opaque_codex_failure(session_id, proj, extra_config, timeout, on_cancel=None):
+    """Recover the human-readable error a `--json` codex audit suppressed.
+
+    codex 0.149.1 exits nonzero SILENTLY under `--json` when the provider rejects the turn -- a
+    refused model or effort, an exhausted quota, an auth failure -- writing nothing to stdout OR
+    stderr (verified live). The SAME turn run WITHOUT `--json` prints the provider's sentence to
+    stderr, which `model_rejection_detail`/`usage_limit_detail` already parse. So on an opaque
+    failure the audit re-runs the resume ONCE without `--json`, read-only and with a trivial prompt,
+    purely to elicit that sentence. Best-effort: any exception or empty result returns "" and the
+    caller keeps its original (generic) message. Uses the same model/effort as the audit, since
+    `resume_by_id_argv` injects them, so it reproduces the same rejection.
+
+    `timeout` bounds the probe by the audit's REMAINING budget, so a diagnostic recovery can never
+    push total wall time past the configured commit-review timeout (the caller skips the probe
+    entirely when no budget remains). `on_cancel` is forwarded so a cancellation DURING the probe
+    still records the outcome, exactly as it would during the audit. The probe runs through `_run`,
+    which rebinds `_LAST_INVOCATION` to its own argv and duration; this saves and restores it so
+    `reviewer_audit` still attributes the record to the FAILED AUDIT, not the probe."""
+    global _LAST_INVOCATION
+    saved_invocation = _LAST_INVOCATION
+    try:
+        _code, _out, err = run_codex_resume_by_id(
+            session_id, proj, "read-only", DIAGNOSTIC_PROBE_PROMPT,
+            timeout=timeout, extra_config=extra_config, on_cancel=on_cancel,
+        )
+        return err or ""
+    except Exception:
+        return ""
+    finally:
+        _LAST_INVOCATION = saved_invocation
+
+
 def run_codex_streaming_audit(
     session_id, proj, sandbox, prompt, timeout=DEFAULT_TIMEOUT,
     first_output_timeout=None, idle_timeout=None, extra_config=None, on_cancel=None,
@@ -874,6 +918,27 @@ def run_codex_streaming_audit(
             # previously saved verdict is preserved.
             return (SCHEMA_VERDICT_MISSING, "",
                     "codex --json produced no schema-conforming verdict")
+
+        # codex --json exits nonzero SILENTLY on a provider rejection, so `err` is empty and the
+        # operator would see a bare "review failed (exit N)" for the very case the model-rejection
+        # /usage-limit diagnostic exists to name. On an opaque, non-timeout failure carrying no
+        # diagnosable stderr, re-probe ONCE without --json to recover the provider's own sentence;
+        # commit_hook then turns it into the actionable diagnostic. The commit is already blocked,
+        # so this only affects the MESSAGE and degrades to the generic text if the probe is empty.
+        # TIMEOUT_EXIT is excluded (its remedy is a bigger budget, not a re-run) as is 127 (the
+        # binary is missing -- a second launch would fail identically).
+        if (code not in (0, TIMEOUT_EXIT, 127)
+                and not model_rejection_detail("codex", err)
+                and not usage_limit_detail(err)):
+            # Bound the diagnostic probe by the audit's REMAINING budget so a recovery attempt can
+            # never push total wall time past `timeout`, and skip it outright once the budget is
+            # spent. on_cancel is forwarded so a cancellation during the probe records its outcome.
+            probe_budget = min(DIAGNOSTIC_PROBE_TIMEOUT, deadline - time.monotonic())
+            if probe_budget > 0:
+                recovered = _reprobe_opaque_codex_failure(
+                    session_id, proj, extra_config, probe_budget, on_cancel=on_cancel)
+                if recovered.strip():
+                    err = recovered
         return (code, verdict_text, err)
     finally:
         for path in tmp_paths:
