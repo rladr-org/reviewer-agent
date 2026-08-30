@@ -52,6 +52,7 @@ from reviewer_state import (
     reviewer_backend,
     stopcontinue_flag_file,
     stopcontinue_watchdog_flag_file,
+    watchdog_teardown_ready_file,
 )
 from reviewer_transcript import (
     _event_text,
@@ -233,34 +234,46 @@ The agent's proposed final message:
 WATCHDOG_MARKER = "stopContinueWatchdog"
 
 
-def watchdog_tick_prompt(proj):
-    """The tick prompt embedded in the CronCreate schedule for `proj`. Names the two flag
-    files by absolute path so the model checks them with Read, not by shelling into
-    stopcontinue_watchdog_toggle.py. See docs/plans/watchdog_tick_visibility.md."""
+def watchdog_tick_prompt(proj, claude_session_id):
+    """The tick prompt embedded in the CronCreate schedule for `proj` + THIS Claude session.
+
+    All timing is decided in the Stop hook (Python); the tick is a pure PRESENCE check with a
+    fail-safe: it tears down only when the session-scoped `teardown_ready` marker exists or a
+    flag file is missing, and deletes NOTHING if it cannot read the files. `teardown_ready` is
+    session-scoped, so the id is baked into the path. Detection keys on the version-stable prefix
+    "stopContinueWatchdog tick". See docs/plans/watchdog_auto_shutoff.md."""
+    ready = str(watchdog_teardown_ready_file(proj, claude_session_id))
     wd = str(stopcontinue_watchdog_flag_file(proj))
     sc = str(stopcontinue_flag_file(proj))
     return (
-        "stopContinueWatchdog tick -- Read {wd} and {sc}; if either is missing, "
-        "CronDelete this cron and stop. Else: if you have unfinished work from "
-        "before, resume it; otherwise reply `ok` and stop."
-    ).format(wd=wd, sc=sc)
+        "stopContinueWatchdog tick -- Read the teardown-ready marker `{ready}`, and the flag "
+        "files `{wd}` and `{sc}`. If the teardown-ready marker exists, OR either flag file is "
+        'missing, CronList and CronDelete every task whose prompt contains "{marker}", then '
+        "stop. If you cannot read those files, do NOT delete anything -- reply `ok` and stop. "
+        "Otherwise: if you have unfinished work from before, resume it; otherwise reply `ok` "
+        "and stop."
+    ).format(ready=ready, wd=wd, sc=sc, marker=WATCHDOG_MARKER)
 
 
-def watchdog_arm_instruction(proj, interval):
-    """The instruction the model follows (in the `/stopContinueWatchdog on` turn and the
-    SessionStart backstop) to reconcile the marker-tagged crons to exactly one at `*/N`."""
+def watchdog_arm_instruction(proj, interval, claude_session_id):
+    """The instruction the model follows (the `/stopContinueWatchdog on` turn, the SessionStart
+    backstop, and the UserPromptSubmit re-arm) to reconcile the marker-tagged crons to exactly
+    one carrying the CURRENT tick prompt. The reconcile is PROMPT-AWARE: keeping a same-schedule
+    cron whose prompt differed would leave an outdated tick that never reads teardown_ready."""
     cron = "*/{} * * * *".format(interval)
+    tick = watchdog_tick_prompt(proj, claude_session_id)
     return (
         "[stopContinueWatchdog] Arm the recovery cron for THIS session. Call CronList, then "
         'reconcile the marker-tagged tasks (whose prompt contains "{marker}") to EXACTLY ONE '
-        'at schedule "{cron}":\n'
-        '- if one or more are already at "{cron}", keep a single one and CronDelete every '
-        "OTHER marker-tagged task;\n"
-        '- otherwise CronDelete all marker-tagged tasks and CronCreate("{cron}", <the tick '
-        "prompt below>).\n"
-        "Post-condition: exactly one marker-tagged cron at \"{cron}\". Tick prompt to use "
-        "verbatim:\n{tick}"
-    ).format(marker=WATCHDOG_MARKER, cron=cron, tick=watchdog_tick_prompt(proj))
+        'whose schedule is "{cron}" AND whose prompt MATCHES the tick prompt below:\n'
+        '- keep a single marker-tagged task only if it is at "{cron}" AND its prompt is '
+        "identical to the tick prompt below; CronDelete every OTHER marker-tagged task -- "
+        "including any at the right schedule but carrying a DIFFERENT or outdated prompt;\n"
+        "- if none matches, CronDelete all marker-tagged tasks and CronCreate one at "
+        '"{cron}" with the tick prompt below.\n'
+        'Post-condition: exactly one marker-tagged cron at "{cron}" carrying the CURRENT tick '
+        "prompt. Tick prompt to use verbatim:\n{tick}"
+    ).format(marker=WATCHDOG_MARKER, cron=cron, tick=tick)
 
 
 WATCHDOG_CANCEL_INSTRUCTION = (

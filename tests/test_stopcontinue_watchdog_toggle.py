@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import reviewer_lib as rl
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -19,11 +21,25 @@ TOGGLE = str(ROOT / "stopcontinue_watchdog_toggle.py")
 STOPCONTINUE_TOGGLE = str(ROOT / "stopcontinue_toggle.py")
 SESSION_START = str(ROOT / "session_start_hook.py")
 
+# The watchdog `on` now bakes a SESSION-scoped marker path, so the toggle resolves this Claude
+# session id from CLAUDE_CODE_SESSION_ID and the tick/arm helpers take it as an argument.
+SID = "claude-toggle-sess"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch):
+    """REVIEWER_STATE_DIR overrides REVIEWER_HOME; an inherited CLAUDE session id would leak the
+    real session into subprocess arms. Clear them so the tests provide their own via SID."""
+    for var in ("REVIEWER_STATE_DIR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"):
+        monkeypatch.delenv(var, raising=False)
+
 
 def run(action, proj, home):
     env = dict(os.environ)
+    env.pop("REVIEWER_STATE_DIR", None)
     env["REVIEWER_HOME"] = home
     env["CLAUDE_PROJECT_DIR"] = proj
+    env["CLAUDE_CODE_SESSION_ID"] = SID          # the toggle `on` fails closed without this
     args = [action] if isinstance(action, str) else list(action)
     return subprocess.run(
         [sys.executable, TOGGLE, *args], capture_output=True, text=True, env=env
@@ -180,11 +196,12 @@ def test_off_output_carries_the_cancel_instruction(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 def run_session_start(proj, home):
     env = dict(os.environ)
+    env.pop("REVIEWER_STATE_DIR", None)
     env["REVIEWER_HOME"] = home
     env["CLAUDE_PROJECT_DIR"] = proj
     return subprocess.run(
         [sys.executable, SESSION_START],
-        input=json.dumps({"cwd": proj}),
+        input=json.dumps({"cwd": proj, "session_id": SID}),
         capture_output=True, text=True, env=env,
     )
 
@@ -252,7 +269,7 @@ def test_watchdog_tick_prompt_is_per_project(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    tick = rl.watchdog_tick_prompt(proj)
+    tick = rl.watchdog_tick_prompt(proj, SID)
     # Both flag files must appear by absolute path so the tick can Read them.
     assert str(rl.stopcontinue_flag_file(proj)) in tick
     assert str(rl.stopcontinue_watchdog_flag_file(proj)) in tick
@@ -264,7 +281,7 @@ def test_watchdog_tick_prompt_uses_read_not_bash(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    tick = rl.watchdog_tick_prompt(proj)
+    tick = rl.watchdog_tick_prompt(proj, SID)
     # No shell-out to a Python script.
     assert "python3" not in tick
     assert "stopcontinue_watchdog_toggle.py" not in tick
@@ -290,7 +307,7 @@ def test_watchdog_tick_prompt_conditions_cancel_on_missing_flag(tmp_path, monkey
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    tick = rl.watchdog_tick_prompt(proj)
+    tick = rl.watchdog_tick_prompt(proj, SID)
     a_path = str(rl.stopcontinue_flag_file(proj))
     b_path = str(rl.stopcontinue_watchdog_flag_file(proj))
 
@@ -347,7 +364,7 @@ def test_watchdog_tick_prompt_conditions_resume_on_unfinished_work(tmp_path, mon
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    tick = rl.watchdog_tick_prompt(proj)
+    tick = rl.watchdog_tick_prompt(proj, SID)
     pattern = re.compile(
         r"\b(if|when)\b[^.;]*?\bunfinished\s+work\b[^.;]*?\bresume\b",
         re.IGNORECASE,
@@ -366,78 +383,61 @@ def test_watchdog_tick_prompt_healthy_reply_is_ok_only_when_no_unfinished_work(
     unfinished-work branch, not the unconditional response — otherwise the tick would answer
     `ok` even when it should be resuming stranded work, defeating recovery.
 
-    Assert (a) 'resume' precedes the quoted `ok`, and (b) an 'otherwise' (or 'else')
-    else-marker sits between 'resume' and `ok` within a single clause (no intervening '.')
-    — the alternation must be structural, not incidental."""
+    Assert the HEALTHY `ok` (the one that ends the resume branch) comes AFTER 'resume' with an
+    'otherwise'/'else' between them in one clause. Note the tick also carries a fail-safe `ok`
+    ("if you cannot read those files, do NOT delete anything -- reply `ok`") that precedes
+    'resume'; the healthy `ok` is specifically the else of the unfinished-work branch, so this
+    keys on the `ok` AFTER 'resume', not the first one in the string."""
     import re
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    tick = rl.watchdog_tick_prompt(proj)
-    # A quoted `ok`/`OK` is the healthy reply.
-    ok_match = re.search(r"""[`'\"]ok[`'\"]""", tick, re.IGNORECASE)
-    assert ok_match, "tick prompt does not quote `ok` as the healthy reply: %r" % tick
+    tick = rl.watchdog_tick_prompt(proj, SID)
     resume_match = re.search(r"\bresume\b", tick, re.IGNORECASE)
     assert resume_match, "tick prompt does not mention 'resume': %r" % tick
-    assert resume_match.start() < ok_match.start(), (
-        "`ok` reply appears BEFORE 'resume' — the recovery branch is dead code: %r" % tick
-    )
-    # Between 'resume' and the `ok` quote, and within a single clause (no '.' separator),
-    # there must be an alternation marker.
-    connector = tick[resume_match.end():ok_match.start()]
+    # The healthy `ok` is the ELSE of the resume branch -> it comes AFTER 'resume'.
+    after = tick[resume_match.end():]
+    ok_match = re.search(r"""[`'\"]ok[`'\"]""", after, re.IGNORECASE)
+    assert ok_match, "no quoted `ok` after 'resume' as the healthy reply: %r" % tick
+    connector = after[:ok_match.start()]
     assert "." not in connector, (
-        "'resume' and `ok` are in different sentences — the else-alternation is not "
-        "structural: %r" % tick
+        "'resume' and the healthy `ok` are in different sentences — the else-alternation is "
+        "not structural: %r" % tick
     )
     alt = re.search(r"\b(otherwise|else)\b", connector, re.IGNORECASE)
     assert alt, (
-        "no 'otherwise'/'else' alternation marker between 'resume' and `ok`: %r" % tick
+        "no 'otherwise'/'else' alternation marker between 'resume' and the healthy `ok`: %r"
+        % tick
     )
 
 
-# Frozen snapshot of reviewer_prompts.WATCHDOG_TICK_PROMPT (pre-visibility-reduction). The
-# GREEN phase removes that module-level literal, so we snapshot it here to keep the size
-# baseline stable. Any future edit to the OLD prompt would happen in tandem with a git
-# history rewrite that is not planned — this snapshot is expected to be stable.
-_BASELINE_TICK_TEMPLATE = (
-    "stopContinueWatchdog tick -- run "
-    '`python3 "{}" status`. '
-    "If it prints INACTIVE, delete THIS watchdog cron (CronDelete) and stop. If it prints "
-    "ACTIVE: if you have unfinished work from before, resume it; otherwise reply briefly "
-    "that you are done and stop."
-)
-
-
-def test_watchdog_tick_prompt_size_is_reduced(tmp_path, monkeypatch):
-    """The visibility reduction promises a shorter tick prompt than today's baseline. Force
-    both new-prompt flag-file paths AND the baseline's toggle-script path to equally short
-    controlled values (3-byte basenames under a 2-byte parent), so the size delta reflects
-    template shape — not path-byte accounting or pytest tmp path length.
-
-    The new prompt embeds TWO paths (both flag files) versus the baseline's ONE (the toggle
-    script). Require the total to still be at least 30 bytes shorter than the baseline —
-    which proves the template body itself trimmed by well more than the extra path bytes."""
+def test_watchdog_tick_prompt_stays_read_based_and_bounded(tmp_path, monkeypatch):
+    """The visibility reduction removed the per-tick bash shell-out; auto-shutoff then added a
+    teardown_ready Read plus a fail-safe delete-guard, so the tick prompt is intentionally LONGER
+    than the pre-auto-shutoff version (the old 'shorter than the bash baseline' size guard no
+    longer applies -- see docs/plans/watchdog_auto_shutoff.md). The remaining invariants: it stays
+    Read-based (no shell-out) and does not balloon. Force all three embedded paths to short
+    controlled values so the bound reflects the template body, not path bytes or tmp-path length."""
     import reviewer_state as _rs
     import reviewer_prompts as _rp
 
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     monkeypatch.setenv("REVIEWER_HOME", home)
-    short_a = Path("/s/a")
-    short_b = Path("/s/b")
+    short = Path("/s/a")
     # Patch at every plausible import site so this test does not encode where the green
     # implementation chose to import the state helpers from.
     for m in (_rs, _rp, rl):
-        monkeypatch.setattr(m, "stopcontinue_flag_file", lambda p, _a=short_a: _a, raising=False)
+        monkeypatch.setattr(m, "stopcontinue_flag_file", lambda p, _x=short: _x, raising=False)
         monkeypatch.setattr(
-            m, "stopcontinue_watchdog_flag_file", lambda p, _b=short_b: _b, raising=False
-        )
-    tick = rl.watchdog_tick_prompt(proj)
-    baseline_len = len(_BASELINE_TICK_TEMPLATE.format(str(short_a)))
-    assert len(tick) < baseline_len - 30, (
-        "tick prompt did not shrink meaningfully vs baseline "
-        "(new=%d, baseline=%d): %r" % (len(tick), baseline_len, tick)
-    )
+            m, "stopcontinue_watchdog_flag_file", lambda p, _x=short: _x, raising=False)
+        monkeypatch.setattr(
+            m, "watchdog_teardown_ready_file", lambda p, s, _x=short: _x, raising=False)
+    tick = rl.watchdog_tick_prompt(proj, SID)
+    # No per-tick shell-out to a script -- the whole point of the visibility change.
+    assert "python3" not in tick and "toggle.py" not in tick
+    # Bounded: catches an accidental runaway while allowing the fail-safe + teardown_ready clauses.
+    assert len(tick) < 700, "tick prompt ballooned (%d bytes): %r" % (len(tick), tick)
 
 
 def test_arm_instruction_signature_takes_proj_and_interval(tmp_path, monkeypatch):
@@ -448,7 +448,7 @@ def test_arm_instruction_signature_takes_proj_and_interval(tmp_path, monkeypatch
     monkeypatch.setenv("REVIEWER_HOME", home)
     # Both callers pass proj; call it here the same way. If the signature still takes only
     # `interval`, this raises TypeError and the test is red.
-    instr = rl.watchdog_arm_instruction(proj, 5)
+    instr = rl.watchdog_arm_instruction(proj, 5, SID)
     assert "*/5 * * * *" in instr
     assert str(rl.stopcontinue_flag_file(proj)) in instr
     assert str(rl.stopcontinue_watchdog_flag_file(proj)) in instr
@@ -471,6 +471,6 @@ def test_arm_instruction_and_sessionstart_produce_identical_tick_prompts(tmp_pat
     # Resolve `expected_tick` under the SAME REVIEWER_HOME the two subprocesses saw, so the
     # embedded flag-file paths match theirs.
     monkeypatch.setenv("REVIEWER_HOME", home)
-    expected_tick = rl.watchdog_tick_prompt(proj)
+    expected_tick = rl.watchdog_tick_prompt(proj, SID)
     assert expected_tick in toggle_out
     assert expected_tick in ctx

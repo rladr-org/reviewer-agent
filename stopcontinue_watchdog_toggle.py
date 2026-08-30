@@ -42,9 +42,19 @@ def _on(proj, interval):
                 rl.WATCHDOG_MIN_INTERVAL, rl.WATCHDOG_MAX_INTERVAL, interval
             )
         )
+    # The tick prompt embeds a SESSION-scoped teardown_ready marker path, so arming needs this
+    # Claude session's id. A slash command receives only argv, but Claude Code exports the id in
+    # the environment. Fail CLOSED if it is absent rather than arming an unscoped or wrong-session
+    # cron -- guessing could tear down another session's watchdog.
+    sid = rl.claude_session_id_from_env()
+    if not sid:
+        return _err(
+            "cannot determine this Claude session's id (CLAUDE_CODE_SESSION_ID is not set), so "
+            "the watchdog cron cannot be armed with its session-scoped marker. Not arming."
+        )
     rl.set_stopcontinue_watchdog_active(root, interval)
     print("stopContinueWatchdog: ON for {} (interval {} min).".format(root, interval))
-    print(rl.watchdog_arm_instruction(root, interval))
+    print(rl.watchdog_arm_instruction(root, interval, sid))
     return 0
 
 

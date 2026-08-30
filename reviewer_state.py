@@ -20,6 +20,7 @@ composes a prompt, or reads a transcript.
 Everything here is re-exported by `reviewer_lib` for back-compat, so existing `rl.is_active(...)`
 call sites are unchanged.
 """
+import datetime
 import hashlib
 import json
 import os
@@ -1010,6 +1011,119 @@ def is_stopcontinue_watchdog_effective(proj):
     on this combined predicate: with stopContinue off the watchdog reports INACTIVE, so its crons
     self-cancel and re-arming stops, WITHOUT the stopContinue toggle needing to know it exists."""
     return is_stopcontinue_active(proj) and is_stopcontinue_watchdog_active(proj)
+
+
+# --------------------------------------------------------------------------
+# Watchdog auto-shutoff markers (per Claude session, not per project).
+# See docs/plans/watchdog_auto_shutoff.md. All timing is decided HERE in Python (the tick is a
+# pure presence check): the Stop hook writes `disarm` (a timestamp) on a genuine STOP_OK and,
+# on later idle ticks, writes `teardown_ready` once the disarm marker is at least one interval
+# old. Session-scoped so two Claude sessions in one repo never tear down each other's cron.
+# --------------------------------------------------------------------------
+def _watchdog_marker_stem(proj, claude_session_id):
+    """A SHORT, bounded, session-scoped stem for the watchdog markers. The readable
+    `_project_session_stem` grows with the project path, and the atomic writer adds a temp-UUID
+    sibling on top -- for long (but valid) project paths that sum can exceed the filesystem's name
+    limit, at which point the Stop hook's fail-open swallows ENAMETOOLONG and auto-shutoff silently
+    stops. A fixed-length digest of (canonical project, session) keeps the marker AND its temp
+    sibling comfortably bounded while preserving session isolation. The session id is still stored
+    IN the disarm marker's JSON body for debuggability."""
+    sid = str(claude_session_id or "").strip()
+    if not sid or not str(proj or "").strip():
+        return None
+    digest = hashlib.sha1(
+        (canonical_project_key(proj) + "\x00" + sid).encode("utf-8")
+    ).hexdigest()
+    return "wd_" + digest[:20]
+
+
+def watchdog_disarm_file(proj, claude_session_id):
+    stem = _watchdog_marker_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".disarm")
+
+
+def watchdog_teardown_ready_file(proj, claude_session_id):
+    stem = _watchdog_marker_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".teardown_ready")
+
+
+def is_watchdog_disarm_set(proj, claude_session_id):
+    f = watchdog_disarm_file(proj, claude_session_id)
+    return bool(f and f.exists())
+
+
+def set_watchdog_disarm(proj, claude_session_id):
+    """Record a completion at `now`. Presence + the `ts` are load-bearing; the ts drives the
+    in-hook age check (the tick never reads it)."""
+    f = watchdog_disarm_file(proj, claude_session_id)
+    if f is None:
+        return
+    ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    _atomic_write_text(f, json.dumps({"ts": ts, "session_id": str(claude_session_id)}) + "\n")
+
+
+def clear_watchdog_disarm(proj, claude_session_id):
+    f = watchdog_disarm_file(proj, claude_session_id)
+    if f is not None:
+        f.unlink(missing_ok=True)
+
+
+def watchdog_disarm_age_seconds(proj, claude_session_id):
+    """Seconds since the disarm marker's `ts`, or None if the marker is absent or unparseable
+    (a corrupt/missing ts must NEVER read as 'old enough to tear down' -- fail safe)."""
+    f = watchdog_disarm_file(proj, claude_session_id)
+    if not (f and f.exists()):
+        return None
+    try:
+        raw = json.loads(f.read_text())
+        ts = datetime.datetime.fromisoformat(str(raw["ts"]).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+
+
+def watchdog_disarm_deadline_passed(proj, claude_session_id):
+    """True iff the disarm marker exists AND has been idle for at least one interval. Used by
+    BOTH the Stop hook (to write teardown_ready) and UserPromptSubmit (the re-arm fallback)."""
+    age = watchdog_disarm_age_seconds(proj, claude_session_id)
+    if age is None:
+        return False
+    return age >= watchdog_interval(proj) * 60
+
+
+def is_watchdog_teardown_ready(proj, claude_session_id):
+    f = watchdog_teardown_ready_file(proj, claude_session_id)
+    return bool(f and f.exists())
+
+
+def set_watchdog_teardown_ready(proj, claude_session_id):
+    f = watchdog_teardown_ready_file(proj, claude_session_id)
+    if f is not None:
+        _atomic_write_text(f, "ready\n")
+
+
+def clear_watchdog_teardown_ready(proj, claude_session_id):
+    f = watchdog_teardown_ready_file(proj, claude_session_id)
+    if f is not None:
+        f.unlink(missing_ok=True)
+
+
+def claude_session_id_from_env():
+    """This Claude session's id from the environment, or None. `CLAUDE_CODE_SESSION_ID` is what
+    Claude Code exports (its value equals the transcript stem, the same key the hooks derive via
+    claude_session_key); the legacy `CLAUDE_SESSION_ID` is a fallback. None (rather than a guess)
+    when neither is set -- used by slash-command scripts that receive only argv."""
+    for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"):
+        val = (os.environ.get(var) or "").strip()
+        if val:
+            return val
+    return None
 
 
 # --------------------------------------------------------------------------

@@ -1,5 +1,13 @@
 # `/stopContinueWatchdog` — recover an idle-stranded agent
 
+> **Update:** the cron no longer ticks forever while a session is idle. It **auto-shuts-off**
+> within a couple of idle intervals (the first idle tick past the interval arms a `teardown_ready`
+> marker; the next tick deletes the cron) and **auto-rearms** on the operator's next prompt (the flag —
+> operator intent — is untouched). The decision is made deterministically in the Stop hook
+> (Python), the tick is reduced to a fail-safe presence check, and a new `UserPromptSubmit` hook
+> re-arms. See `docs/plans/watchdog_auto_shutoff.md` for the mechanism; the "flag on → ticks run
+> forever" behavior described below is the pre-auto-shutoff baseline.
+
 ## Why
 
 stopContinue supervises **only at a turn boundary**: `stop_hook.py` runs when the agent ends its

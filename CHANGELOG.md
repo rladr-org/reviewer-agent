@@ -104,6 +104,16 @@ Codex host needs in order to notice a reinstall — it is not part of the releas
   shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
   two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
   `docs/plans/watchdog_tick_visibility.md`.
+- `stopContinueWatchdog` now auto-shuts-off on idle and auto-rearms on the next prompt (Claude
+  Code), so an idle session goes quiet instead of ticking every N minutes indefinitely. When a
+  session genuinely stops (a STOP_OK verdict), the Stop hook records a session-scoped disarm
+  timestamp; after a full interval of idle ticks it writes a `teardown_ready` marker and the tick
+  — now a pure, fail-safe presence check that never does clock arithmetic — deletes its own cron.
+  The next operator prompt re-arms via a new `UserPromptSubmit` hook. All timing is decided in
+  Python (never by the tick model); disarm is written only on a genuine completion, so an
+  incomplete or background-parked strand keeps the watchdog armed to recover it. The arm/reconcile
+  is prompt-aware so a changed tick replaces a stale cron. See
+  `docs/plans/watchdog_auto_shutoff.md`.
 
 ### Added — reviewer skim mechanism
 

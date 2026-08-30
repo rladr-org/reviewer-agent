@@ -141,6 +141,33 @@ def _is_human_prompt(ev):
     return not any(low.startswith(pre) for pre in _NON_HUMAN_USER_PREFIXES)
 
 
+def _last_turn_prompt_text(events):
+    """Text of the most recent MAIN-session turn-start user event -- the prompt that STARTED the
+    current turn, human OR isMeta-injected (a watchdog tick, a stop-hook-feedback continuation).
+
+    Unlike `_is_human_prompt` this INCLUDES `isMeta` turn-starts: a fired watchdog tick is a
+    `type: user` event with `isMeta: True`, so keying tick detection on "last human prompt" would
+    filter the tick out and return the previous real prompt. It still excludes `tool_result`
+    carriers and, crucially, `isSidechain` (subagent) events, so a subagent's prompt later in the
+    transcript is never mistaken for the current main turn. Returns '' if none is found."""
+    for ev in reversed(events or []):
+        if ev.get("type") != "user":
+            continue
+        if ev.get("isSidechain") or ev.get("isCompactSummary"):
+            continue
+        if ev.get("toolUseResult") is not None:
+            continue
+        c = _event_content(ev)
+        if isinstance(c, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in c
+        ):
+            continue
+        txt = _event_text(ev)
+        if txt.strip():
+            return txt
+    return ""
+
+
 def _event_epoch_seconds(ev):
     """The event's ISO-8601 timestamp as epoch seconds, or None."""
     ts = ev.get("timestamp")

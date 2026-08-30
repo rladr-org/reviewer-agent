@@ -55,14 +55,15 @@ def _brief_if_active(data, cwd):
         )
 
 
-def _watchdog_rearm_context(cwd):
+def _watchdog_rearm_context(cwd, claude_sid):
     """The SessionStart additionalContext that re-arms the watchdog cron, or None. Gated on the
     EFFECTIVE state (watchdog flag AND stopContinue active), so a session that resumes after
     stopContinue was turned off does not re-arm ticks the now-inert Stop hook cannot supervise.
-    Independent of the main reviewer flag -- the watchdog is its own opt-in."""
+    Independent of the main reviewer flag -- the watchdog is its own opt-in. `claude_sid` is baked
+    into the tick's session-scoped teardown_ready marker path."""
     if not rl.is_stopcontinue_watchdog_effective(cwd):
         return None
-    return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd))
+    return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd), claude_sid)
 
 
 def main():
@@ -80,7 +81,7 @@ def main():
         _brief_if_active(data, cwd)
     except Exception as e:
         rl.log("[session_start] brief EXCEPTION {}: {}".format(type(e).__name__, e))
-    ctx = _watchdog_rearm_context(cwd)
+    ctx = _watchdog_rearm_context(cwd, rl.claude_session_key(data))
     if ctx:
         rl.log("[session_start] key={} watchdog re-arm context injected".format(
             rl.canonical_project_key(cwd)))

@@ -108,6 +108,17 @@ def _tool_only_transcript(tmp_path):
     return _write_jsonl(tmp_path, "toolonly.jsonl", events)
 
 
+def _tick_turn_tool_only_transcript(tmp_path):
+    """A tick turn (isMeta tick turn-start) whose final message is tool-only, so the Stop hook
+    takes its tool-only early return before supervision."""
+    events = [
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": _TICK_BODY}},
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "tool_use", "name": "CronDelete", "input": {}}]}},
+    ]
+    return _write_jsonl(tmp_path, "tick_toolonly.jsonl", events)
+
+
 def _bg_wait_transcript(tmp_path):
     events = [
         {"type": "user", "message": {"role": "user", "content": "kick off the run"}},
@@ -431,6 +442,42 @@ def test_idle_heartbeat_tick_does_not_refresh_existing_disarm(tmp_path, monkeypa
     assert p.returncode == 0, p.stderr
     monkeypatch.setenv("REVIEWER_HOME", home)
     assert _disarm_ts(repo, "claude-stop") == fresh_ts        # NOT overwritten (set only if absent)
+
+
+def test_aged_tick_that_keeps_working_does_not_arm_teardown_ready(tmp_path, monkeypatch):
+    """Regression (green review): an aged idle-eligible tick that resumes a stranded task and gets
+    KEEP_WORKING must NOT arm teardown_ready -- otherwise the next tick would delete the watchdog
+    while work still remains. teardown_ready is armed only on a genuine STOP_OK verdict."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    _write_disarm_age(repo, "claude-stop", 120)               # aged past the 1-min interval
+    tr = _tick_turn_transcript(tmp_path, "Resuming the stranded task...")
+    p = run_stop(_stop_input(repo, tr), {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                 "FAKE_CODEX_STDOUT": "Continue: finish the stranded task.", "FAKE_CODEX_EXIT": "0"})
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout)["decision"] == "block"        # KEEP_WORKING
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
+
+
+def test_aged_tick_tool_only_early_return_does_not_arm_teardown_ready(tmp_path, monkeypatch):
+    """Regression (green review): an aged tick whose final turn is tool-only takes the tool-only
+    early return before supervision, so it never reaches the STOP_OK branch and never arms
+    teardown_ready (the pre-supervision path no longer writes it)."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    _write_disarm_age(repo, "claude-stop", 120)
+    tr = _tick_turn_tool_only_transcript(tmp_path)
+    p = run_stop(_stop_input(repo, tr), {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                 "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN", "FAKE_CODEX_EXIT": "0"})
+    assert p.returncode == 0, p.stderr
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout             # supervisor not consulted
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
 
 
 def test_flag_off_clears_both_markers(tmp_path, monkeypatch):

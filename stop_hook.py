@@ -35,6 +35,49 @@ import reviewer_lib as rl  # noqa: E402
 STOP_TIMEOUT = 300
 
 
+def _turn_start_is_tick(data):
+    """True iff THIS turn was started by a watchdog tick. A fired tick is a `type: user` event
+    with `isMeta: True`, which `_is_human_prompt` filters out, so this uses `_last_turn_prompt_text`
+    (main-session turn-start, isMeta included, sidechain/tool_result excluded) and keys on the
+    version-stable prefix. Fails to False (treat as an ordinary turn) if the transcript is
+    unreadable. See docs/plans/watchdog_auto_shutoff.md."""
+    try:
+        events = rl._transcript_events(rl.resolve_transcript_path(data))
+        return rl._last_turn_prompt_text(events).strip().startswith("stopContinueWatchdog tick")
+    except Exception:
+        return False
+
+
+def _watchdog_pre_supervision(cwd, claude_sid):
+    """Flag off -> clear both markers (stale). Runs before the early returns so a control turn
+    that turns the watchdog off still clears its markers. Does NOT arm teardown_ready: that is
+    decided only on a genuine STOP_OK verdict (see `_watchdog_on_stop_ok`), never on marker age
+    alone -- an aged tick that resumes work, or takes an early return, must not arm teardown while
+    work may remain."""
+    if not rl.is_stopcontinue_watchdog_active(cwd):
+        rl.clear_watchdog_disarm(cwd, claude_sid)
+        rl.clear_watchdog_teardown_ready(cwd, claude_sid)
+
+
+def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
+    """Runs only on a genuine STOP_OK verdict -- never on KEEP_WORKING, nor on the tool-only /
+    bg-wait / nudge-cap / fail-open allow paths, which take earlier returns and leave the watchdog
+    armed to recover an incomplete or parked strand. Because a tick only reaches here when it
+    genuinely completed (a healthy `ok`, or a recovery that finished its work), it is safe to arm
+    `teardown_ready` here when the disarm marker has aged past one interval -- the next tick then
+    removes the cron. Then set the disarm marker ONLY if none exists (a heartbeat tick never resets
+    an aging marker's ts, while a completion starts the countdown). A non-tick STOP_OK also clears
+    any pending teardown_ready (a fresh completion restarts the idle cycle)."""
+    if not rl.is_stopcontinue_watchdog_active(cwd):
+        return
+    if is_tick and rl.watchdog_disarm_deadline_passed(cwd, claude_sid):
+        rl.set_watchdog_teardown_ready(cwd, claude_sid)
+    if not rl.is_watchdog_disarm_set(cwd, claude_sid):
+        rl.set_watchdog_disarm(cwd, claude_sid)
+    if not is_tick:
+        rl.clear_watchdog_teardown_ready(cwd, claude_sid)
+
+
 def _main(data):
     cwd = data.get("cwd") or rl.project_dir()
     key = rl.canonical_project_key(cwd)
@@ -68,6 +111,13 @@ def _main(data):
 
     if not flag_active:
         return 0
+
+    # Watchdog auto-shutoff DECISION (deterministic, Python). Only the flag-off marker clear runs
+    # this early; teardown_ready is armed later, gated on a genuine STOP_OK verdict, so a tick that
+    # resumes work (KEEP_WORKING) or takes an early return never arms teardown while work may remain.
+    is_tick = _turn_start_is_tick(data)
+    _watchdog_pre_supervision(cwd, claude_sid)
+
     if not text.strip():
         return 0  # tool-only / nothing to evaluate -> allow the stop
 
@@ -209,6 +259,8 @@ def _main(data):
         print(json.dumps(rl.info_output(
             "[stopContinue supervisor] approved this stop:\n" + rl.short(out)
         )))
+        # A genuine completion arms the watchdog idle countdown (disarm only on STOP_OK).
+        _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
     # else: empty / failure -> allow the stop silently (fail-open, logged above).
     return 0
 

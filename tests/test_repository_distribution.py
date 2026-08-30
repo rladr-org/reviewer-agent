@@ -65,6 +65,7 @@ def test_claude_hooks_resolve_python_from_path_in_exec_form():
         "askq_answer_hook.py",
         "session_start_hook.py",
         "stop_hook.py",
+        "userpromptsubmit_hook.py",
     }
     command_hooks = [
         hook

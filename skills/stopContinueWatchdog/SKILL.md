@@ -20,10 +20,12 @@ using the Cron tools — this is the mid-session arming/cancellation, done in th
 left to a future SessionStart:
 
 - an **ARM** instruction: call `CronList`, then reconcile the marker-tagged tasks (whose prompt
-  contains the marker) to **exactly one** at the schedule the instruction names — keep one already
-  at that schedule and `CronDelete` every other marker-tagged task; if none is at that schedule,
+  contains the marker) to **exactly one** at the schedule the instruction names AND carrying the
+  instruction's exact tick prompt — keep a single task only if its schedule matches AND its prompt
+  is identical to the instruction's tick prompt, and `CronDelete` every other marker-tagged task
+  (including any at the right schedule but with a different or outdated prompt); if none matches,
   `CronDelete` all marker-tagged tasks and `CronCreate` one with the tick prompt **verbatim** from
-  the instruction.
+  the instruction. Matching by prompt is what lets a changed tick replace a stale cron.
 - a **CANCEL** instruction: call `CronList` and `CronDelete` every task whose prompt contains the
   marker.
 

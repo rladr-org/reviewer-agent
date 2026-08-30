@@ -105,31 +105,34 @@ session id never appears in a live session's hook, tick, or prompt.
 ### 2. `stop_hook.py`: the decision (pure Python, reliable clock)
 
 Existing stopContinue supervision is unchanged. The decision is added with this precedence.
-**Positioning matters (see 2c): tick detection and its `teardown_ready` bookkeeping must run
-before the hook's existing early returns (tool-only, background-wait, nudge-cap), so a tick
-turn's bookkeeping is never bypassed.**
+**Both marker writes are gated on a genuine STOP_OK verdict (step 4), never on marker age
+pre-supervision (see 2c) — arming teardown on age alone would delete the watchdog on a tick that
+resumed incomplete work or took an early return.**
 
-1. Compute flag state and `sid = claude_session_key(data)`.
+1. Compute flag state and `sid = claude_session_key(data)`, and whether this is a tick turn via
+   `_last_turn_prompt_text(events)` (2a): the main-session turn-start begins with
+   `stopContinueWatchdog tick`.
 2. **Marker-clear-first invariant.** If the watchdog flag is **off**, clear **both** markers for
    `sid`, then pass through. Their meaning is invalid under flag-off; any present marker is
-   stale. Idempotent. (A stale marker under a fully-inactive stopContinue is also benign — at
-   most one idempotent reconcile — so this need not be forced ahead of the stopContinue-inactive
-   early return; it only needs to run on paths the hook already reaches.)
-3. **Tick detection (load-bearing), run early.** Using `_last_turn_prompt_text(events)` (2a): if
-   the main-session turn-start begins with `stopContinueWatchdog tick --`, this is a tick turn.
-   The one piece that must run before any early return is the age check: **if the disarm marker
-   exists AND `now − disarm.ts ≥ watchdog_interval(proj)` (reliable Python clock), write
-   `teardown_ready`.** (No verdict is needed for this, so it is never bypassed.) Remember that
-   this is a tick turn for step 4.
-4. **On a STOP_OK verdict (after supervision), set the disarm marker if none exists** (`ts =
-   now`); a **non-tick** STOP_OK also clears `teardown_ready` (a fresh completion starts a new
-   idle cycle). "Set only if absent" is what lets this rule run on ticks too without a heartbeat
-   tick ever resetting an aging marker's `ts`: it covers (i) an ordinary completion, (ii) a
-   **tick that resumed a stranded task to completion** (disarm was absent because the strand
-   ended incompletely, so this writes it and the now-idle session counts down normally), and
-   (iii) the first idle tick of an armed-but-never-worked session. **Every other real-turn
-   outcome — KEEP_WORKING, tool-only allow, nudge-cap allow, background-wait park, fail-open —
-   writes nothing** (principle 3).
+   stale. Idempotent, and it runs before the early returns so a control turn that turns the
+   watchdog off still clears its markers. (A stale marker under a fully-inactive stopContinue is
+   also benign, so this need not be forced ahead of the stopContinue-inactive early return.)
+3. **Supervise as today** — no watchdog marker write happens on any of the allow-without-STOP_OK
+   early returns (tool-only, background-wait park, nudge-cap): those leave the watchdog armed.
+4. **On a genuine STOP_OK verdict (after supervision):**
+   - if this is a **tick** turn AND the disarm marker has aged past one interval
+     (`now − disarm.ts ≥ watchdog_interval(proj)`, reliable Python clock) → write
+     `teardown_ready`; the next tick tears the cron down. A tick only reaches here when it
+     genuinely completed (a healthy `ok`, or a recovery that finished its work), so this never
+     arms teardown while work may remain.
+   - set the disarm marker **if none exists** (`ts = now`) — a heartbeat tick never resets an
+     aging marker, while a completion (an ordinary turn, a **recovery tick that resumed a stranded
+     task to completion**, or the first idle tick of an armed-but-never-worked session) starts the
+     countdown.
+   - a **non-tick** STOP_OK also clears any pending `teardown_ready` (a fresh completion restarts
+     the idle cycle).
+   **Every other real-turn outcome — KEEP_WORKING, tool-only allow, nudge-cap allow,
+   background-wait park, fail-open — writes nothing** (principle 3).
 
 Gone versus the prior draft: the hijacked `KEEP_WORKING`, its cleanup prose, the "second stop"
 branch, and the control-turn exemption (2b).
@@ -157,21 +160,20 @@ prompt re-arms. That is the intended cron-follows-activity / flag-follows-intent
 it is self-healing (contrast the hijack design, which deleted the just-armed cron the same turn).
 A control `off` turn takes the flag-off branch (step 2), which clears both markers.
 
-### 2c. Ordering and the background-wait / incomplete-stop exclusions
+### 2c. Only a STOP_OK verdict arms teardown (the incomplete-stop exclusions)
 
-The Stop hook already has early-return paths that allow a stop without a STOP_OK verdict:
-background-wait park (agent parked on a harness-tracked background task — the harness
-auto-re-invokes), tool-only final turn, and nudge-cap-reached. Two requirements:
+The Stop hook has paths that allow a stop WITHOUT a STOP_OK verdict: background-wait park (harness
+auto-re-invokes), tool-only final turn, nudge-cap-reached — plus KEEP_WORKING, where the agent
+keeps working. In every one the work may be incomplete, so the watchdog must stay armed to recover
+the strand. Therefore **both** the disarm write and the `teardown_ready` arm live only in the
+STOP_OK branch (step 4), never pre-supervision on marker age.
 
-- **None of these writes the disarm marker** (principle 3): the watchdog must stay armed to
-  recover an incomplete or parked strand. Only a real STOP_OK verdict disarms.
-- **The step-3 age check must precede these early returns**, so an idle tick whose final turn
-  happens to be tool-only or otherwise short still advances `teardown_ready`. If it were ever
-  bypassed, the only cost is one extra idle tick before `teardown_ready` is written (the next
-  tick where the age check still holds) — bounded, never silent. The step-4 disarm-if-absent
-  write needs the STOP_OK verdict, so it runs on the normal post-supervision path (a turn that
-  produced a verdict did not take an early return); a recovery tick that finishes real work
-  reaches supervision and STOP_OK there.
+An earlier draft armed `teardown_ready` pre-supervision "so a tool-only tick still advances it."
+That was a bug: an aged tick that resumes work and gets KEEP_WORKING, or that takes a
+tool-only / bg-wait / nudge-cap early return, would arm teardown, and the next tick would delete
+the watchdog **despite incomplete work**. Gating on the STOP_OK verdict is the fix. The only cost
+is that an idle tick whose final message happens to be tool-only does not advance `teardown_ready`
+that tick; the next healthy `ok` tick does — bounded, and never a spurious teardown.
 
 ### 3. `watchdog_tick_prompt` / the tick: the execution (pure presence check, fail-safe)
 
@@ -294,10 +296,12 @@ not the two plugin hosts; all three share this flow.
   (`stopContinueWatchdog tick`).
 - `skills/stopContinueWatchdog/SKILL.md`: update the reconcile description to the prompt-aware
   contract (section 3a) so the operator-facing skill matches the arm-instruction.
-- `stop_hook.py`: add the decision (flag-off clears both; tick detection early, writing
-  `teardown_ready` when `now − disarm.ts ≥ interval`, never writing disarm; STOP_OK writes disarm
-  + clears `teardown_ready`; every other allow-stop and KEEP_WORKING write nothing), positioned
-  before the tool-only/background-wait/nudge-cap early returns (2c).
+- `stop_hook.py`: add the decision — flag-off clears both markers (before the early returns);
+  compute `is_tick` via `_last_turn_prompt_text`; and, only on a genuine STOP_OK verdict, arm
+  `teardown_ready` when `is_tick` and `now − disarm.ts ≥ interval`, then set disarm if absent (a
+  non-tick STOP_OK also clears `teardown_ready`). KEEP_WORKING and the tool-only/background-wait/
+  nudge-cap early returns write nothing — so an aged tick that resumes work or takes an early
+  return never arms teardown while work may remain (2c).
 - `userpromptsubmit_hook.py`: new file. Clears both markers; emits the arm-instruction iff
   `teardown_ready` present or the disarm age fallback holds.
 - `hooks/hooks.json`: add the `UserPromptSubmit` entry → `userpromptsubmit_hook.py`.
@@ -340,9 +344,13 @@ roundtrip, session-scoped (session B never sees A's markers; distinct paths).
 - Real tool-only allow / nudge-cap allow / **background-wait park**, flag on → disarm NOT written
   (watchdog stays armed to recover the strand).
 - Real KEEP_WORKING, flag on → nothing written.
-- **Tick turn with a stale disarm (age ≥ interval)** → teardown_ready now set; disarm NOT
+- **STOP_OK tick with a stale disarm (age ≥ interval)** → teardown_ready now set; disarm NOT
   refreshed (`ts` unchanged). *(Simulate by writing disarm with an old `ts`.)*
-- **Tick turn with a fresh disarm (age < interval)** → teardown_ready NOT written (no premature).
+- **STOP_OK tick with a fresh disarm (age < interval)** → teardown_ready NOT written (no premature).
+- **Aged tick that gets KEEP_WORKING** (resumed a stranded task, not done) → teardown_ready NOT
+  armed (only a STOP_OK verdict arms it; the watchdog stays up while work remains).
+- **Aged tick whose final turn is tool-only** (takes the tool-only early return before
+  supervision) → teardown_ready NOT armed.
 - **Recovery tick: tick turn, STOP_OK verdict, NO disarm marker present** → disarm now set
   (`ts ≈ now`), so the recovered-then-idle session goes on to produce teardown_ready and shut
   off (covers the "tick resumes all unfinished work then STOP_OK" path).

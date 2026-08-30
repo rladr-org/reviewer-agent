@@ -9,7 +9,6 @@ reviewer.
 By default, automatic rotation happens after three completed first-pass audits. Corrective retry
 audits do not count. The limit command overrides the config-file default; zero/off disables it.
 """
-import os
 import sys
 from pathlib import Path
 
@@ -26,11 +25,7 @@ def _session_id():
     rotating the WRONG session would retire a reviewer mid-review, so guessing is not an option:
     with neither variable set this reports an error instead of picking a session.
     """
-    for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"):
-        val = (os.environ.get(var) or "").strip()
-        if val:
-            return val
-    return None
+    return rl.claude_session_id_from_env()
 
 
 def _show(proj, sid):

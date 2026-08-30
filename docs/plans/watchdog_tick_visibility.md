@@ -1,5 +1,13 @@
 # Watchdog tick — reduce the visible per-tick footprint
 
+> **Composes with `docs/plans/watchdog_auto_shutoff.md`:** this plan makes each individual tick
+> smaller; auto-shutoff makes there be *finitely many* of them (an idle session's cron tears itself
+> down within a couple of idle intervals — the first idle tick past the interval arms `teardown_ready`
+> and the next tick deletes the cron — instead of ticking indefinitely). Note that auto-shutoff
+> further reshaped the tick into a fail-safe presence check that also reads a `teardown_ready`
+> marker, so the tick is now somewhat larger than the minimal Read-based form described here — the
+> "finitely many ticks" win is what dominates.
+
 ## Why
 
 Each `stopContinueWatchdog` tick fires as a full Claude Code turn (per the platform ceiling
