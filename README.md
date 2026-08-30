@@ -703,6 +703,31 @@ auto-generated data (dataset rows, captured HTML, generated manifests) so the re
 their diffs instead of judging individual records. The file is optional — a missing file is
 today's baseline, no exclusions.
 
+How to use it:
+
+1. Create `reviewerAgent-ignore.md` at the repository root. Name the paths *and* say why —
+   the prose is sent to the reviewer, not just the patterns, so it can still judge intent and
+   schema:
+
+        # Skimmed paths
+
+        data/**/*.jsonl are generated dataset rows (rebuilt by `make data`, never hand-edited).
+        Skim their diffs: judge whether a change matches the commit's stated intent and whether
+        the schema shifted — not individual records.
+
+        ```reviewer-ignore
+        data/**/*.jsonl
+        ```
+
+2. **Commit the ignore file first — it does not apply to the commit that introduces it.** Because
+   of delayed application (see the security rules below), a `reviewerAgent-ignore.md` that is
+   added or changed in a commit takes effect only on *later* commits. Landing the ignore file and
+   your generated data in the **same** commit is the most common surprise: that commit is still
+   fully reviewed. Commit the ignore file on its own, then commit changes under the paths it names.
+
+3. Commit as usual. Matched paths are skimmed; everything else is reviewed normally. To confirm it
+   engaged, see *Confirming it skimmed* below.
+
 Format: free-form markdown with one or more fenced blocks tagged ```reviewer-ignore``` whose
 lines are glob patterns:
 
@@ -725,6 +750,15 @@ Two delivery channels:
   inlined patch already in the message.
 - **Channel B** — on retries, codex drops matched paths from the delta candidate set so
   their diff bytes do not reach the retry prompt (pi and claude are Channel A only in v1).
+
+Confirming it skimmed: each gated commit writes one line to
+`~/.claude/reviewer-agent/logs/reviewer.log`. When an ignore file excluded staged paths, that line
+carries `ignore_matched_files=N ignore_matched_lines=M` (both `0` when nothing matched — a quick
+way to catch a pattern that isn't hitting, or an ignore file that hasn't taken effect yet):
+
+```bash
+grep ignore_matched ~/.claude/reviewer-agent/logs/reviewer.log | tail -1
+```
 
 Security rules the parser enforces:
 - The file is read from git objects (index or HEAD), never the working tree. An unstaged
