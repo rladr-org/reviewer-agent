@@ -262,6 +262,27 @@ def test_tick_prompt_tears_down_on_teardown_ready_or_missing_flag_and_is_failsaf
     assert ready in tick and tick.rfind(ready) < cd
 
 
+def test_tick_prompt_directs_per_path_check_not_a_batched_ls(tmp_path, monkeypatch):
+    """A model given the tick may check the three paths with a single batched `ls ready wd sc`.
+    Because `teardown_ready` is armed only on a genuine STOP_OK, it is ABSENT in every healthy
+    session, so that batched `ls` exits non-zero on the healthy case -- surfacing a scary
+    `Error: Exit code 1` and, worse, colliding with the fail-safe `cannot read` clause (a
+    legitimately-missing marker looks like an unreadable filesystem, which could suppress a real
+    teardown and leak the cron). The tick must therefore (a) direct a PER-PATH check and warn off
+    a single batched `ls`, and (b) state that the teardown-ready marker is normally ABSENT and that
+    a merely-missing path is NOT a read failure -- so absence is never mistaken for unreadability."""
+    home = str(tmp_path / "rh")
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    low = rl.watchdog_tick_prompt(repo, "S-A").lower()
+    # (a) per-path, explicitly not one batched ls
+    assert "individually" in low or "one at a time" in low or "one by one" in low
+    assert "batch" in low or "single `ls`" in low or "single ls" in low
+    # (b) teardown-ready normally absent; a missing path is not a read failure
+    assert "normally absent" in low or "expected absent" in low or "normally missing" in low
+    assert "not a read failure" in low or "not a read error" in low or "not unreadable" in low
+
+
 # --------------------------------------------------------------------------
 # Arm instruction: threads session id + prompt-aware reconcile
 # --------------------------------------------------------------------------

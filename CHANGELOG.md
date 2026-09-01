@@ -20,6 +20,11 @@ is compared by version *string*, so `claude plugin update` is a no-op until the 
   shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
   two-character `ok` reply; the "resume unfinished work" recovery branch is preserved. See
   `docs/plans/watchdog_tick_visibility.md`.
+- `stopContinueWatchdog` tick prompt now directs a PER-PATH check (Read each path on its own, not
+  one batched `ls`) and states that the session-scoped `teardown_ready` marker is normally absent,
+  so a merely-missing path is not a read failure. A batched `ls` of all three paths exits non-zero
+  on every healthy session -- a spurious error that also risked the fail-safe misreading an absent
+  marker as an unreadable filesystem. See `docs/plans/watchdog_auto_shutoff.md`.
 - `stopContinueWatchdog` now auto-shuts-off on idle and auto-rearms on the next prompt (Claude
   Code), so an idle session goes quiet instead of ticking every N minutes indefinitely. When a
   session genuinely stops (a STOP_OK verdict), the Stop hook records a session-scoped disarm

@@ -246,12 +246,14 @@ def watchdog_tick_prompt(proj, claude_session_id):
     wd = str(stopcontinue_watchdog_flag_file(proj))
     sc = str(stopcontinue_flag_file(proj))
     return (
-        "stopContinueWatchdog tick -- Read the teardown-ready marker `{ready}`, and the flag "
-        "files `{wd}` and `{sc}`. If the teardown-ready marker exists, OR either flag file is "
-        'missing, CronList and CronDelete every task whose prompt contains "{marker}", then '
-        "stop. If you cannot read those files, do NOT delete anything -- reply `ok` and stop. "
-        "Otherwise: if you have unfinished work from before, resume it; otherwise reply `ok` "
-        "and stop."
+        "stopContinueWatchdog tick -- Check these three paths INDIVIDUALLY (Read each, not one "
+        "batched `ls` -- the teardown-ready marker is normally ABSENT): the teardown-ready "
+        "marker `{ready}`, and the flag files `{wd}` and `{sc}`. A merely-missing path is NOT a "
+        "read failure. If the teardown-ready marker exists, OR either flag file is missing, "
+        'CronList and CronDelete every task whose prompt contains "{marker}", then stop. If you '
+        "cannot read a path (a real error, not a missing file), do NOT delete anything -- reply "
+        "`ok` and stop. Otherwise: if you have unfinished work from before, resume it; otherwise "
+        "reply `ok` and stop."
     ).format(ready=ready, wd=wd, sc=sc, marker=WATCHDOG_MARKER)
 
 

@@ -126,14 +126,16 @@ truth**, and watchdog crons are identified by a fixed marker string in their tic
 ### The tick prompt
 
 Per-project text carrying the `stopContinueWatchdog` marker, built by
-`watchdog_tick_prompt(proj)` in `reviewer_prompts.py`, e.g.: *"stopContinueWatchdog tick -- Read
-`<state_dir>/<proj>.stopcontinue_watchdog.active` and `<state_dir>/<proj>.stopcontinue.active`;
-if either is missing, CronDelete this cron and stop. Else: if you have unfinished work from
-before, resume it; otherwise reply `ok` and stop."* Keeps each tick small (the model reads two
-short flag files with the Read tool rather than shelling out to a status subprocess), makes
-stale crons self-terminate on either flag being cleared, and leaves continue-vs-stop to the
-existing Stop hook. See `docs/plans/watchdog_tick_visibility.md` for the visibility reduction
-that produced this shape.
+`watchdog_tick_prompt(proj, claude_session_id)` in `reviewer_prompts.py`. It is a fail-safe
+PRESENCE check that names the session-scoped `teardown_ready` marker and the two flag files and
+directs the model to Read each path INDIVIDUALLY -- never one batched `ls`, because `teardown_ready`
+is normally ABSENT, so a batched check would exit non-zero on a healthy session (a spurious error,
+and a legitimately-missing marker must not be misread as an unreadable filesystem). It tears the
+cron down when `teardown_ready` exists OR either flag file is missing, deletes NOTHING when a path
+is genuinely unreadable (a merely-missing path is not a read failure), and otherwise resumes any
+unfinished work or replies `ok`. All timing is decided in the Stop hook (Python), so the tick reads
+short flag files with the Read tool rather than shelling out. See
+`docs/plans/watchdog_auto_shutoff.md` and `docs/plans/watchdog_tick_visibility.md`.
 
 ## Files (minimal)
 
