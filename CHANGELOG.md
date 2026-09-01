@@ -5,10 +5,10 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
-## [1.2.1-beta.1] — unreleased
+## [1.2.1-beta.2] — unreleased
 
 Opens the `1.2.1` pre-release line. Every declared version across both packages moves to
-`1.2.1-beta.1` in lockstep (checked by `tools/release_versions.py`); the Codex plugin's
+`1.2.1-beta.2` in lockstep (checked by `tools/release_versions.py`); the Codex plugin's
 `+codex.<timestamp>` build metadata is refreshed so the Codex host notices the reinstall. The
 version bump is what lets an installed copy pick the changes up: a local (directory-source) plugin
 is compared by version *string*, so `claude plugin update` is a no-op until the version changes.

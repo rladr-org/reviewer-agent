@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Autonomous reviewer and stop supervisor for Claude Code; all features use the selected codex, pi or claude backend",
-    "version": "1.2.1-beta.1"
+    "version": "1.2.1-beta.2"
   },
   "plugins": [
     {
       "name": "reviewer-agent",
       "source": "./",
       "description": "Autonomous reviewer for Claude Code: the selected codex, pi or claude backend gates commits, answers timed-out AskUserQuestion prompts, and supervises stops through stopContinue.",
-      "version": "1.2.1-beta.1",
+      "version": "1.2.1-beta.2",
       "author": {
         "name": "RLADR"
       },
