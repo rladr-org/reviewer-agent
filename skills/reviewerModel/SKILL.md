@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_model_toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" model "$ARGUMENTS"`
 
 The block above is the live output of the model script (it ran before you saw this).
 

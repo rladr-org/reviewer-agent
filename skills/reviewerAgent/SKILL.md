@@ -9,7 +9,7 @@ Toggling the reviewer agent for this project (`$ARGUMENTS`).
 
 The block below is the live output of the toggle script (it runs before you see this):
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" agent "$ARGUMENTS"`
 
 Report the resulting state in one line, read from the output above:
 - `reviewerAgent: ON ...` — the reviewer now gates git commits for this project and answers any

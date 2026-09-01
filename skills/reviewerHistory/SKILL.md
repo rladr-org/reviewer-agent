@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_history_toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" history "$ARGUMENTS"`
 
 The block above is the live output of the history script (it ran before you saw this).
 

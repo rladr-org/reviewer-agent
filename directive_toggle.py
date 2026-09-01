@@ -25,75 +25,72 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
 
 
-def _list(proj):
+def _list_message(proj):
     items = rl.load_directives(proj)
     if not items:
-        print(
+        return (
             "reviewerDirective: no operator directives for this project. Add one with "
             "`/reviewerDirective <text>`."
         )
-        return 0
-    print("reviewerDirective: {} directive(s) in force for this project:".format(len(items)))
+    lines = ["reviewerDirective: {} directive(s) in force for this project:".format(len(items))]
     for i, d in enumerate(items, 1):
         stamp = " [{}]".format(d["added"]) if d.get("added") else ""
-        print("  {}.{} {}".format(i, stamp, d["text"]))
-    return 0
+        lines.append("  {}.{} {}".format(i, stamp, d["text"]))
+    return "\n".join(lines)
 
 
-def main(argv):
-    proj = os.getcwd()
-    args = [a for a in argv[1:] if a.strip()]
+def run(args, proj):
+    """Execute a reviewerDirective invocation under an EXPLICIT project and return
+    (exit_code, message) WITHOUT printing. `proj` is passed in rather than read from os.getcwd() so
+    the UserPromptSubmit hook records under the payload cwd -- the authoritative repository -- not
+    the hook process's own directory. `args` is a token list (argv-style); the caller owns
+    tokenization, so the hook can pass free-form directive text as a single verbatim element while
+    the CLI passes shell-split words."""
+    args = [a for a in args if a and a.strip()]
 
     if not args or (len(args) == 1 and args[0].lower() == "list"):
-        return _list(proj)
+        return (0, _list_message(proj))
 
     verb = args[0].lower()
 
     if verb == "clear" and len(args) == 1:
         n = rl.clear_directives(proj)
         rl.log("[directive] cleared {} for {}".format(n, rl.canonical_project_key(proj)))
-        print("reviewerDirective: cleared {} directive(s) for this project.".format(n))
-        return 0
+        return (0, "reviewerDirective: cleared {} directive(s) for this project.".format(n))
 
     if verb == "remove":
         if len(args) != 2:
-            print(
-                "reviewerDirective: ERROR - `remove` takes one number, e.g. "
-                "`/reviewerDirective remove 2` (see `/reviewerDirective list`).",
-                file=sys.stderr,
-            )
-            return 2
+            return (2, "reviewerDirective: ERROR - `remove` takes one number, e.g. "
+                       "`/reviewerDirective remove 2` (see `/reviewerDirective list`).")
         entry = rl.remove_directive(proj, args[1])
         if entry is None:
-            print(
-                "reviewerDirective: ERROR - no directive numbered {!r}. Run "
-                "`/reviewerDirective list` to see the current numbering.".format(args[1]),
-                file=sys.stderr,
-            )
-            return 2
+            return (2, "reviewerDirective: ERROR - no directive numbered {!r}. Run "
+                       "`/reviewerDirective list` to see the current numbering.".format(args[1]))
         rl.log("[directive] removed {!r}".format(rl.short(entry["text"], 200)))
-        print("reviewerDirective: removed {!r}. {} remaining.".format(
+        return (0, "reviewerDirective: removed {!r}. {} remaining.".format(
             entry["text"], len(rl.load_directives(proj))))
-        return 0
 
-    # Anything else is the directive itself. The skill passes $ARGUMENTS unquoted, so the
-    # operator's words arrive as separate argv entries -- rejoin them into one directive.
+    # Anything else is the directive itself. The caller supplies tokenization: the hook passes the
+    # operator's free text as a single verbatim element (injection-proof, never shell-parsed); the
+    # CLI passes shell-split words.
     text = " ".join(args)
     try:
         entry = rl.add_directive(proj, text)
     except ValueError as e:
-        print("reviewerDirective: ERROR - {}".format(e), file=sys.stderr)
-        return 2
+        return (2, "reviewerDirective: ERROR - {}".format(e))
     rl.log("[directive] added {!r} for {}".format(
         rl.short(entry["text"], 200), rl.canonical_project_key(proj)))
-    print(
-        "reviewerDirective: recorded {!r} -- the reviewer receives it on every commit, "
-        "question and stop from the next hook invocation (no re-brief needed). "
-        "`/reviewerDirective list` to review, `remove <n>` or `clear` to retract.".format(
-            entry["text"]
-        )
-    )
-    return 0
+    return (0,
+            "reviewerDirective: recorded {!r} -- the reviewer receives it on every commit, "
+            "question and stop from the next hook invocation (no re-brief needed). "
+            "`/reviewerDirective list` to review, `remove <n>` or `clear` to retract.".format(
+                entry["text"]))
+
+
+def main(argv):
+    code, message = run(argv[1:], os.getcwd())
+    print(message, file=(sys.stdout if code == 0 else sys.stderr))
+    return code
 
 
 if __name__ == "__main__":

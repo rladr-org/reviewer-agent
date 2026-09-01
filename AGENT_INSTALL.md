@@ -351,6 +351,22 @@ enablement invocation (in `/config`, or set `permissions.defaultMode` to `defaul
 mode afterward if you want it back. The same applies to `/stopContinue on [acceptRisk]` and
 `/stopContinueWatchdog on`.
 
+**One permission rule for the manual commands.** The six manual commands (`/reviewerAgent`,
+`/reviewerHistory`, `/reviewerModel`, `/reviewerSession`, `/stopContinue`, `/stopContinueWatchdog`)
+run a `!` shell pre-exec through a single dispatcher, `reviewer_cmd.py`. In Claude Code `auto` mode a
+pre-exec with no matching allow-rule is blocked before it runs, so add ONE scoped rule to
+`~/.claude/settings.json`. Permission-rule paths are literal (no `${CLAUDE_PLUGIN_ROOT}` expansion),
+so substitute your resolved plugin path — `claude plugin list` shows it:
+
+```json
+{ "permissions": { "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer_cmd.py\":*)"] } }
+```
+
+`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell. Note
+that a state-CHANGING invocation (`on`) may still be stopped by auto mode's classifier regardless of
+the allow-rule (above); the rule is what lets the non-state-changing invocations run without turning
+auto mode off.
+
 Without auto mode blocking it, the plain `on` invocation must refuse without enabling and display:
 
 ```text

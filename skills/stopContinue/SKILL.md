@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/stopcontinue_toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" stopcontinue "$ARGUMENTS"`
 
 The block above is the live output of the toggle script (it ran before you saw this).
 

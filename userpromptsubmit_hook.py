@@ -18,6 +18,38 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
+import directive_toggle  # noqa: E402
+
+# The literal the reviewerDirective skill emits (no bang) and this hook detects. The directive text
+# arrives in the JSON `prompt` field -- never through a shell -- so it is injection-proof: shell
+# metacharacters like `$(...)`/backticks and pasted content cannot execute. (A crafted directive is
+# still a prompt-injection vector against the reviewer once recorded -- a separate, unchanged
+# concern, per SECURITY.md.)
+DIRECTIVE_SENTINEL = "<<reviewer-agent directive>>"
+
+
+def _directive_block(data, cwd):
+    """If the prompt is a reviewerDirective invocation, record it under the payload cwd (the
+    AUTHORITATIVE project, not the hook process's own directory) and return a top-level blocking
+    result so the model turn is suppressed and the outcome is shown; else None."""
+    prompt = str(data.get("prompt") or "")
+    if not prompt.lstrip().startswith(DIRECTIVE_SENTINEL):
+        return None
+    remainder = prompt.split(DIRECTIVE_SENTINEL, 1)[1].strip()
+    toks = remainder.split()
+    verb = toks[0].lower() if toks else ""
+    is_command = (
+        not toks
+        or (len(toks) == 1 and verb in ("list", "clear"))
+        or (len(toks) == 2 and verb == "remove")
+    )
+    # A recognized subcommand needs its tokens; free text is passed as ONE verbatim element so it is
+    # recorded exactly as typed (no whitespace normalization, no re-parse).
+    args = toks if is_command else [remainder]
+    _code, message = directive_toggle.run(args, cwd)
+    rl.log("[userpromptsubmit] key={} reviewerDirective handled".format(
+        rl.canonical_project_key(cwd)))
+    return {"decision": "block", "reason": message, "systemMessage": message}
 
 
 def _rearm_context(data, cwd):
@@ -46,6 +78,10 @@ def main():
         raw = sys.stdin.read()
         data = json.loads(raw) if raw.strip() else {}
         cwd = data.get("cwd") or rl.project_dir()
+        block = _directive_block(data, cwd)
+        if block is not None:
+            print(json.dumps(block))
+            return 0
         ctx = _rearm_context(data, cwd)
         if ctx:
             rl.log("[userpromptsubmit] key={} watchdog re-arm context injected".format(

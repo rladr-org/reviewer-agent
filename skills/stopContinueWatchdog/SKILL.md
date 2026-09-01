@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*), CronList, CronCreate, CronDelete
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/stopcontinue_watchdog_toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" watchdog "$ARGUMENTS"`
 
 The block above is the live output of the toggle script (it ran before you saw this).
 

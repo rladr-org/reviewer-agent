@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_session_toggle.py" $ARGUMENTS`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/reviewer_cmd.py" session "$ARGUMENTS"`
 
 The block above is the live output of the session script (it ran before you saw this).
 

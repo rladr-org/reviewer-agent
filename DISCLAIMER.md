@@ -117,9 +117,11 @@ You are not installing a linter. Understand these before you enable it:
    deploying or publishing software; communicating with third parties; disclosing information; or
    incurring charges. The model may misunderstand the user's instructions or incorrectly conclude
    that an action was previously authorized.
-8. **The bundled Claude Code slash commands intentionally use `!` shell preprocessing.** They are
-   marked for manual invocation only, but their arguments are processed by the shell. Avoid shell
-   syntax, and do not paste untrusted text into `/reviewerDirective`, which accepts free-form text.
+8. **`/reviewerDirective` is handled by a UserPromptSubmit hook (no shell); the other bundled slash
+   commands use `!` shell preprocessing.** A directive's text reaches the hook as JSON, so shell
+   syntax in it cannot execute -- but its content is injected into every reviewer prompt, so do not
+   paste untrusted text into it (a prompt-injection vector against the reviewer). The other commands
+   are manual-only and process their arguments through the shell; avoid shell syntax in them.
 
 ## It is not a security control
 

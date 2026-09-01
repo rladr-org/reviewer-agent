@@ -648,9 +648,13 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
 | `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
 
-> These manual commands intentionally use Claude Code `!` shell preprocessing. Because command
-> arguments are processed by the shell, avoid shell syntax and do not paste untrusted text into
-> `/reviewer-agent:reviewerDirective`.
+> `/reviewer-agent:reviewerDirective` is handled by a `UserPromptSubmit` hook that reads its text
+> from JSON rather than a shell, so shell syntax in a directive no longer matters. Its content is
+> still injected into every reviewer prompt, so do not paste untrusted text into it -- a crafted
+> directive is a prompt-injection vector against the reviewer, not a shell one. The other manual
+> commands run through Claude Code `!` shell preprocessing (via one `reviewer_cmd.py` dispatcher),
+> so their arguments are processed by the shell; keep them to the documented keywords and ids and
+> avoid shell syntax.
 
 Codex reasoning levels are `none` through `ultra`. Pi levels are `off`, `minimal`, `low`,
 `medium`, `high`, `xhigh`, and `max`. Claude levels are `low`, `medium`, `high`, `xhigh` and
