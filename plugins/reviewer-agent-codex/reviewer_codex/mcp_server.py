@@ -11,7 +11,7 @@ from .stop_tool import review_stop
 
 
 SERVER_NAME = "reviewer-agent-codex"
-SERVER_VERSION = "1.2.1-beta.3"
+SERVER_VERSION = "1.2.1-beta.4"
 PROTOCOL_VERSION = "2025-06-18"
 
 TOOL = {

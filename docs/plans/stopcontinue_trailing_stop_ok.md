@@ -90,7 +90,9 @@ report's observed failure is the trailing shape, which is accepted.
 
 ### Docs
 
-- `CHANGELOG.md` — `### Fixed` entry under `1.2.1-beta.3` (unreleased; no version bump needed).
+- `CHANGELOG.md` — `### Fixed` entry in the open `1.2.1` pre-release section, released as
+  `1.2.1-beta.4` (a bump is what lets a directory-source install pick the fix up; `1.2.1-beta.3`
+  was declared but never tagged).
 - Docstrings on both parsers state the two positions and the excluded middle position.
 
 ## Tests (red first)
