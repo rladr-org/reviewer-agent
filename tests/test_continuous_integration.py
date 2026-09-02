@@ -184,7 +184,7 @@ def test_the_network_dependent_audit_is_scheduled_not_a_pull_request_gate():
     assert "pull_request" not in triggers
 
 
-def test_dependabot_watches_all_three_ecosystems_weekly():
+def test_dependabot_covers_all_three_ecosystems_for_security_updates_only():
     updates = yaml.safe_load(
         (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     )["updates"]
@@ -193,4 +193,7 @@ def test_dependabot_watches_all_three_ecosystems_weekly():
     assert set(ecosystems) == {"pip", "npm", "github-actions"}
     for entry in updates:
         assert entry["schedule"]["interval"] == "weekly"
+        # Limit 0 is GitHub's switch for "security updates only": version updates stop, the
+        # ecosystem stays configured so advisory-driven updates still arrive.
+        assert entry["open-pull-requests-limit"] == 0
     assert ecosystems["npm"]["directory"] == "/pi-extensions/git-read-only"

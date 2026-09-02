@@ -1,4 +1,10 @@
 # SPDX-License-Identifier: MPL-2.0
+#
+# SECURITY UPDATES ONLY. Every ecosystem below sets `open-pull-requests-limit: 0`, which is
+# GitHub's documented way to switch off Dependabot *version* updates while keeping the ecosystem
+# configured, so Dependabot *security* updates (enabled in the repository's security settings)
+# still open a pull request when an advisory matches a pinned dependency. Version bumps for their
+# own sake produced up to nine pull requests a week for a project that promises no maintenance.
 version: 2
 
 updates:
@@ -9,7 +15,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "chore"
     labels: ["dependencies"]
@@ -21,7 +27,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "chore"
     labels: ["dependencies"]
@@ -34,7 +40,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     commit-message:
       prefix: "chore"
     labels: ["dependencies"]
