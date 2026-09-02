@@ -439,3 +439,70 @@ def test_incomplete_ruling_retires_abort_callback(
     assert not state.consume_stop_abort_bypass(
         git_repo, "root-session", "turn-1"
     )
+
+
+# Trailing STOP_OK parity with the Claude Code hook (docs/plans/stopcontinue_trailing_stop_ok.md):
+# the sentinel counts on the first OR the last non-empty line; a mid-reply sentinel followed by
+# more directive is contradictory and resolves to incomplete.
+def test_stop_ok_on_the_last_line_after_reasoning_grants_permit(
+    git_repo, isolated_state, monkeypatch
+):
+    state.set_feature(git_repo, "stop")
+    ruling = "There is no authorized work left incomplete.\n\nSTOP_OK\n"
+    monkeypatch.setattr(
+        stop_tool.backend, "review_turn", lambda *args, **kwargs: (0, ruling, "")
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "stop_ok"
+    assert state.consume_stop_permit(git_repo, "root-session")
+
+
+def test_stop_ok_trailing_line_tolerates_emphasis_only(git_repo, isolated_state, monkeypatch):
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(
+        stop_tool.backend,
+        "review_turn",
+        lambda *args, **kwargs: (0, "Nothing remains.\n\n**STOP_OK**\n", ""),
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "stop_ok"
+
+
+def test_stop_ok_mentioned_in_a_trailing_sentence_is_incomplete(
+    git_repo, isolated_state, monkeypatch
+):
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(
+        stop_tool.backend,
+        "review_turn",
+        lambda *args, **kwargs: (
+            0, "Fix the failing test.\n\nSTOP_OK is not warranted until it passes.\n", ""
+        ),
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "incomplete"
+    assert not state.consume_stop_permit(git_repo, "root-session")
+
+
+def test_stop_ok_mid_reply_is_contradictory_and_incomplete(
+    git_repo, isolated_state, monkeypatch
+):
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(
+        stop_tool.backend,
+        "review_turn",
+        lambda *args, **kwargs: (
+            0, "The list is complete.\n\nSTOP_OK\n\nHowever, run the linter first.\n", ""
+        ),
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "incomplete"
+    assert not state.consume_stop_permit(git_repo, "root-session")

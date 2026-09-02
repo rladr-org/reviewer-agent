@@ -2215,3 +2215,51 @@ def test_partial_tool_use_result_keeps_text_parsed_timeout(tmp_path):
     ev["toolUseResult"] = {"taskId": "bmon8"}
     path = _transcript(tmp_path, _human("monitor the run"), ev, _asst("Waiting."))
     assert rl.has_outstanding_background_task(path) is True
+
+
+# --------------------------------------------------------------------------
+# Trailing STOP_OK (docs/plans/stopcontinue_trailing_stop_ok.md): a supervisor that explains
+# itself and THEN answers puts the sentinel on the last line. First-line-only parsing read that
+# permit-the-stop verdict as a continue directive and nudged a finished task to the cap.
+# --------------------------------------------------------------------------
+_REASONED_STOP_OK = (
+    "The operator's stopping condition (\"all ten boxes ticked and placeholder text gone\") is "
+    "fully met, and there is no authorized work left to do.\n\nSTOP_OK"
+)
+
+
+def test_is_stop_ok_accepts_the_sentinel_as_the_last_line():
+    assert rl.is_stop_ok(_REASONED_STOP_OK) is True
+    assert rl.is_stop_ok("No authorized work remains.\n\nstop_ok\n") is True
+    assert rl.stop_ok_position(_REASONED_STOP_OK) == "last"
+
+
+def test_is_stop_ok_trailing_line_tolerates_emphasis_and_punctuation_only():
+    assert rl.is_stop_ok("Nothing is left.\n\n**STOP_OK**") is True
+    assert rl.is_stop_ok("Nothing is left.\n\n`STOP_OK`") is True
+    assert rl.is_stop_ok("Nothing is left.\n\nSTOP_OK.") is True
+    # Exact token on the trailing line: STOP_OKAY is not the sentinel.
+    assert rl.is_stop_ok("Nothing is left.\n\nSTOP_OKAY") is False
+
+
+def test_is_stop_ok_trailing_line_must_be_the_bare_token_not_a_prefix():
+    # A continue directive can END with a sentence that merely mentions the sentinel. Prefix
+    # matching stays confined to the first line, where the prompt puts the verdict.
+    assert rl.is_stop_ok(
+        "Run the failing test and fix it.\n\nSTOP_OK is not warranted until the tests pass."
+    ) is False
+
+
+def test_is_stop_ok_mid_reply_sentinel_is_contradictory_and_not_honored():
+    text = "The task list is complete.\n\nSTOP_OK\n\nHowever, first run the linter and fix it."
+    assert rl.is_stop_ok(text) is False
+    assert rl.stop_ok_position(text) == "mid"
+
+
+def test_stop_ok_position_first_and_none():
+    assert rl.stop_ok_position("STOP_OK -- the task is genuinely complete.") == "first"
+    assert rl.stop_ok_position("STOP_OK\n(task complete)") == "first"
+    assert rl.stop_ok_position("Continue: run the remaining tests.") is None
+    assert rl.stop_ok_position("") is None
+    assert rl.stop_ok_position("   \n\n  ") is None
+    assert rl.stop_ok_position(None) is None

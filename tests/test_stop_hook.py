@@ -445,3 +445,58 @@ def test_after_harness_wake_scoping_restores_normal_supervision(tmp_path, monkey
     out = json.loads(p.stdout)
     assert out["decision"] == "block"                    # normal supervision still active
     assert "frozen eval" in out["reason"]
+
+
+# --------------------------------------------------------------------------
+# Trailing STOP_OK (docs/plans/stopcontinue_trailing_stop_ok.md). Observed: the supervisor
+# reasoned first and put STOP_OK last; the first-line-only parser read it as a continue
+# directive and nudged a finished task six times. The verdict position is logged so a
+# contradictory (mid-reply) sentinel is visible rather than silently inverted.
+# --------------------------------------------------------------------------
+_REASONED_STOP_OK = (
+    "The operator's stopping condition (\"all ten boxes ticked and placeholder text gone\") is "
+    "fully met, and there is no authorized work left to do.\n\nSTOP_OK"
+)
+
+
+def test_trailing_stop_ok_allows_stop_and_logs_position(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "All ten boxes are ticked and the placeholder text is gone.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": _REASONED_STOP_OK, "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert "decision" not in out                       # allowed to stop
+    assert "approved this stop" in out["systemMessage"]
+    assert rl.read_nudge_count(repo, "claude-stop") == 0   # no forced continuation was spent
+    t = _log_text(home)
+    assert "keep_going=False" in t
+    assert "stop_ok=last" in t
+
+
+def test_mid_reply_stop_ok_still_continues_but_is_logged_as_mid(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Done, I think.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "The list is complete.\n\nSTOP_OK\n\nHowever, run the linter first.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"                  # contradictory reply resolves to continue
+    t = _log_text(home)
+    assert "keep_going=True" in t
+    assert "stop_ok=mid" in t
