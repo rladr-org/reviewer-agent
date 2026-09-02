@@ -9,7 +9,7 @@ Hooks (each runs as a fresh short-lived process, reading JSON on stdin):
 
 - `commit_hook.py` -- PreToolUse(Bash), intercepts `git commit`, routes the STAGED diff to the
   active backend, and ALLOWs or DENYs. Fail-CLOSED.
-- `askq_answer_hook.py` -- PostToolUse(AskUserQuestion), answers on the operator's behalf.
+- `askq_reroute_hook.py` -- PreToolUse(AskUserQuestion), reroutes the question to prose the stop supervisor answers (only with stopContinue active). Fail-OPEN.
 - `stop_hook.py` -- Stop, the stopContinue supervisor. Fail-OPEN.
 - `session_start_hook.py` -- SessionStart.
 
@@ -22,7 +22,7 @@ Library and commands:
   in it may raise into a caller -- the commit gate is fail-closed, so an exception in
   instrumentation would block an approved commit.
 - `toggle.py`, `stopcontinue_toggle.py`, `directive_toggle.py`, `reviewer_model_toggle.py`,
-  `reviewer_session_toggle.py`, `setup_timeout.py` -- the slash commands.
+  `reviewer_session_toggle.py` -- the slash commands.
 - `tests/` -- pytest. `fake_codex.py` / `fake_pi.py` stub the real CLIs; nothing in the suite
   may spend a real reviewer call.
 

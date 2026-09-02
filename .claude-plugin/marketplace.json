@@ -11,7 +11,7 @@
     {
       "name": "reviewer-agent",
       "source": "./",
-      "description": "Autonomous reviewer for Claude Code: the selected codex, pi or claude backend gates commits, answers timed-out AskUserQuestion prompts, and supervises stops through stopContinue.",
+      "description": "Autonomous reviewer for Claude Code: the selected codex, pi or claude backend gates commits and supervises stops through stopContinue (which also reroutes AskUserQuestion prompts to the supervisor).",
       "version": "1.2.1-beta.2",
       "author": {
         "name": "RLADR"

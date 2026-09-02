@@ -41,6 +41,6 @@ Levels differ by backend and the sets are NOT interchangeable:
 An unset pi or claude level means `medium`, which is what those backends are actually sent, so a
 bare `/reviewerModel` reports `medium` rather than "not overridden". Levels are additionally per-MODEL, so one the
 current model does not support may still fail the call. Effort applies to the commit audit
-and question answers only: the brief stays low (its reply is discarded) and the stop supervisor
+only: the brief stays low (its reply is discarded) and the stop supervisor
 keeps its own. A timeout still BLOCKS the commit (the gate is fail-closed) -- raising it only
 buys the reviewer more time on a large diff.

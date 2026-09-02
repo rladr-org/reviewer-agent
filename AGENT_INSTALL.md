@@ -22,7 +22,6 @@ full list is here, before the first command rather than buried in a step:
 | path | what happens | reversible? |
 |---|---|---|
 | Claude Code's plugin directory | the plugin is installed | yes, `/plugin uninstall reviewer-agent` (full teardown: [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md)) |
-| `~/.claude/settings.json` | `askUserQuestionTimeout` is **added if absent**; an existing value is never overwritten | yes, remove the key |
 | `~/.claude/reviewer-agent/` | created for flags, session ids, logs, verdicts | yes, delete the directory |
 | system temp base `reviewer-agent-scratch/` | **codex backend only:** per-reviewer-session scratch for the streamed codex audit (`REVIEWER_SCRATCH_ROOT` relocates it) | yes, auto-reclaimed at rotation / by a lease sweep; safe to delete |
 | `~/.pi/agent/extensions/git-read-only/` | **only if** the backend is `pi` | yes, delete the directory |
@@ -33,8 +32,7 @@ full list is here, before the first command rather than buried in a step:
 true.** Step 5 writes a brief and the optional pi section copies a directory; both are told to
 refuse rather than clobber, because a repository's existing `reviewerAgent.md` is hand-written
 content nobody wants replaced by a template, and an existing pi extension may be a newer copy than
-this one. `askUserQuestionTimeout` is likewise added only when absent — the toggle never replaces
-a value you chose.
+this one.
 
 ## Two paths, and they are not the same directory
 
@@ -78,9 +76,8 @@ intended behaviour, not a malfunction. If the person you are acting for has not 
 stop and confirm before step 6.
 
 **Stop and report, do not improvise, if:** no backend the operator is willing to use is present (step 2 records the
-operator's backend choice and its audit trade-off); the chosen backend is unauthenticated; `~/.claude/
-settings.json` is unwritable; the test suite fails; or any check below does not produce the stated
-result. A partially installed fail-closed gate can block every commit in every repository, so a
+operator's backend choice and its audit trade-off); the chosen backend is unauthenticated; the test
+suite fails; or any check below does not produce the stated result. A partially installed fail-closed gate can block every commit in every repository, so a
 half-finished install is worse than none.
 
 **Stop if a standalone predecessor is still registered.** Before installing the plugin, inspect
@@ -146,7 +143,7 @@ are controlled by Anthropic and the terms applicable to that account.
 Now branch on what you found. In every case the operator answers before you continue:
 
 - **More than one available** — **ask which one to use.** State the relevant trade-off: every
-  backend handles commit audits, timed-out questions, and stop supervision; the current *codex*
+  backend handles commit audits, the `AskUserQuestion` reroute, and stop supervision; the current *codex*
   configuration can run tests during an audit; the current *pi* and *claude* configurations omit
   shell tools; and *claude* uses the operator's provider account. Do
   not default to codex because it is listed first here.
@@ -389,19 +386,6 @@ If instead it prints `reviewerAgent: ERROR - brief not found at <path>`, nothing
 step 5 did not run, or the session is in a directory other than the one you wrote the brief in.
 Compare the path it names against step 5's file before doing anything else.
 
-**Check:** the accepting invocation reports that it armed `askUserQuestionTimeout`, or warns that it
-could not write `~/.claude/settings.json`. A warning is not fatal for the commit gate, but question
-answering will never fire until it is resolved — report it rather than ignoring it.
-
-Verify the setting landed:
-
-```
-python3 -c "import json,os;p=os.path.expanduser('~/.claude/settings.json');print(json.load(open(p)).get('askUserQuestionTimeout'))"
-```
-
-**Check:** prints a value such as `60s`. If it prints `None`, question answering is inert; run
-`python3 <PLUGIN_DIR>/setup_timeout.py 60s` and re-check.
-
 If `codex` is at a non-standard path from step 2, set `REVIEWER_CODEX_BIN` to it now.
 
 ## Step 7 — prove the gate actually gates
@@ -430,7 +414,7 @@ optional: the reviewer withholds bash from Pi, so commit audits read the reposit
 this extension. A missing or broken extension blocks every commit in the repository behind the
 fail-closed gate.
 
-Pi handles commit audits, timed-out questions, and stop supervision with whatever model Pi is
+Pi handles commit audits, the `AskUserQuestion` reroute, and stop supervision with whatever model Pi is
 configured for. It never invokes Codex as a fallback. See *Claude Code backends* in the README.
 
 ```

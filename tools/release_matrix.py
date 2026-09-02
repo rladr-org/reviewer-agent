@@ -708,8 +708,8 @@ Still requires a person, in a real host, and cannot be scripted here:
      `INSTALL_WITH_AGENT.md`, and again following the manual instructions.
   4. Confirm shell-commit redirection in native Codex: a bare `git commit` is denied with the
      absolute-path retry instruction.
-  5. Exercise a real timed-out `AskUserQuestion` by leaving a question unanswered in Claude Code
-     until the configured timeout expires.
+  5. Confirm the `AskUserQuestion` reroute in a real interactive Claude Code session with
+     `stopContinue` on: the tool is denied (no dialog) and the agent re-asks in prose.
   6. Uninstall on each host and confirm unrelated plugins, marketplaces and settings survive.
 """
 

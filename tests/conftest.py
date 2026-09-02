@@ -32,12 +32,3 @@ def _never_spend_a_real_reviewer_call(monkeypatch):
     monkeypatch.setenv("REVIEWER_PI_BIN", fake)
 
 
-@pytest.fixture(autouse=True)
-def _isolate_user_settings(tmp_path, monkeypatch):
-    """Point REVIEWER_SETTINGS_FILE at a throwaway file for EVERY test.
-
-    `/reviewerAgent on` arms `askUserQuestionTimeout` in the user's real
-    ~/.claude/settings.json, and the subprocess-based tests inherit this environment -- so
-    without this the suite would edit the operator's own settings. Tests that need a specific
-    settings file still pass REVIEWER_SETTINGS_FILE explicitly, which overrides this."""
-    monkeypatch.setenv("REVIEWER_SETTINGS_FILE", str(tmp_path / "user_settings.json"))

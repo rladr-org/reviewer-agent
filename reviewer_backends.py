@@ -1139,9 +1139,9 @@ def run_pi_review(
     later turns resume that exact id without re-briefing.
 
     ``require_staged_read`` is true by default because the historical and primary caller is
-    the fail-closed commit gate. Question answering and stop supervision set it false: those
+    the fail-closed commit gate. Stop supervision sets it false: those
     turns have no staged set, so applying the commit-only ``git_read --staged`` requirement
-    would replace every valid answer with a synthetic rejection.
+    would replace a valid ruling with a synthetic rejection.
     """
     model = reviewer_model("pi")
     stored = read_pi_session(cwd, claude_session_id, role)

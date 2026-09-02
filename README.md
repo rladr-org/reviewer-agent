@@ -63,7 +63,7 @@ Everything below is optional, enabled **per repository** and **per feature**; no
 
 **Fits your workflow**
 
-- **Timed-out question answering** — an `AskUserQuestion` you leave unanswered (and the host auto-closes) can be answered by the reviewer on your behalf, so an idle prompt doesn't stall a run.
+- **Question rerouting (with `stopContinue`)** — with `stopContinue` on, an `AskUserQuestion` is turned into a prose question the stop supervisor answers from your established context (or hands back to you), so an idle prompt doesn't stall a run.
 - **Verdict history** — approvals, rejections, and no-verdict outcomes (timeouts, cancellations) are recorded per project, outside the repo, so you can see what happened: `/reviewer-agent:reviewerHistory`. → [Verdict retention](#verdict-retention)
 - Settings persist across restarts and apply to linked worktrees.
 
@@ -154,8 +154,8 @@ useful way to judge a change is to see whether it still passes. The current invo
 read-only; that configuration is intended to prevent the reviewer from creating the commit. It returns
 one of two answers: `APPROVED` (optionally with non-blocking `SUGGESTIONS:`), or `REJECTED:`
 followed by a numbered list of required fixes with `file:line` evidence. The developer host
-performs the commit only after an approval response. Briefing, question answering and stop
-supervision request read-only operation.
+performs the commit only after an approval response. Briefing and stop supervision (which
+answers any rerouted `AskUserQuestion`) request read-only operation.
 
 **Pi** — intended as a static review. The current invocation omits shell, write, and edit tools;
 it supplies the staged patch through a constrained Git wrapper and allows repository reads for
@@ -225,7 +225,7 @@ different hooks and runtime interfaces, and are installed independently.
 | Developer host | Capability | Reviewer backend | Status |
 |---|---|---|---|
 | Claude Code | staged commit audit | selected `codex`, `pi` or `claude` backend | implemented |
-| Claude Code | timed-out `AskUserQuestion` answer | selected `codex`, `pi` or `claude` backend | implemented |
+| Claude Code | `AskUserQuestion` reroute (needs `stopContinue`) | selected `codex`, `pi` or `claude` backend | implemented |
 | Claude Code | `stopContinue` supervision | selected `codex`, `pi` or `claude` backend | implemented |
 | Codex | staged commit audit | Codex child session | implemented |
 | Codex | stop supervision | separate Codex child session | implemented |
@@ -234,11 +234,9 @@ different hooks and runtime interfaces, and are installed independently.
 **"Implemented" means the code exists and the tests pass. It is not a claim of support and not a
 promise that it works for you.** Every row above is covered by the unit suites. The automated live
 matrix, which drives the real reviewer CLIs, additionally covers commit audits and stop
-supervision on every backend — the timed-out `AskUserQuestion` path is not in it, because the
-timeout is produced by the host rather than by anything this harness can trigger, so that path has
-unit tests and hand checks only.
+supervision on every backend.
 
-Selecting `pi` in Claude Code routes commit audits, timed-out `AskUserQuestion` answers, and `stopContinue` through Pi.
+Selecting `pi` in Claude Code routes commit audits and `stopContinue` (including the `AskUserQuestion` reroute) through Pi.
 Selecting `pi` does not require or launch Codex. The same is true of `claude`.
 
 The three backends differ in what a review is *allowed to do*, and that is the difference to
@@ -246,7 +244,7 @@ understand before choosing one:
 
 | Reviewer backend | Execution boundary |
 |---|---|
-| `codex` | The current commit-audit invocation requests `workspace-write` with `approval_policy="never"` and read-only Git metadata. Briefing, question answering, and stop supervision request read-only operation. |
+| `codex` | The current commit-audit invocation requests `workspace-write` with `approval_policy="never"` and read-only Git metadata. Briefing and stop supervision (which answers any rerouted `AskUserQuestion`) request read-only operation. |
 | `pi` | The current `-t` allowlist names read/search tools plus `git_read` and omits shell, write, and edit tools. The intended result is a static audit of the staged patch. |
 | `claude` | The current child invocation requests `--safe-mode`, `--permission-mode dontAsk`, and an allowlist of `Read`, `Grep`, and `Glob`, with common execution and mutation tools denied by name. The staged patch is supplied in the prompt. |
 
@@ -270,10 +268,11 @@ The Claude Code plugin provides three per-repository capabilities:
 1. **Commit gate.** A `git commit` is intercepted and the staged set is audited first. Approval
    permits the command; rejection or an operational review failure blocks it. The gate is
    fail-closed.
-2. **Timed-out question answering.** Claude Code displays `AskUserQuestion` normally. If the
-   operator answers, the reviewer is not involved. If the native away-from-keyboard timeout
-   expires with no answer, the selected reviewer answers and the developer agent continues. This
-   path is fail-open if the reviewer fails.
+2. **`AskUserQuestion` reroute (with `stopContinue`).** When `stopContinue` is active, an
+   `AskUserQuestion` is denied at `PreToolUse` and the agent re-asks it as a prose message; the
+   stop supervisor then answers it from established operator context or defers it to the operator.
+   With `stopContinue` off, the question renders normally and the reviewer is not involved.
+   Fail-open.
 3. **`stopContinue` supervision.** When enabled separately, the selected reviewer checks each
    proposed stop. It returns `STOP_OK` when the task is complete or gives a continuation directive
    when work remains. This path is fail-open and has a per-turn nudge cap.
@@ -331,7 +330,7 @@ In each repository to protect:
    that project. `/reviewer-agent:reviewerAgent on` refuses to enable a repository without this
    brief.
 2. Select and verify the backend as described in [Claude Code backends](#claude-code-backends).
-3. Enable the commit gate and timed-out question answering:
+3. Enable the commit gate:
 
    ```text
    /reviewer-agent:reviewerAgent on
@@ -357,10 +356,6 @@ In each repository to protect:
 The flags are stored by canonical repository root, apply to linked worktrees, and persist across
 Claude Code restarts. `/reviewer-agent:reviewerAgent off` and `/reviewer-agent:stopContinue off`
 disable them independently.
-
-The successful reviewerAgent enabling invocation also adds `askUserQuestionTimeout: 60s` to the
-user’s `~/.claude/settings.json` when the setting is absent. It never replaces an existing value.
-The setting takes effect in a new Claude Code session.
 
 For agent-assisted installation, start with [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md). The
 Claude-specific unattended procedure it invokes is [`AGENT_INSTALL.md`](AGENT_INSTALL.md).
@@ -473,17 +468,12 @@ Then, optionally and in your own time:
   (or the legacy `REVIEWER_HOME` alias), remove that path instead.
 - **The Pi extension**, if you installed it: `rm -rf ~/.pi/agent/extensions/git-read-only`.
   Nothing else uses it.
-- **The question timeout.** Enabling the reviewer set `askUserQuestionTimeout` in
-  `~/.claude/settings.json`, because Claude Code only auto-closes an unanswered
-  `AskUserQuestion` when that key is present. Uninstalling does not remove it: it is a host
-  setting you may now want for other reasons. Delete the key by hand to restore the previous
-  behaviour.
 
 ## Claude Code backends
 
 The Claude Code plugin resolves one backend per repository, from three: `codex`, `pi` and
 `claude`. Whichever it resolves handles all three Claude Code capabilities — commit audits,
-timed-out question answering, and stop supervision. Nothing is selected for you beyond the
+the `AskUserQuestion` reroute, and stop supervision. Nothing is selected for you beyond the
 `codex` fallback, and `claude` in particular is never selected implicitly: it spends your own
 subscription quota, so it is chosen explicitly or not at all.
 
@@ -492,8 +482,8 @@ subscription quota, so it is chosen explicitly or not at all.
 Install and authenticate `codex` with `codex login` or an API key.
 Briefing requests a read-only sandbox. Commit audits request `workspace-write` with
 `approval_policy="never"` so the reviewer can run tests; Git metadata is requested read-only to
-prevent the reviewer from creating the commit. Timed-out question answers and stop supervision
-request the read-only sandbox.
+prevent the reviewer from creating the commit. Stop supervision (which answers any rerouted
+`AskUserQuestion`) requests the read-only sandbox.
 
 Set a nonstandard binary with `REVIEWER_CODEX_BIN`.
 
@@ -505,8 +495,8 @@ reviewer.
 
 The current commit-review invocation omits a shell and supplies Git access through the bundled
 `git_read` extension, which constructs fixed arguments with `shell:false`. This design is intended
-to keep the reviewer read-only and does not provide a way to run a test suite during an audit. Question answering
-and stop supervision do not require a staged read, but `/reviewer-agent:reviewerAgent on` also enables the commit
+to keep the reviewer read-only and does not provide a way to run a test suite during an audit. Stop
+supervision does not require a staged read, but `/reviewer-agent:reviewerAgent on` also enables the commit
 gate, so a functional Pi installation must include the extension.
 
 Pi prerequisites:
@@ -632,7 +622,7 @@ convention for namespaced commands).
 
 | Command | Purpose |
 |---|---|
-| `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review and timed-out question answering. First enablement requires the operator's exact `acceptRisk` invocation. |
+| `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review. First enablement requires the operator's exact `acceptRisk` invocation. |
 | `/reviewer-agent:stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
 | `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. |
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
@@ -670,8 +660,8 @@ staged-set boundary, retry handling, required finding dispositions, and review o
 The project brief adds repository-specific requirements and takes precedence when more specific.
 
 The full brief is sent once when each role session is created. A compact capsule containing the
-non-negotiable rules, project-brief path, directives, and current context is sent on every commit,
-question, and stop call. Changes to the capsule apply on the next call. Changes to the full brief
+non-negotiable rules, project-brief path, directives, and current context is sent on every commit
+and stop call. Changes to the capsule apply on the next call. Changes to the full brief
 require `/reviewer-agent:reviewerSession rotate`.
 
 The commit reviewer automatically rotates after three completed non-retry audits. Configure the
@@ -685,8 +675,8 @@ Automatic rotation leaves the separate stop-supervisor session untouched.
 
 Within one Claude Code session, every backend keeps separate role sessions:
 
-- the reviewer session handles commit audits and timed-out questions;
-- the stop session handles `stopContinue` only.
+- the reviewer session handles commit audits;
+- the stop session handles `stopContinue`, including the `AskUserQuestion` reroute.
 
 For Codex these are stored as `sess_<claude-session>.reviewer.codex` and
 `sess_<claude-session>.stop.codex`. For Pi they are `sess_<claude-session>.pi` and
@@ -898,10 +888,10 @@ the next gated action brief a fresh one, at the cost of one cold start. In Claud
 keyed by project as well as by session to prevent the previously observed collision. If this
 occurs, disable the reviewer and report it; do not rely on the isolation claim alone.
 
-**`AskUserQuestion` is never answered for you.** That path only fires when Claude Code
-auto-closes an *unanswered* question, which it only does when `askUserQuestionTimeout` is set in
-`~/.claude/settings.json`. A successful reviewerAgent enable arms it; if that step warned, the key
-is missing.
+**`AskUserQuestion` is only rerouted with `stopContinue` on.** With `stopContinue` active the
+reviewer turns the question into a prose message and the stop supervisor answers it or hands it
+back to you; with `stopContinue` off the question renders normally and the reviewer is not
+involved.
 
 Where to look when it is none of those: `~/.claude/reviewer-agent/logs/reviewer.log` has one
 line per gated action, with the exit code, the verdict tail and the stderr tail. The Codex
@@ -942,7 +932,9 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_DISK_WARN_BYTES` | `2147483648` (2 GiB) | Codex backend: warn-only free-space threshold; below it the audit prints a low-disk warning and never blocks the commit. `0` disables. |
 
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
-The question and stop paths each use a separate 300-second limit and fail open.
+Stop supervision uses a separate 300-second reviewer limit and fails open. The `AskUserQuestion`
+reroute is a `PreToolUse` hook (a 60-second host timeout) that makes no reviewer call of its own;
+the rerouted question is answered by stop supervision.
 
 The streaming, scratch, and idle-threshold behavior below is specific to **this Claude Code plugin
 running its `codex` reviewer backend** (Claude Code as the host, codex as the reviewer). It does not
@@ -1099,7 +1091,7 @@ hooks/hooks.json                       Claude Code hook registration
 skills/<name>/SKILL.md                 Claude Code slash commands (invoked as /reviewer-agent:<name>)
 reviewer_*.py                          Claude Code runtime layers
 commit_hook.py                         Claude Code commit gate
-askq_answer_hook.py                    Claude Code timed-out question handler
+askq_reroute_hook.py                   Claude Code AskUserQuestion reroute (stopContinue)
 stop_hook.py                           Claude Code stop supervisor
 session_start_hook.py                  Claude Code Codex-session bootstrap
 reviewerAgent.md.template              project brief template

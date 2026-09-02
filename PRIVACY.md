@@ -23,8 +23,7 @@ What may be sent depends on the call and backend:
 |---|---|
 | Session brief | The project's `reviewerAgent.md` and package-owned reviewer instructions. |
 | Commit audit | The staged diff, typed session messages, standing directives, retry context and repository files the reviewer reads. A Codex reviewer may also run repository commands. |
-| Timed-out question answer | The question, options, typed session messages and directives. |
-| Stop supervision | The proposed final message, typed operator messages, directives and available plan, task or liveness context. |
+| Stop supervision | The proposed final message (for a rerouted `AskUserQuestion`, this includes the question and its options), typed operator messages, directives and available plan, task or liveness context. |
 
 The exact content can change with the selected host, backend and provider version. Inspect the
 source and provider settings if a particular data boundary matters.

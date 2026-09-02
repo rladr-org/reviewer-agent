@@ -339,26 +339,3 @@ def test_the_stop_supervisor_prompt_carries_the_directive(tmp_path):
          "FAKE_CODEX_STDOUT": "STOP_OK"},
     )
     assert any(GO in arg for arg in _sent_prompts(dump)), _sent_prompts(dump)
-
-
-def test_the_askq_answer_prompt_carries_the_directive(tmp_path):
-    repo = str(tmp_path / "repo")
-    Path(repo).mkdir()
-    subprocess.run(["git", "init", "-q", repo], check=True)
-    rl.set_active(repo)
-    rl.add_directive(repo, GO)
-    dump = str(tmp_path / "argv.jsonl")
-    tool_input = {"questions": [{"question": "Pick one?", "header": "H", "options": [
-        {"label": "A", "description": "aa"}, {"label": "B", "description": "bb"}]}]}
-    _run(
-        "askq_answer_hook.py",
-        {"cwd": repo, "session_id": "s3", "tool_name": "AskUserQuestion",
-         "hook_event_name": "PostToolUse", "tool_input": tool_input,
-         "tool_response": {"questions": tool_input["questions"], "answers": {},
-                           "annotations": {}, "afkTimeoutMs": 60000}},
-        {"REVIEWER_HOME": os.environ["REVIEWER_HOME"],
-         "REVIEWER_CODEX_BIN": FAKE,
-         "FAKE_CODEX_ARGV_FILE": dump,
-         "FAKE_CODEX_STDOUT": "A"},
-    )
-    assert any(GO in arg for arg in _sent_prompts(dump)), _sent_prompts(dump)

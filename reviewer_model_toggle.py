@@ -18,7 +18,7 @@ produced a success message for a change the running reviewer would never read.
   fail-CLOSED, so this buys time, not mercy.
 - EFFORT: reasoning depth. The backends have DIFFERENT valid sets -- codex `none..ultra`,
   pi `off..max`, claude `low..max` -- so each is validated against its own. On codex it covers the
-  commit audit and question answers, deliberately NOT the brief (its reply is discarded) and not
+  commit audit, deliberately NOT the brief (its reply is discarded) and not
   the stop supervisor (own knob, runs every turn end). On pi it is the `--thinking` level and on
   claude the `--effort` flag, both defaulting to `medium` because the flag is always sent.
 

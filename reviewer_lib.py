@@ -343,7 +343,6 @@ from reviewer_prompts import (  # noqa: F401
     operator_transcript_block,
     operator_transcript_enabled,
     operator_watermark_file,
-    posttool_context_output,
     sessionstart_context_output,
     read_audited_stage,
     read_operator_watermark,

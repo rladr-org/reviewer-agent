@@ -72,9 +72,8 @@ def _on(proj, accept_risk=False):
     rl.log("[on] root={} (flag set; reviewer briefed lazily on first use)".format(root))
     print(
         "reviewerAgent: ON for {} - the reviewer is briefed on first use, so the first "
-        "commit/question/stop it gates will take a moment.".format(root)
+        "commit it gates will take a moment.".format(root)
     )
-    _arm_question_answering()
     _warn_about_an_old_host()
     _state_the_risk(root)
     return 0
@@ -115,34 +114,6 @@ def _warn_about_an_old_host():
     if warning:
         print("reviewerAgent: WARNING - " + warning, file=sys.stderr)
         rl.log("[on] host version warning: {}".format(warning))
-
-
-def _arm_question_answering():
-    """Establish `askUserQuestionTimeout` in the user settings file.
-
-    The question-answering hook only fires when Claude Code auto-closes an UNANSWERED
-    AskUserQuestion, which it only does when that key is set -- and a plugin manifest cannot
-    ship it (plugin `settings` supports only `agent`/`subagentStatusLine`). So enabling the
-    reviewer arms it here, or the advertised capability would silently never fire. Never
-    fatal: the commit gate and stop supervisor do not depend on it, so a failure WARNS and
-    leaves the reviewer enabled."""
-    try:
-        import setup_timeout
-
-        code, detail = setup_timeout.ensure()
-    except Exception as e:  # never let this break enabling the reviewer
-        code, detail = 1, "ERROR - {}".format(e)
-    if code == 0:
-        print("reviewerAgent: askUserQuestionTimeout {}".format(detail))
-        rl.log("[on] askq timeout: {}".format(detail))
-        return
-    print(
-        "reviewerAgent: WARNING - askUserQuestionTimeout NOT armed ({}). The reviewer is "
-        "enabled and still gates commits and stops, but questions you leave unanswered will "
-        "NOT be answered until this is fixed.".format(detail),
-        file=sys.stderr,
-    )
-    rl.log("[on] askq timeout NOT armed: {}".format(detail))
 
 
 def main(argv):

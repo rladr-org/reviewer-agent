@@ -114,9 +114,9 @@ Identify the two entries: the **preflight** hook (frequently the operator's own 
 If instead `PreToolUse` (Bash) points **directly** at `commit_hook.py` (no wrapper), just remove that
 one hook entry. **Never remove the operator's own preflight/approval hook.**
 
-**c. Remove the other standalone entries** from `~/.claude/settings.json`: the `PostToolUse`
-(`askq_answer_hook.py`), `SessionStart` (`session_start_hook.py`) and `Stop` (`stop_hook.py`) hooks
-that point under `~/.claude/reviewerAgent/`.
+**c. Remove the other standalone entries** from `~/.claude/settings.json`: the `PreToolUse`
+(`askq_reroute_hook.py`, matcher `AskUserQuestion`), `SessionStart` (`session_start_hook.py`) and
+`Stop` (`stop_hook.py`) hooks that point under `~/.claude/reviewerAgent/`.
 
 **Check — BEFORE deleting anything:**
 
@@ -186,9 +186,6 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
   legacy `REVIEWER_HOME`, else `~/.claude/reviewer-agent`) — every project's flags, reviewer/stop
   session ids, retained verdicts, and logs. Skip it to keep review history and per-repo enablement
   for a later reinstall.
-- **The question timeout.** Enabling the reviewer added `askUserQuestionTimeout` to
-  `~/.claude/settings.json`; it is a host setting the operator may still want. Delete the key by hand
-  only if it is unwanted.
 - **Per-repository briefs.** Each protected repo has a hand-written `reviewerAgent.md`. Leave them
   unless the operator asks — they are not the tool's to delete.
 - **The Pi extension**, only if `pi` was used: `rm -rf ~/.pi/agent/extensions/git-read-only`.
@@ -198,7 +195,7 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
 Ask the operator to **restart Claude Code**, then confirm:
 
 - `/hooks` lists **no** reviewerAgent hooks (`session_start_hook.py`, `stop_hook.py`,
-  `askq_answer_hook.py`, or a `commit_hook.py` chained in `bash_gate.py`).
+  `askq_reroute_hook.py`, or a `commit_hook.py` chained in `bash_gate.py`).
 - A normal Bash command runs — the operator's own preflight/approval hook survived.
 - A `git commit` in a previously gated repository is **no longer** intercepted by a reviewer.
 

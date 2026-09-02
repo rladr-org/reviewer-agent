@@ -232,7 +232,7 @@ def test_every_hook_path_receives_a_capsule(tmp_path, home):
 
 # --------------------------------------------------------------------------
 # The staged-set instructions belong ONLY to the commit audit. apply_context also serves the
-# question answerer and the stop supervisor, where there is no staged set and no audit block --
+# stop supervisor, where there is no staged set and no audit block --
 # telling those turns to "judge the STAGED set only" describes a thing that does not exist.
 # --------------------------------------------------------------------------
 def test_non_commit_capsule_says_nothing_about_a_staged_set(tmp_path):

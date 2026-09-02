@@ -133,24 +133,24 @@ def test_on_does_not_run_the_codex_brief(tmp_path, monkeypatch):
 
 
 def test_on_tells_the_operator_briefing_is_lazy(tmp_path):
-    # The operator must know the reviewer is not briefed yet, so the first gated action
-    # (commit / question / stop) is expected to take a moment.
+    # The operator must know the reviewer is not briefed yet, so the first commit it gates is
+    # expected to take a moment. reviewerAgent gates commits; it must NOT claim to gate questions
+    # -- AskUserQuestion rerouting is a separately-enabled stopContinue feature, not reviewerAgent.
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     p = run_toggle(["on", "acceptRisk"], proj, home, {"FAKE_CODEX_STDOUT": "ack"})
     assert p.returncode == 0, p.stderr
     assert "first" in p.stdout.lower()
+    assert "commit" in p.stdout.lower()
+    assert "question" not in p.stdout.lower()  # reviewerAgent no longer advertises question answering
 
 
 # --------------------------------------------------------------------------
-# `on` must ARM the question-answering path end to end.
-#
-# askq_answer_hook only ever fires when Claude Code auto-closes an UNANSWERED
-# AskUserQuestion, and that only happens when `askUserQuestionTimeout` is set in USER
-# settings. A plugin manifest cannot ship that key, so if enabling does not establish it the
-# advertised "answers questions you leave unanswered" capability silently never fires.
+# `on` no longer touches the user's settings file. AskUserQuestion answering moved off the
+# host `askUserQuestionTimeout` auto-close (which stopped firing) onto the stopContinue
+# PreToolUse reroute, so enabling the reviewer arms nothing in ~/.claude/settings.json.
 # --------------------------------------------------------------------------
-def test_on_arms_the_askuserquestion_timeout(tmp_path):
+def test_on_does_not_touch_user_settings(tmp_path):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     settings = tmp_path / "user_settings.json"
@@ -158,41 +158,8 @@ def test_on_arms_the_askuserquestion_timeout(tmp_path):
         ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
     )
     assert p.returncode == 0, p.stderr
-    assert json.loads(settings.read_text())["askUserQuestionTimeout"] == "60s"
-    assert "askUserQuestionTimeout" in p.stdout
-
-
-def test_on_never_overrides_a_timeout_the_operator_chose(tmp_path):
-    home = str(tmp_path / "rh")
-    proj = make_repo(tmp_path)
-    settings = tmp_path / "user_settings.json"
-    settings.write_text(json.dumps({"askUserQuestionTimeout": "10m", "model": "opus"}))
-    p = run_toggle(
-        ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
-    )
-    assert p.returncode == 0, p.stderr
-    data = json.loads(settings.read_text())
-    assert data["askUserQuestionTimeout"] == "10m"  # the operator's choice stands
-    assert data["model"] == "opus"                  # and nothing else is disturbed
-
-
-def test_on_surfaces_a_timeout_failure_without_blocking_enable(tmp_path, monkeypatch):
-    # A corrupt settings file must not silently leave question answering disarmed -- and must
-    # not stop the reviewer being enabled either.
-    home = str(tmp_path / "rh")
-    proj = make_repo(tmp_path)
-    settings = tmp_path / "user_settings.json"
-    settings.write_text('{"model": "opus",}')
-    p = run_toggle(
-        ["on", "acceptRisk"], proj, home, {"REVIEWER_SETTINGS_FILE": str(settings)}
-    )
-    assert p.returncode == 0, p.stderr
-    assert flag_exists(home, proj, monkeypatch)  # enabling still succeeded
-    out = p.stdout + p.stderr
-    assert "ON" in out
-    assert "askUserQuestionTimeout" in out
-    assert "WARNING" in out
-    assert settings.read_text() == '{"model": "opus",}'  # untouched
+    assert not settings.exists()  # enabling wrote no settings file
+    assert "askUserQuestionTimeout" not in p.stdout + p.stderr
 
 
 def test_on_does_not_persist_a_session_id(tmp_path, monkeypatch):

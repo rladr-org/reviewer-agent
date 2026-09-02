@@ -4,7 +4,7 @@
 > **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
 
 A procedure for an **agent** told to update an existing installation of reviewer-agent
-(`reviewerAgent`, `stopContinue`, `stopContinueWatchdog`, and the timed-out-question answerer) to
+(`reviewerAgent`, `stopContinue`, `stopContinueWatchdog`, and the `AskUserQuestion` reroute) to
 the most recent version. Every step has a command and a check that proves it worked. Do not
 proceed past a failed check.
 
@@ -52,7 +52,6 @@ An update writes outside the repository. The full list, before the first command
 | Claude Code's plugin cache (`~/.claude/plugins/cache/reviewer-agent/…/<version>/`) | a **new** version directory is copied in; the previous one remains until the host garbage-collects it | yes, roll back by reinstalling the prior version |
 | `~/.claude/plugins/installed_plugins.json` | the `reviewer-agent` entry's `version`, `installPath`, `gitCommitSha` and `lastUpdated` are rewritten | yes, reinstall |
 | `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **nothing** — an update does not touch state. Per-repo enablement and the accepted-risk receipt survive, so you do **not** re-accept or re-enable after an update | n/a |
-| `~/.claude/settings.json` (`askUserQuestionTimeout`) | **nothing** — an update never changes it | n/a |
 | `~/.pi/agent/extensions/git-read-only/` | **nothing** — a plugin update does **not** refresh the Pi extension. If the extension changed and you use the `pi` backend, refresh it by hand (step 6) | yes, delete the directory |
 | the **running** Claude Code session | **nothing takes effect until restart** — hooks are snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted | n/a |
 
@@ -273,7 +272,7 @@ check and reserve `--all` (real) for validating an actual release.
 
 The runner also prints **six scenarios it cannot script** — they need a person in a real host:
 pressing Escape mid-review, restarting to prove persistence, a clean-profile install, native-Codex
-shell-commit redirection, a real timed-out `AskUserQuestion`, and uninstall-survival of unrelated
+shell-commit redirection, the `AskUserQuestion` reroute in a real interactive session, and uninstall-survival of unrelated
 plugins. Report these as "requires a human" rather than claiming them green.
 
 Alongside the matrix, the always-run gates for any release are the two unit suites plus the

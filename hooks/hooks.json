@@ -1,5 +1,5 @@
 {
-  "description": "reviewerAgent: the selected codex, pi or claude backend reviews commits, answers timed-out AskUserQuestion prompts, and supervises stops. All paths resolve under ${CLAUDE_PLUGIN_ROOT}.",
+  "description": "reviewerAgent: the selected codex, pi or claude backend reviews commits and supervises stops (and, with stopContinue on, reroutes AskUserQuestion prompts to the supervisor). All paths resolve under ${CLAUDE_PLUGIN_ROOT}.",
   "hooks": {
     "PreToolUse": [
       {
@@ -12,17 +12,15 @@
             "timeout": 3600
           }
         ]
-      }
-    ],
-    "PostToolUse": [
+      },
       {
         "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/askq_answer_hook.py"],
-            "timeout": 330
+            "args": ["${CLAUDE_PLUGIN_ROOT}/askq_reroute_hook.py"],
+            "timeout": 60
           }
         ]
       }

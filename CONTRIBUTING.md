@@ -67,7 +67,7 @@ The five scenarios are `claude-codex`, `claude-pi`, `claude-claude`, `codex-nati
 operator's own Claude subscription quota; prefer `--stub` for a smoke check and reserve `--all`
 (real) for validating a release. The runner also prints six scenarios that require a person in a
 real host (Escape mid-review, restart-persistence, clean-profile install, native-Codex shell-commit
-redirection, a real timed-out `AskUserQuestion`, uninstall-survival) — report those by hand.
+redirection, the `AskUserQuestion` reroute in a real interactive session, uninstall-survival) — report those by hand.
 
 ## How changes are expected to arrive
 

@@ -1342,7 +1342,7 @@ def context_provenance(proj, transcript_path, claude_session_id=None):
 #
 # Kept under a character ceiling (test_reviewer_capsule) because it is paid on every single call.
 #
-# TWO LAYERS. apply_context also serves the question answerer and the stop supervisor, where there
+# TWO LAYERS. apply_context also serves the stop supervisor, where there
 # is no staged set and no audit block -- telling those turns to "judge the STAGED set only"
 # describes something that does not exist. So layer 1 is true for ANY reviewer turn, and the
 # staged-set half is appended only for a commit audit.
@@ -1547,11 +1547,11 @@ def apply_context(prompt, proj, transcript_path=None, claude_session_id=None,
     be compacted away. Operator context and the task prompt follow, nearest the end.
 
     `commit_audit` selects the capsule that talks about the staged set. Only the commit hook
-    passes it; the question answerer and the stop supervisor have no staged set.
+    passes it; the stop supervisor has no staged set.
 
     `role` selects WHICH backend session this prompt is being composed for, and so which
-    watermark applies. Only the stop hook passes it; the commit hook and the question answerer
-    both address the reviewer session.
+    watermark applies. Only the stop hook passes it; the commit hook addresses the reviewer
+    session.
 
     Side effect: advances the operator-message watermark for (`claude_session_id`, `role`) so
     that role's NEXT call marks only genuinely newer messages. Only the MARKING moves -- every
@@ -1608,23 +1608,6 @@ def allow_output(system_message):
 
 def info_output(system_message):
     return {"systemMessage": system_message}
-
-
-def posttool_context_output(additional_context, system_message=None):
-    """PostToolUse output that injects `additional_context` next to the tool result (into
-    Claude's context, so Claude acts on it) WITHOUT blocking or hiding the tool's own output.
-    Used by the AskUserQuestion answerer: the question widget already rendered and the user
-    saw it; if they did not answer, this feeds the reviewer's answer to Claude. `system_message`
-    (optional) echoes the exchange to the operator."""
-    out = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": additional_context,
-        }
-    }
-    if system_message:
-        out["systemMessage"] = system_message
-    return out
 
 
 def sessionstart_context_output(additional_context):

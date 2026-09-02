@@ -15,6 +15,18 @@ is compared by version *string*, so `claude plugin update` is a no-op until the 
 
 ### Changed
 
+- `AskUserQuestion` answering moved off the host `askUserQuestionTimeout` auto-close onto a
+  `stopContinue` reroute. The old `PostToolUse` answerer (`askq_answer_hook.py`) depended on the
+  host auto-closing an unanswered question and returning an `afkTimeoutMs` tool response; that
+  stopped firing (last observed 2026-08-21), so an unanswered `AskUserQuestion` blocked
+  indefinitely and the reviewer was never invited. It is replaced by a `PreToolUse` hook
+  (`askq_reroute_hook.py`) that -- only while `stopContinue` is active -- denies `AskUserQuestion`
+  and directs the agent to re-ask it as a plain-prose message; the existing stop supervisor then
+  answers it from established operator context or defers it to the operator. `/reviewerAgent on`
+  no longer writes `askUserQuestionTimeout` to user settings (`setup_timeout.py` removed). The
+  reroute is independent of `afkTimeoutMs`: if the host auto-close ever returns, restore
+  `askq_answer_hook.py` and its `posttool_context_output` helper from git history to re-answer
+  timed-out questions for `stopContinue`-off users. See `docs/plans/askq_stopcontinue_reroute.md`.
 - `stopContinueWatchdog` tick prompt is smaller and Read-based. The tick now names the two
   per-project flag files by absolute path and directs the model to Read them, instead of
   shelling into `python3 stopcontinue_watchdog_toggle.py status`. Healthy ticks contract to a
