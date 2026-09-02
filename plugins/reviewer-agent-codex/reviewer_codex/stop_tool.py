@@ -1,16 +1,30 @@
 # SPDX-License-Identifier: MPL-2.0
 """Cancellable minimal stopContinue ruling for the bundled MCP server."""
 
+import re
 from pathlib import Path
 
 from . import backend, cancellation, liveness, prompts, state
 
+# The sentinel as a whole TRAILING line: STOP_OK alone, tolerating only markdown emphasis /
+# backticks around it and trailing sentence punctuation. Exact token, never a prefix (STOP_OKAY
+# is not the sentinel, and a directive may END with a sentence that merely mentions it).
+_STOP_OK_BARE_LINE = re.compile(r"^[\s*_`]*STOP_OK[\s*_`.!]*$")
+
 
 def _stop_ok(output):
-    for line in str(output or "").splitlines():
-        if line.strip():
-            return line.strip().upper() == "STOP_OK"
-    return False
+    """The ruling permits the stop when the STOP_OK sentinel is the FIRST non-empty line
+    (exact token, unchanged: `STOP_OK.` followed by a directive is NOT a permit) or the bare
+    sentinel is the LAST non-empty line. A model that explains itself and then answers puts it
+    last; first-line-only parsing read that as an incomplete ruling. A sentinel line in the
+    MIDDLE, followed by more directive, is contradictory and resolves to incomplete. Parity with
+    the Claude Code hook's `is_stop_ok` (docs/plans/stopcontinue_trailing_stop_ok.md)."""
+    lines = [ln.strip() for ln in str(output or "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    if lines[0].upper() == "STOP_OK":
+        return True
+    return bool(_STOP_OK_BARE_LINE.match(lines[-1].upper()))
 
 
 def _result(status, message, **values):

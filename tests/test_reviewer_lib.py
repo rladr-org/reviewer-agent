@@ -2240,6 +2240,9 @@ def test_is_stop_ok_trailing_line_tolerates_emphasis_and_punctuation_only():
     assert rl.is_stop_ok("Nothing is left.\n\nSTOP_OK.") is True
     # Exact token on the trailing line: STOP_OKAY is not the sentinel.
     assert rl.is_stop_ok("Nothing is left.\n\nSTOP_OKAY") is False
+    # Only emphasis / backticks / trailing punctuation are tolerated -- not quote wrappers.
+    assert rl.is_stop_ok('Nothing is left.\n\n"STOP_OK"') is False
+    assert rl.is_stop_ok("Nothing is left.\n\n'STOP_OK'") is False
 
 
 def test_is_stop_ok_trailing_line_must_be_the_bare_token_not_a_prefix():
@@ -2259,6 +2262,12 @@ def test_is_stop_ok_mid_reply_sentinel_is_contradictory_and_not_honored():
 def test_stop_ok_position_first_and_none():
     assert rl.stop_ok_position("STOP_OK -- the task is genuinely complete.") == "first"
     assert rl.stop_ok_position("STOP_OK\n(task complete)") == "first"
+    assert rl.stop_ok_position("STOP_OK.") == "first"
+    # Whole word on the first line: a longer token is not the sentinel (parity with the Codex
+    # parser and the trailing-line rule; a bare startswith accepted this).
+    assert rl.stop_ok_position("STOP_OKAY") is None
+    assert rl.is_stop_ok("STOP_OKAY -- the task is complete.") is False
+    assert rl.is_stop_ok("STOP_OK_NOW") is False
     assert rl.stop_ok_position("Continue: run the remaining tests.") is None
     assert rl.stop_ok_position("") is None
     assert rl.stop_ok_position("   \n\n  ") is None

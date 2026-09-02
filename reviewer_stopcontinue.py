@@ -21,6 +21,7 @@ rebound and therefore deliberately kept private to `reviewer_backends`.
 import datetime
 import json
 import os
+import re
 import sys
 import time
 
@@ -121,16 +122,58 @@ def last_assistant_text(transcript_path, retries=3, retry_delay=0.3):
     return ""
 
 
+# The sentinel as a whole line: STOP_OK alone, tolerating only markdown emphasis / backticks
+# around it and trailing sentence punctuation (`**STOP_OK**`, `` `STOP_OK` ``, `STOP_OK.`).
+# Deliberately exact-token, NOT a prefix: a continue directive can end with a sentence that
+# merely mentions the sentinel ("STOP_OK is not warranted until the tests pass"), and a prefix
+# rule on the trailing line would read that as approval. Prefix matching stays confined to the
+# first line, where the prompt puts the verdict and where the long-standing tests pin it.
+_STOP_OK_BARE_LINE = re.compile(r"^[\s*_`]*STOP_OK[\s*_`.!]*$")
+# The first line opens with the WHOLE WORD STOP_OK: a trailing clause is fine (`STOP_OK -- the
+# task is genuinely complete.`), a longer token is not (`STOP_OKAY`). A bare `startswith` accepted
+# the latter, in conflict with the exact-token rule the Codex parser and the trailing line apply.
+_STOP_OK_OPENING = re.compile(r"^STOP_OK\b")
+
+
+def stop_ok_position(codex_out):
+    """Where the STOP_OK sentinel sits in the stop supervisor's reply, or None.
+
+    "first" -- the first non-empty line opens with the whole word STOP_OK (the prompt-compliant
+               shape; a trailing clause such as `STOP_OK -- the task is genuinely complete.` is
+               fine, `STOP_OKAY` is not).
+    "last"  -- the last non-empty line is the bare sentinel (`_STOP_OK_BARE_LINE`): a model that
+               explained itself and THEN answered. Observed in the wild (2026-09, claude backend):
+               first-line-only parsing read this permit-the-stop verdict as a continue directive
+               and nudged a finished task to the cap, relaying reasoning that said there was
+               nothing to do as the "keep working" instruction.
+    "mid"   -- a bare sentinel line exists that is neither first nor last, i.e. the reply both
+               permits the stop and keeps directing. Contradictory; NOT honored (the supervisor's
+               job is to keep the agent working, so the ambiguous reading resolves to continue)
+               but reported distinctly so the stop hook can log it instead of silently inverting
+               it. The stop-path analogue of the commit gate's APPROVED-and-REJECTED refusal.
+    None    -- no sentinel in an honored-or-contradictory position: a continue directive, or
+               empty / whitespace-only / None input.
+
+    See docs/plans/stopcontinue_trailing_stop_ok.md."""
+    lines = [ln.strip() for ln in (codex_out or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    if _STOP_OK_OPENING.match(lines[0].upper()):
+        return "first"
+    if _STOP_OK_BARE_LINE.match(lines[-1].upper()):
+        return "last"
+    if any(_STOP_OK_BARE_LINE.match(ln.upper()) for ln in lines[1:-1]):
+        return "mid"
+    return None
+
+
 def is_stop_ok(codex_out):
     """True iff the stop supervisor's verdict is the STOP_OK sentinel (task genuinely done,
-    or a human-only decision) -- i.e. the agent is allowed to stop. The first non-empty line,
-    stripped and uppercased, must start with STOP_OK; anything else is a continue directive."""
-    for line in (codex_out or "").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        return stripped.upper().startswith("STOP_OK")
-    return False
+    or a human-only decision) -- i.e. the agent is allowed to stop. The sentinel counts as the
+    opening word of the FIRST non-empty line or as the bare token on the LAST one; a mid-reply
+    sentinel is contradictory and does not count. Anything else is a continue directive.
+    `stop_ok_position` is the single classifier; this is its boolean view."""
+    return stop_ok_position(codex_out) in ("first", "last")
 
 
 # --------------------------------------------------------------------------

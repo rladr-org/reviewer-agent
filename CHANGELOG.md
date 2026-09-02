@@ -79,6 +79,19 @@ is compared by version *string*, so `claude plugin update` is a no-op until the 
 
 ### Fixed
 
+- `stopContinue` no longer discards a `STOP_OK` verdict that is not the first line. A supervisor
+  that explains itself and then answers puts the sentinel last; the first-line-only parser read
+  that permit-the-stop verdict as a continue directive, nudged a finished task to the cap (six
+  false rounds observed, ~45 s each), and relayed reasoning that said there was nothing to do as
+  the "keep working" instruction — failing *closed* on the one path documented as fail-open. The
+  sentinel now counts as the opening whole word of the first non-empty line (a trailing clause
+  is still fine; `STOP_OKAY`, which the old prefix match accepted, is not) or as the bare token on
+  the last non-empty line (markdown emphasis and trailing punctuation tolerated; quote wrappers
+  and a sentence that merely mentions `STOP_OK` are not). A bare `STOP_OK` in the *middle* of a
+  reply, followed by more directive, is contradictory and still resolves to continue — but the
+  `[stop]` log line now records `stop_ok=first|last|mid|none` so that case is visible rather than
+  silently inverted. The native Codex stop supervisor's ruling parser gets the same rule.
+  See `docs/plans/stopcontinue_trailing_stop_ok.md`.
 - Actionable model-rejection and usage-limit diagnostics now fire for the streaming `codex` commit
   audit, not only the brief. codex (0.149.x) exits nonzero **silently** under `--json` when the
   provider refuses the configured model or reasoning effort, or the account is out of quota —

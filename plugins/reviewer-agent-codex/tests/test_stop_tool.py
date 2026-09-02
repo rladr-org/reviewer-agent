@@ -472,6 +472,36 @@ def test_stop_ok_trailing_line_tolerates_emphasis_only(git_repo, isolated_state,
     assert result["status"] == "stop_ok"
 
 
+def test_stop_ok_first_line_stays_exact_token(git_repo, isolated_state, monkeypatch):
+    # The trailing-line tolerance must not widen the first-line rule: `STOP_OK.` followed by a
+    # directive is not a permit.
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(
+        stop_tool.backend,
+        "review_turn",
+        lambda *args, **kwargs: (0, "STOP_OK.\n\nRun the targeted tests first.\n", ""),
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "incomplete"
+    assert not state.consume_stop_permit(git_repo, "root-session")
+
+
+def test_stop_ok_trailing_line_rejects_quote_wrappers(git_repo, isolated_state, monkeypatch):
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(
+        stop_tool.backend,
+        "review_turn",
+        lambda *args, **kwargs: (0, 'Nothing remains.\n\n"STOP_OK"\n', ""),
+    )
+
+    result = stop_tool.review_stop(git_repo, _ticket(git_repo))
+
+    assert result["status"] == "incomplete"
+    assert not state.consume_stop_permit(git_repo, "root-session")
+
+
 def test_stop_ok_mentioned_in_a_trailing_sentence_is_incomplete(
     git_repo, isolated_state, monkeypatch
 ):

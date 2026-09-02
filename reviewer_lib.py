@@ -415,6 +415,7 @@ from reviewer_stopcontinue import (  # noqa: F401
     _split_suggestions,
     bump_nudge_count,
     is_stop_ok,
+    stop_ok_position,
     last_assistant_text,
     max_nudges,
     nudge_count_file,

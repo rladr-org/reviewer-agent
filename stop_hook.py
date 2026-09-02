@@ -232,11 +232,14 @@ def _main(data):
                else rl.model_rejection_message(backend, err))
         )))
     provenance = rl.context_provenance(cwd, transcript_path, claude_sid)
+    # `stop_ok=` names WHERE the sentinel was found (first|last|mid|none), so `keep_going=True
+    # stop_ok=mid` (a contradictory reply resolved to continue) is distinguishable from a plain
+    # continue directive, and a trailing verdict that was honored is visible as `stop_ok=last`.
     rl.log(
-        "[stop] key={} backend={} reviewer_sid={} exit={} keep_going={} used={}/{} final={!r} "
-        "directive_tail={!r} stderr_tail={!r}{}".format(
-            key, backend, sid, code, keep_going, used, cap, rl.short(text, 200),
-            rl.tail(out, 400), rl.tail(err, 200),
+        "[stop] key={} backend={} reviewer_sid={} exit={} keep_going={} stop_ok={} used={}/{} "
+        "final={!r} directive_tail={!r} stderr_tail={!r}{}".format(
+            key, backend, sid, code, keep_going, rl.stop_ok_position(out) or "none", used, cap,
+            rl.short(text, 200), rl.tail(out, 400), rl.tail(err, 200),
             ("\n" + provenance) if provenance else "",
         )
     )

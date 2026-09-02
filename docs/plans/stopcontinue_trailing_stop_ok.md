@@ -41,12 +41,14 @@ variant. reviewerAgent.md requires the two stop supervisors to stay aligned, so 
 
 A reply permits the stop when the sentinel is in either of two positions:
 
-- **first** — the first non-empty line starts with `STOP_OK` (Claude Code path, unchanged: `STOP_OK
-  -- the task is genuinely complete.` stays valid); the Codex package keeps its exact-token rule on
-  this line (`STOP_OKAY` stays rejected).
+- **first** — the first non-empty line opens with the whole word `STOP_OK` (Claude Code path:
+  `STOP_OK -- the task is genuinely complete.` stays valid; `STOP_OKAY`, which the old bare
+  `startswith` accepted, no longer counts); the Codex package keeps its exact-token rule on this
+  line (`STOP_OKAY` stays rejected, and the trailing-line tolerance does not widen it).
 - **last** — the last non-empty line is the *bare* token: `STOP_OK` alone, tolerating only markdown
   emphasis/backticks around it and trailing sentence punctuation (`**STOP_OK**`, `` `STOP_OK` ``,
-  `STOP_OK.`). This is the observed shape: a model that explains itself and then answers.
+  `STOP_OK.`; not quote wrappers such as `"STOP_OK"`). This is the observed shape: a model that
+  explains itself and then answers.
 
 The trailing position is deliberately **exact-token, not prefix**: a continue directive can end
 with a sentence such as "STOP_OK is not warranted until the tests pass", and a prefix rule would
