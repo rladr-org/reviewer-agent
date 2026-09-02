@@ -152,7 +152,10 @@ def test_stop_rechecks_shell_markers_before_declaring_work_active(
     monkeypatch.setattr(
         liveness, "outstanding", lambda _path, _session_id: next(readings)
     )
-    monkeypatch.setattr(supervisor.time, "sleep", sleeps.append)
+    # Patch the supervisor's seam, not the global `time.sleep`: the global patch also recorded
+    # CPython's `subprocess` wait polling (0.0005 s doubling) whenever a git child on the
+    # supervise path was slow to exit, which is exactly what a loaded CI runner does.
+    monkeypatch.setattr(supervisor, "_sleep", sleeps.append)
 
     output = supervisor.supervise(_payload(git_repo))
 
