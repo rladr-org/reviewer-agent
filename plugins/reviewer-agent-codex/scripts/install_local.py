@@ -39,7 +39,11 @@ def main() -> int:
     action = "Prepared" if args.prepare_only else "Installed"
     print(f"{action} {result.plugin_id}")
     print(f"Marketplace: {result.marketplace_path}")
-    print("Start a new Codex thread, run /hooks, and trust the plugin hooks.")
+    print("Open an interactive Codex CLI session by running `codex`, then run /hooks and")
+    print("trust the reviewer-agent-codex hooks. /hooks is not a Codex GUI command.")
+    print("Then exit the CLI, fully quit and restart the Codex GUI, and start a new GUI chat")
+    print("so it loads the trusted hooks and current plugin components.")
+    print("Active-host use inside the CLI has not been validated.")
     return 0
 
 

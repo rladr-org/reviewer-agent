@@ -12,7 +12,8 @@ software's risks on a human's behalf.
 
 Before starting:
 
-1. Install and authenticate the developer host to be protected: Claude Code or Codex.
+1. Install and authenticate the developer host to be protected: Claude Code, or the Codex GUI plus
+   the Codex CLI used for installation and hook trust.
 2. Confirm that the machine's Git client can read `rladr-org/reviewer-agent`; authentication is
    needed only when installing from a private fork or mirror.
 3. For Claude Code only, install and authenticate at least one desired reviewer backend: `codex`,
@@ -20,6 +21,10 @@ Before starting:
    not need Codex, and the `claude` backend needs no additional install. Its usage, quota, billing
    and account consequences are controlled by Anthropic and the user's plan.
 4. Start the developer host in the repository you want to protect.
+
+For the Codex package, the exercised developer host is the Codex GUI. The CLI is required for
+installation and hook trust, but using the plugin with the CLI itself as the active developer host
+has not been validated.
 
 Then give the agent this prompt:
 
@@ -29,8 +34,10 @@ Clone https://github.com/rladr-org/reviewer-agent.git into a new user-owned dire
 
 If a checkout already exists, replace the clone clause with its absolute path. During installation,
 the human must approve writes outside the repository when the host requests approval. At the final
-human-only checkpoint, restart the developer host. For Codex, also run `/hooks` and trust the
-`reviewer-agent-codex` hooks. Those actions cannot safely be delegated.
+human-only checkpoint, restart the developer host. For Codex, hook trust must be completed in the
+interactive CLI even when the human uses the GUI: run `codex` in a terminal, enter `/hooks`, and
+trust the `reviewer-agent-codex` hooks. Then fully restart the GUI, if that is the surface being
+used. Those actions cannot safely be delegated.
 
 ## Procedure for the installing agent
 
@@ -111,16 +118,19 @@ Refuse to overwrite `<TARGET_REPO>/reviewerAgent.md`. If it is absent, copy
 `<INSTALLER_REPO>/plugins/reviewer-agent-codex/reviewerAgent.md.template` there and edit it for the
 target repository. Do not run the source checkout's toggle CLI: it cannot record operator risk
 acceptance. The operator must read the plugin's `DISCLAIMER.md` and personally invoke the exact
-`acceptRisk` command from a new, trusted Codex thread. Do not substitute `codex plugin add`: the
-local installer also configures the blocking reviewer MCP namespace as a direct-only tool.
+`acceptRisk` command from a new Codex GUI chat after completing hook trust in the CLI. Do not
+substitute `codex plugin add`: the local installer also configures the blocking reviewer MCP
+namespace as a direct-only tool.
 
 ### 5. Human-only checkpoint and final report
 
 After all agent-executable checks pass, tell the human exactly what remains:
 
 - Claude Code: restart Claude Code in `<TARGET_REPO>` so the installed hooks are loaded.
-- Codex: start a new Codex thread in `<TARGET_REPO>`, run `/hooks`, inspect the
-  `reviewer-agent-codex` entries, and trust them.
+- Codex: run `codex` in a terminal to open an interactive CLI session, then run `/hooks`, inspect
+  the `reviewer-agent-codex` entries, and trust them. `/hooks` is not a Codex GUI command. If the
+  operator uses the validated GUI flow, exit the CLI, fully quit and restart the GUI, then start a
+  new chat in `<TARGET_REPO>`. Report that active-host use inside the CLI has not been validated.
 
 Then tell the human to invoke plain `on` first. It must refuse without enabling and display the
 exact accepting form. After reading `DISCLAIMER.md`, the human may type that exact form:

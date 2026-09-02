@@ -153,7 +153,9 @@ def test_repository_guidance_requires_tdd_and_amygdala():
 def test_readme_documents_one_command_local_install():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "python3 scripts/install_local.py" in readme
-    assert "new Codex thread" in readme
+    assert "start a new GUI chat" in readme
+    assert "/hooks` is not a Codex GUI" in readme
+    assert "active developer host may work, but has not been validated" in readme
     assert "gpt-5.6-luna" in readme
     assert '"reasoningEffort": "xhigh"' in readme
     assert "$reviewer-agent-codex:reviewer-model" in readme

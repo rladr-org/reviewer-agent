@@ -50,7 +50,7 @@ Everything below is optional, enabled **per repository** and **per feature**; no
 
 **Pick any model as the reviewer**
 
-- Host on **Claude Code** or **Codex**. On the Claude Code host, back the reviewer with **Codex**, **Pi** (any model), or the **Claude Code** CLI itself; the Codex host reviews with its own Codex child. Either way the reviewer is a session separate from the coding agent, so a second perspective catches what the author missed. → [Selecting and verifying a backend](#selecting-and-verifying-a-backend)
+- Host on **Claude Code** or the **Codex GUI**. On the Claude Code host, back the reviewer with **Codex**, **Pi** (any model), or the **Claude Code** CLI itself; the Codex GUI host reviews with its own Codex child. Either way the reviewer is a session separate from the coding agent, so a second perspective catches what the author missed. → [Selecting and verifying a backend](#selecting-and-verifying-a-backend)
 - A small, cheap reviewer (e.g. `gpt-5.6-luna` at xhigh) routinely flags real bugs even against frontier coding agents. Set model, reasoning effort, and timeouts per backend with `/reviewer-agent:reviewerModel …`. → [Commands](#claude-code-commands)
 
 **Smarter reviews**
@@ -186,7 +186,7 @@ past rather than a promise about your machine:
 | Developer host | Reviewer backend | What was actually done |
 |---|---|---|
 | Claude Code | `codex` | used daily in a private installation, macOS Tahoe |
-| Codex | Codex child session | used daily in a private installation, macOS Tahoe |
+| Codex GUI | Codex child session | used daily in a private installation, macOS Tahoe |
 | Claude Code | `pi` | automated release matrix on macOS; no sustained use |
 | Claude Code | `claude` | automated release matrix on macOS; no sustained use |
 
@@ -227,9 +227,9 @@ different hooks and runtime interfaces, and are installed independently.
 | Claude Code | staged commit audit | selected `codex`, `pi` or `claude` backend | implemented |
 | Claude Code | `AskUserQuestion` reroute (needs `stopContinue`) | selected `codex`, `pi` or `claude` backend | implemented |
 | Claude Code | `stopContinue` supervision | selected `codex`, `pi` or `claude` backend | implemented |
-| Codex | staged commit audit | Codex child session | implemented |
-| Codex | stop supervision | separate Codex child session | implemented |
-| Codex | `AskUserQuestion` | — | not implemented by the Codex host |
+| Codex GUI | staged commit audit | Codex child session | implemented |
+| Codex GUI | stop supervision | separate Codex child session | implemented |
+| Codex GUI | `AskUserQuestion` | — | not implemented by the Codex host |
 
 **"Implemented" means the code exists and the tests pass. It is not a claim of support and not a
 promise that it works for you.** Every row above is covered by the unit suites. The automated live
@@ -286,9 +286,10 @@ The shortest installation route delegates every executable step to the current c
 human only supplies credentials and choices, approves external writes, and performs the final
 restart and hook-trust actions that an agent cannot perform for them.
 
-1. Install and authenticate Claude Code or Codex. For Claude Code, also install and authenticate
-   the chosen reviewer backend (`codex` or `pi`); the `claude` backend needs nothing beyond the
-   authenticated Claude Code you are already running.
+1. Install and authenticate Claude Code, or install and authenticate both the Codex GUI and Codex
+   CLI. For Claude Code, also install and authenticate the chosen reviewer backend (`codex` or
+   `pi`); the `claude` backend needs nothing beyond the authenticated Claude Code you are already
+   running.
 2. Confirm that Git can read the reviewer-agent repository; authentication is needed only when
    installing from a private fork or mirror.
 3. Start the developer host in the repository you want to protect.
@@ -299,7 +300,8 @@ restart and hook-trust actions that an agent cannot perform for them.
    ```
 
 5. Approve the requested writes outside the repository. When the agent finishes, follow its one
-   restart instruction; for Codex, also run `/hooks` and trust the displayed reviewer hooks.
+   restart instruction. For Codex, hook trust is managed in the interactive CLI even if you use
+   the GUI: run `codex` in a terminal, enter `/hooks`, and trust the displayed reviewer hooks.
 
 The installing agent's complete procedure is [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md).
 It covers both host packages, prevents the installer checkout from being mistaken for the target,
@@ -373,11 +375,18 @@ python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
 When installing from a private fork or mirror, grant the installer’s user access before cloning.
+The plugin has been exercised with the Codex GUI as the developer host. An installed, authenticated
+`codex` CLI is still required for installation and the one-time hook review and trust step because
+`/hooks` is an interactive CLI command, not a GUI slash command. Using the plugin with the CLI as
+the active developer host may work, but has not been validated.
+
 After installation:
 
-1. Start a new Codex thread.
-2. Run `/hooks`, inspect the `reviewer-agent-codex` hooks, and trust them.
-3. From the repository to protect, enable the desired features:
+1. In a terminal, run `codex` to start a new interactive CLI session.
+2. In that CLI session, run `/hooks`, inspect the `reviewer-agent-codex` hooks, and trust them.
+3. Exit the CLI, fully quit and reopen the Codex GUI, then start a new GUI chat in the repository
+   to protect.
+4. From that new GUI chat, enable the desired features:
 
    ```text
    $reviewer-agent-codex:reviewer-agent on
@@ -395,8 +404,8 @@ After installation:
    `$reviewer-agent-codex:stop-continue on acceptRisk`.
 
 Those settings persist across Codex restarts. They do not need to be re-enabled in each thread.
-A new thread is required after installing or updating the plugin so Codex loads its current tools,
-skills, and hooks.
+A new GUI chat is required after installing or updating the plugin so Codex loads its current
+tools, skills, and hooks.
 
 The repository also contains a Codex marketplace manifest for discovery:
 
@@ -973,6 +982,8 @@ undertakes to support, and not the oldest that can work. Older hosts are a cavea
 refusal: a successful `/reviewer-agent:reviewerAgent on` and the Codex installer both detect the host version and print a
 warning below these floors, then continue. Newer versions are equally untested — a host that
 changes underneath this project can break it at any time, and nothing here promises otherwise.
+For the Codex package, that CLI version covers installation, hook trust, and nested reviewer calls;
+the active developer host exercised by the release matrix was the Codex GUI, not the CLI.
 
 Python 3.9 is past upstream end of life and is kept deliberately. macOS ships `/usr/bin/python3`
 at 3.9, and this package is standard-library-only at runtime precisely so it installs against the

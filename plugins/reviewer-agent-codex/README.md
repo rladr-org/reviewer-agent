@@ -27,13 +27,17 @@ Both features are off by default.
 
 ## Requirements
 
-- Codex CLI with lifecycle hooks enabled.
+- The Codex GUI as the developer host, plus an installed and authenticated Codex CLI with lifecycle
+  hooks enabled. The CLI is required for installation and hook review/trust because `/hooks` is not
+  a GUI slash command. Active-host use inside the CLI may work, but has not been validated.
 - Python 3.9 or newer; runtime code uses only the standard library.
 - An authenticated `codex` executable available on `PATH`, or `REVIEWER_CODEX_BIN`.
 
 ## Platform support
 
-macOS is tested. Native Linux and Windows through WSL2 are untested beta platforms that are
+The Codex GUI on macOS is tested. Using the plugin with Codex CLI as the active developer host has
+not been validated; the CLI has only been exercised as the installer, hook-trust UI, and nested
+reviewer process. Native Linux and Windows through WSL2 are untested beta platforms that are
 expected to work, but this plugin does not yet have Linux/WSL2 CI or live-host coverage. Native
 Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
 will not work for a different reason: starting with
@@ -95,7 +99,8 @@ sanitized error output.
 For the minimal-human route covering clone, verification, installation, project brief creation,
 feature toggles, restart, and hook trust, start Codex in the repository to protect and give it the
 prompt in [`INSTALL_WITH_AGENT.md`](../../INSTALL_WITH_AGENT.md). The agent runs the same
-installer below and stops only at the human-only new-thread and `/hooks` trust checkpoint.
+installer below and stops only at the human-only trust and restart checkpoint. GUI users complete
+hook trust from the CLI as described below.
 
 ### Shared repository install
 
@@ -155,8 +160,11 @@ newly installed immutable cache, then through the permanent
 does not become trapped in a missing-hook Stop or PreToolUse loop merely because the plugin was
 upgraded incorrectly.
 
-Then start a new Codex thread, run `/hooks`, inspect the `reviewer-agent-codex` lifecycle hooks, and
-trust them. Codex loads newly installed plugin skills and hooks at thread startup.
+Then open a terminal and run `codex` to start an interactive CLI session. Run `/hooks` there,
+inspect the `reviewer-agent-codex` lifecycle hooks, and trust them. `/hooks` is not a Codex GUI
+command. Exit the CLI, fully quit and restart the GUI, then start a new GUI chat. Codex loads newly
+installed plugin skills and hooks at that session boundary. Using the plugin with the CLI as the
+active developer host may work, but has not been validated.
 
 To update, pull the combined repository and re-run the same installer:
 
@@ -251,7 +259,9 @@ python3 tools/release_cachebuster.py          # from the repository root
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-Start a **new** Codex thread afterwards, run `/hooks`, and trust the plugin hooks again.
+Afterwards, open an interactive `codex` CLI session, run `/hooks`, and trust the plugin hooks again.
+Then exit the CLI, fully quit and restart the GUI, and start a new GUI chat. `/hooks` is not a Codex
+GUI command; active-host use inside the CLI has not been validated.
 
 **Disable without uninstalling**, per repository:
 
@@ -506,7 +516,9 @@ See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 
 The 1.2.0-beta.1 release matrix was run against Codex CLI 0.147.0 and Python 3.9 (the macOS
 system interpreter). `scripts/install_local.py` detects both and prints a warning below either
-floor, then continues: these are the oldest versions exercised, not the oldest that can work.
+floor, then continues: these are the oldest versions exercised, not the oldest that can work. The
+CLI version records the installer, hook-trust UI, and nested reviewer dependency; it is not evidence
+that the plugin was exercised with the CLI as its active developer host.
 
 ## License
 

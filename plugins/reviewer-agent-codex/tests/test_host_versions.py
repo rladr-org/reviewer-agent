@@ -72,6 +72,28 @@ def test_an_old_codex_makes_the_installer_warn_without_failing(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_installer_handoff_distinguishes_cli_hook_trust_from_gui_usage(tmp_path):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\necho 'codex-cli 0.147.0'\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    environment = dict(os.environ)
+    environment.update(
+        REVIEWER_CODEX_BIN=str(fake_codex),
+        HOME=str(tmp_path),
+        CODEX_HOME=str(tmp_path / ".codex"),
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(INSTALLER), "--prepare-only"],
+        capture_output=True, text=True, env=environment,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "interactive Codex CLI" in result.stdout
+    assert "/hooks is not a Codex GUI command" in result.stdout
+    assert "restart the Codex GUI" in result.stdout
+
+
 def test_a_missing_codex_binary_is_not_warned_about(tmp_path):
     # The installer is routinely run before codex is on PATH in that shell. A warning nobody
     # can act on trains people to ignore warnings.
