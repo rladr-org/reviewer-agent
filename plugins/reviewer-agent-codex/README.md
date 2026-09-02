@@ -40,7 +40,7 @@ will not work for a different reason: starting with
 [Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl), Codex's Linux sandbox uses `bubblewrap`
 and no longer supports WSL1.
 
-### Native Linux (never run there)
+### Native Linux (untested)
 
 Install Git, `curl`, and Python 3.9 or newer using the distribution's package manager. If Codex is
 not already installed and authenticated, use the
@@ -55,7 +55,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 9); print(sys.version)'
 Then use [Shared repository install](#shared-repository-install) below. Run Codex, the checkout
 installer, and repositories protected by the plugin in the same Linux environment.
 
-### Windows through WSL2 (never run there)
+### Windows through WSL2 (untested)
 
 Install WSL2 from an elevated PowerShell window and restart Windows if prompted:
 
