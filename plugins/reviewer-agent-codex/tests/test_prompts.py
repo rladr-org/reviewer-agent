@@ -2,6 +2,23 @@
 from reviewer_codex import prompts, state
 
 
+def test_stop_brief_classifies_go_ahead_requests_as_remaining_work():
+    # Parity with the Claude Code STOP_SUPERVISE_PROMPT: reviewerAgent.md requires the two
+    # stop-supervisor prompts to stay aligned, so this pins the same hardening in STOP_BRIEF.
+    norm = " ".join(prompts.STOP_BRIEF.split()).lower()
+    for phrase in ("say the word", "shall i", "let me know", "i'll do that next", "ready when you are"):
+        assert phrase in norm, phrase
+    # the phrasings must sit INSIDE the classification clause, not merely occur somewhere
+    assert "ready when you are) is authorized remaining work, not by itself a request for operator input" in norm
+
+
+def test_stop_brief_requires_verifying_a_claimed_approval():
+    norm = " ".join(prompts.STOP_BRIEF.split()).lower()
+    assert "do not take that claim at face value" in norm
+    assert "genuinely needs operator authorization" in norm
+    assert "not already granted" in norm
+
+
 def test_commit_prompt_defines_nonblocking_suggestions_for_both_verdicts():
     prompt = prompts.COMMIT_PROMPT
     normalized = " ".join(prompt.split())
