@@ -15,6 +15,18 @@ is compared by version *string*, so `claude plugin update` is a no-op until the 
 
 ### Changed
 
+- `stopContinue` supervisor prompt-hardening + a configurable pre-enactment delay. The stop
+  supervisor now classifies a polite go-ahead request for named in-scope work ("say the word,"
+  "shall I," "let me know," "I'll do that next," "ready when you are") as authorized remaining
+  work rather than a request for operator input, and verifies a *claimed* approval requirement
+  (genuinely needed, and not already granted in a message or plan) instead of taking it at face
+  value — closing a case where a premature stop was approved. The same hardening is applied to the
+  native Codex `STOP_BRIEF` (parity pinned by tests). A new `REVIEWER_STOPCONTINUE_DELAY_SECS`
+  (or `stopContinueDelaySecs`, default 0, max 300) pauses before enacting EITHER verdict — a
+  continue directive or a stop approval — announcing on stderr first so an operator can Escape; it
+  is capped against the remaining Stop-hook budget (whose host timeout is raised to 630 s) so it
+  can never overrun cancellation (which would fail the stop open). See
+  `docs/plans/stopcontinue_delay_and_prompt_hardening.md`.
 - `AskUserQuestion` answering moved off the host `askUserQuestionTimeout` auto-close onto a
   `stopContinue` reroute. The old `PostToolUse` answerer (`askq_answer_hook.py`) depended on the
   host auto-closing an unanswered question and returning an `afkTimeoutMs` tool response; that

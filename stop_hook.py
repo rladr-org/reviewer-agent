@@ -26,6 +26,7 @@ a non-firing hook.
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -33,6 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
 
 STOP_TIMEOUT = 300
+
+# Wall clock for the pre-enactment delay's remaining-budget cap. A seam so a test can drive
+# elapsed time deterministically.
+_hook_now = time.monotonic
 
 
 def _turn_start_is_tick(data):
@@ -79,6 +84,7 @@ def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
 
 
 def _main(data):
+    hook_start = _hook_now()  # for the pre-enactment delay's remaining-budget cap
     cwd = data.get("cwd") or rl.project_dir()
     key = rl.canonical_project_key(cwd)
     claude_sid = rl.claude_session_key(data)
@@ -234,6 +240,16 @@ def _main(data):
             ("\n" + provenance) if provenance else "",
         )
     )
+
+    # Pre-enactment delay: when the supervisor produced a verdict (a continue directive OR a
+    # STOP_OK approval), pause BEFORE emitting it so the operator has a window to intervene. The
+    # fail-open no-verdict paths (empty / failed reviewer) skip this. Budget-capped so the sleep
+    # can never run past host cancellation of the Stop hook, which would fail the stop OPEN.
+    produced_verdict = keep_going or (code == 0 and bool(out.strip()) and rl.is_stop_ok(out))
+    if produced_verdict:
+        budget = rl.HOOK_BUDGET_S - (_hook_now() - hook_start) - rl.DELAY_MARGIN_S
+        rl.apply_stopcontinue_delay(
+            "continue" if keep_going else "stop-approval", budget_remaining=budget)
 
     if keep_going:
         rl.bump_nudge_count(cwd, claude_sid)

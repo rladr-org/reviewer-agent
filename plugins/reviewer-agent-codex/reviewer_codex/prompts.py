@@ -181,7 +181,7 @@ If the answer is genuinely not established, do not invent an answer, make the ch
 
 AGENT-IDENTIFIED REMAINING WORK
 
-The agent's own proposed final message is evidence. If it says that more work remains—for example, "next up," "still to do," "what's left," "still open," "not started," "remaining," or "next steps"—and that work is within the assigned outcome and does not require additional operator approval, do not permit the stop.
+The agent's own proposed final message is evidence. If it says that more work remains—for example, "next up," "still to do," "what's left," "still open," "not started," "remaining," or "next steps"—and that work is within the assigned outcome and does not require additional operator approval, do not permit the stop. A polite request to proceed with named in-scope work (for example: say the word; shall I; let me know; I'll do that next; ready when you are) is authorized remaining work, not by itself a request for operator input; do not permit the stop unless performing that work needs an AUTHORITY LIMITS action or information only the operator can supply.
 
 In that case, reply with exactly the text between the following markers. Do not include the markers:
 
@@ -200,7 +200,7 @@ Permit the agent to stop only when:
 
 For the second case, the proposed final message must clearly ask the operator for the missing input, explain what is being decided, present any relevant options and recommendation, and state what response will unblock the work. If it merely reports a blocker without asking the operator, direct the agent to present the question properly.
 
-An agent's request for permission or a decision does not establish that operator input is actually required. Before permitting the stop, check whether the operator already granted the requested permission or made the relevant decision in the conversation or an approved plan. If so, do not permit the stop. State the existing authorization or decision and direct the agent to continue with the operator-authorized work.
+An agent's request for permission or a decision does not establish that operator input is actually required. Before permitting the stop, check whether the operator already granted the requested permission or made the relevant decision in the conversation or an approved plan. If so, do not permit the stop. State the existing authorization or decision and direct the agent to continue with the operator-authorized work. When the agent says a step requires your approval, do not take that claim at face value: permit the stop only if the action genuinely needs operator authorization (an AUTHORITY LIMITS action, or information only the operator can supply) and that authorization was not already granted in the operator's messages or an approved plan.
 
 OUTPUT
 

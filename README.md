@@ -920,6 +920,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_DELTA_INLINE_TOTAL_MAX` | `96000` | Re-attempt diff bytes inlined in total; `0` disables. |
 | `REVIEWER_STOPCONTINUE_EFFORT` | `low` | Stop-supervisor reasoning effort. |
 | `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `10` | Maximum forced continuations per user turn. |
+| `REVIEWER_STOPCONTINUE_DELAY_SECS` | `0` (max 300) | Seconds to pause before enacting either stopContinue verdict — a continue directive or a stop approval — giving you a window to intervene (Escape). Announced on stderr first, then capped against the remaining Stop-hook budget. Also `stopContinueDelaySecs` in `config.json`. |
 | `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |
 | `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |
 | `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
@@ -934,7 +935,10 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
 Stop supervision uses a separate 300-second reviewer limit and fails open. The `AskUserQuestion`
 reroute is a `PreToolUse` hook (a 60-second host timeout) that makes no reviewer call of its own;
-the rerouted question is answered by stop supervision.
+the rerouted question is answered by stop supervision. When `REVIEWER_STOPCONTINUE_DELAY_SECS`
+(or `stopContinueDelaySecs`) is set, the Stop hook pauses before enacting either verdict; its own
+host timeout is 630 s to fit the reviewer plus a full delay, and the delay is capped against the
+remaining budget so it never overruns cancellation (which would fail the stop open).
 
 The streaming, scratch, and idle-threshold behavior below is specific to **this Claude Code plugin
 running its `codex` reviewer backend** (Claude Code as the host, codex as the reviewer). It does not

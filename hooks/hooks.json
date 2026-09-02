@@ -44,7 +44,7 @@
             "type": "command",
             "command": "python3",
             "args": ["${CLAUDE_PLUGIN_ROOT}/stop_hook.py"],
-            "timeout": 330
+            "timeout": 630
           }
         ]
       }

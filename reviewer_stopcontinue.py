@@ -21,6 +21,7 @@ rebound and therefore deliberately kept private to `reviewer_backends`.
 import datetime
 import json
 import os
+import sys
 import time
 
 from reviewer_base import (
@@ -40,6 +41,7 @@ from reviewer_state import (
 # stopContinue: read the agent's last message; decide if it's a user question
 # --------------------------------------------------------------------------
 _sleep = time.sleep  # module-level seam so tests can fake the flush-race retry delay
+_delay_sleep = time.sleep  # separate seam for the stopContinue pre-enactment delay (below)
 
 
 def _assistant_event_text(ev):
@@ -191,6 +193,45 @@ def stopcontinue_effort():
 
 def stopcontinue_effort_config():
     return 'model_reasoning_effort="{}"'.format(stopcontinue_effort())
+
+
+# --------------------------------------------------------------------------
+# stopContinue pre-enactment delay: pause BEFORE enacting a supervised verdict (a continue
+# directive OR a stop approval) so the operator has a window to intervene even when the model's
+# call is wrong. Default 0 (no delay); the Stop hook budget-caps it so it can never overrun host
+# cancellation (which would fail the stop OPEN). See docs/plans/stopcontinue_delay_and_prompt_hardening.md.
+# --------------------------------------------------------------------------
+DELAY_MAX_S = 300  # a single intervention window; also the ceiling the hook budget is sized for
+DELAY_MARGIN_S = 30  # leave this much of the hook budget for emitting the decision after the sleep
+HOOK_BUDGET_S = 630  # MUST match the Stop hook timeout in hooks/hooks.json (pinned by a test):
+#                      STOP_TIMEOUT (300) + DELAY_MAX_S (300) + DELAY_MARGIN_S (30).
+
+
+def stopcontinue_delay_secs():
+    """Seconds to pause before enacting a stopContinue verdict (env
+    REVIEWER_STOPCONTINUE_DELAY_SECS or config stopContinueDelaySecs, default 0 = no delay,
+    floored at 0 and capped at DELAY_MAX_S). Applies to BOTH a continue directive and a stop
+    approval."""
+    return min(DELAY_MAX_S, _tunable_int("REVIEWER_STOPCONTINUE_DELAY_SECS", "stopContinueDelaySecs", 0, 0))
+
+
+def apply_stopcontinue_delay(decision, budget_remaining=None):
+    """Pause before enacting a stopContinue `decision` ("continue" or "stop-approval"), if
+    configured. Announces on stderr BEFORE sleeping so an operator can Escape during the window,
+    then sleeps via the `_delay_sleep` seam. `budget_remaining`, when given, caps the sleep against
+    the time left before the host cancels the Stop hook, so the decision is always emitted."""
+    secs = stopcontinue_delay_secs()
+    if budget_remaining is not None:
+        secs = min(secs, max(0, int(budget_remaining)))
+    if secs <= 0:
+        return
+    try:
+        sys.stderr.write(
+            "[stopContinue] applying {} in {}s -- interrupt now to override.\n".format(decision, secs))
+        sys.stderr.flush()
+    except Exception:  # a heads-up must never be the reason the decision is not enacted
+        pass
+    _delay_sleep(secs)
 
 
 # Retained verdicts per project. Enough to cover a long convergence across several sessions,
