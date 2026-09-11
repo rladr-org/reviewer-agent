@@ -52,6 +52,18 @@ _SHELL_OPS = {"&&", "||", "|", "|&", ";", "&"}
 # `git commit -m x 2>&1 | tail` leaves `2>&1` looking like a bare pathspec (false positive).
 _REDIR_RE = re.compile(r"^(?:[0-9]*[<>]|&>>?)")
 
+# A `-C <path>` argument the LEXER cannot resolve because it carries shell expansion only the
+# shell performs at run time: a `$VAR`/`${VAR}`, a `$(...)` command substitution, or a `...`
+# backtick. shlex keeps the token literal, so `os.path.join(cwd, "$R")` used to fabricate
+# `cwd/$R` -- no real repository -- and is_active() then came back False, silently disabling the
+# fail-CLOSED commit gate (the amazon-reviews fail-open, where every commit was `git -C "$R"
+# commit`). Such a target is unknowable statically, so commit_hook FAILS THE COMMIT CLOSED
+# (commit_c_unresolvable + any_reviewer_active) rather than gating the session cwd -- gating cwd
+# would review the WRONG repo when the variable points at a different, active repository.
+# `git_c_effective_dir` still returns cwd for such a target, but only as an internal fallback the
+# fail-closed check pre-empts; it is never used to gate the commit.
+_UNRESOLVABLE_C_RE = re.compile(r"[$`]")
+
 
 def is_git_repo(path):
     try:
@@ -69,18 +81,24 @@ def is_git_commit(command):
     return _COMMIT_RE.search(command or "") is not None
 
 
-def git_c_effective_dir(command, cwd):
-    """Effective working directory a `git ... commit` acts on, honoring `git -C <path>`.
-    Git applies -C options (GLOBAL, before the subcommand) in order -- each relative to the
-    prior, an absolute path resetting -- and chdir's there before running the subcommand. So
-    the reviewer must gate the repo the commit TARGETS, not the Claude session's cwd (e.g.
-    `git -C /other/repo commit` issued from a session rooted elsewhere). Returns the effective
-    directory, or `cwd` unchanged when there is no -C, no commit subcommand, or the command
-    cannot be lexically parsed."""
+def _commit_c_scan(command, cwd):
+    """Walk `command` for the `git ... commit` invocation and resolve its `-C` target.
+
+    Returns `(effective_dir, unresolvable)`:
+    - `effective_dir` is the directory the commit acts on. Git applies -C options (GLOBAL, before
+      the subcommand) in order -- each relative to the prior, an absolute path resetting -- and
+      chdir's there before running the subcommand, so the reviewer must gate the repo the commit
+      TARGETS, not the Claude session's cwd. It is `cwd` when there is no -C, no commit subcommand,
+      or the command cannot be lexically parsed.
+    - `unresolvable` is True when a -C target on the commit invocation carries shell expansion
+      (`$VAR`, `$(...)`, backtick) the lexer cannot expand. The gate then cannot know which
+      repository the commit targets: `effective_dir` falls back to `cwd`, but the caller MUST fail
+      CLOSED on it rather than gate `cwd` -- gating `cwd` reviews the WRONG repo (a fail-open) when
+      the variable points elsewhere."""
     try:
         tokens = shlex.split(command or "")
     except ValueError:
-        return cwd
+        return cwd, False
     n = len(tokens)
     j = 0
     while j < n:
@@ -89,13 +107,17 @@ def git_c_effective_dir(command, cwd):
             continue
         eff = str(cwd)
         saw_c = False
+        unresolvable = False  # a -C target this invocation carries shell expansion we cannot expand
         k = j + 1
         while k < n:  # walk this git invocation's GLOBAL options up to its subcommand
             t = tokens[k]
             if t in _SHELL_OPS or _REDIR_RE.match(t):
                 break
             if t == "-C" and k + 1 < n:
-                eff = os.path.join(eff, os.path.expanduser(tokens[k + 1]))
+                if _UNRESOLVABLE_C_RE.search(tokens[k + 1]):
+                    unresolvable = True  # e.g. `git -C "$R" commit` -- target unknowable
+                else:
+                    eff = os.path.join(eff, os.path.expanduser(tokens[k + 1]))
                 saw_c = True
                 k += 2
                 continue
@@ -107,10 +129,30 @@ def git_c_effective_dir(command, cwd):
                     k += 1
                 continue
             if t == "commit":  # first non-option token is the subcommand
-                return os.path.normpath(eff) if saw_c else cwd
+                if unresolvable:  # target unknowable -> caller fails CLOSED; dir is just a fallback
+                    return cwd, True
+                return (os.path.normpath(eff) if saw_c else cwd), False
             break
         j = k + 1
-    return cwd
+    return cwd, False
+
+
+def git_c_effective_dir(command, cwd):
+    """Effective working directory a `git ... commit` acts on, honoring `git -C <path>`. Returns
+    the effective directory, or `cwd` unchanged when there is no -C, no commit subcommand, the
+    command cannot be lexically parsed, or the -C target is an unresolvable shell expansion (for
+    which the caller must additionally consult `commit_c_unresolvable` and fail CLOSED)."""
+    return _commit_c_scan(command, cwd)[0]
+
+
+def commit_c_unresolvable(command):
+    """True when the `git ... commit` invocation in `command` carries a `-C <target>` whose target
+    is a shell expansion the gate cannot resolve (`$VAR`, `$(...)`, backtick). The gate cannot know
+    which repository such a commit targets, so commit_hook fails CLOSED on it rather than reviewing
+    the session cwd -- which is the WRONG repo (a fail-open) when the variable points elsewhere.
+    Regression for the amazon-reviews fail-open, where `R=<repo>; git -C "$R" commit` slipped
+    through unreviewed."""
+    return _commit_c_scan(command, "")[1]
 
 
 def _commit_arg_tokens(tokens):

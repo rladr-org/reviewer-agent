@@ -173,6 +173,77 @@ def test_active_commit_approved_allows_the_commit_to_proceed(tmp_path, monkeypat
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_a_delivered_review_consumes_the_carryover_and_does_not_re_deliver(tmp_path, monkeypatch):
+    # The commit hook consumes the carryover marker AFTER a completed review that actually DELIVERED
+    # it -- so a delivered+completed review ends with the marker gone, and the next review does not
+    # re-deliver. (A review that did not deliver leaves it armed for the retry -- see the unit tests.)
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    payload = _input("git commit -m x", cwd=repo)
+    payload["session_id"] = "cc-carry"
+    csid = rl.claude_session_key(payload)
+    rl.save_review("REJECTED\nREQUIRED FIXES:\n1. WIDGET_FINDING", proj=repo, claude_session_id=csid)
+    rl.set_commit_carryover(repo, csid)
+
+    argv1 = str(tmp_path / "argv1.jsonl")
+    p1 = run_hook(payload, {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                            "FAKE_CODEX_VERDICT": "APPROVED", "FAKE_CODEX_EXIT": "0",
+                            "FAKE_CODEX_ARGV_FILE": argv1})
+    assert p1.returncode == 0, p1.stderr
+    assert "WIDGET_FINDING" in Path(argv1).read_text(encoding="utf-8")  # fresh successor inherited
+    assert not rl.commit_carryover_pending(repo, csid)                  # consumed after delivery
+
+    argv2 = str(tmp_path / "argv2.jsonl")
+    p2 = run_hook(payload, {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                            "FAKE_CODEX_VERDICT": "APPROVED", "FAKE_CODEX_EXIT": "0",
+                            "FAKE_CODEX_ARGV_FILE": argv2})
+    assert p2.returncode == 0, p2.stderr
+    assert "WIDGET_FINDING" not in Path(argv2).read_text(encoding="utf-8")  # not re-delivered
+
+
+def test_real_rotation_carries_former_findings_into_the_successor_prompt(tmp_path, monkeypatch):
+    # END-TO-END through the ACTUAL rotation trigger (not a manually-set marker): with the audit
+    # limit at 1, a rejected NON-retry commit rotates the reviewer session and arms the carryover;
+    # the successor's retry-review PROMPT (captured from the fake codex argv) must then carry the
+    # retired session's finding text AND the verify instruction, and -- because commit 2 both
+    # delivered the carryover and completed -- the marker is consumed afterward.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    rl.set_reviewer_session_audit_limit(1)          # rotate after ONE completed non-retry audit
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    payload = _input("git commit -m x", cwd=repo)
+    payload["session_id"] = "cc-rot"
+    csid = rl.claude_session_key(payload)
+    finding = "CARRYOVER_MARKER_FIX_42"
+
+    # Commit 1: non-retry, REJECTED -> record_completed_reviewer_audit hits the limit -> rotate ->
+    # retire (preserve findings) -> arm carryover.
+    p1 = run_hook(
+        payload,
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_VERDICT": "REJECTED",
+         "FAKE_CODEX_FINDINGS": finding, "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p1.returncode == 0, p1.stderr
+    assert json.loads(p1.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert rl.commit_carryover_pending(repo, csid), "the real rotation did not arm the carryover"
+
+    # Commit 2: the retry. Capture the successor review's prompt from the fake codex argv.
+    argv_file = str(tmp_path / "codex_argv.jsonl")
+    p2 = run_hook(
+        payload,
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_VERDICT": "APPROVED",
+         "FAKE_CODEX_EXIT": "0", "FAKE_CODEX_ARGV_FILE": argv_file},
+    )
+    assert p2.returncode == 0, p2.stderr
+    prompts = Path(argv_file).read_text(encoding="utf-8")
+    assert finding in prompts, "successor prompt did not inherit the retired finding"
+    assert "VERIFY" in prompts.upper(), "successor prompt did not carry the verify instruction"
+    assert not rl.commit_carryover_pending(repo, csid), "delivered+completed review must consume it"
+
+
 def test_audit_runs_with_tmpdir_scoped_to_the_session_scratch_dir(tmp_path, monkeypatch):
     # INTEGRATION for the scratch-cleanup change: the real hook must create a per-generation scratch
     # dir keyed by the reviewer session id AND launch the audit subprocess with TMPDIR scoped to it.
@@ -1159,6 +1230,101 @@ def test_git_c_effective_dir_finds_commit_in_compound_command():
 
 def test_git_c_effective_dir_unparseable_returns_cwd():
     assert rl.git_c_effective_dir("git -C 'unterminated commit", "/sess") == "/sess"
+
+
+def test_git_c_effective_dir_shell_variable_returns_cwd():
+    # `git -C "$R" commit`: shlex keeps the token `$R` literal (no variable expansion), so the
+    # target repo is unknowable here. git_c_effective_dir returns the session cwd as an INTERNAL
+    # FALLBACK -- it must NEVER fabricate `cwd/$R` (no real repo). The commit GATE does not act on
+    # this cwd: commit_c_unresolvable makes commit_hook FAIL THE COMMIT CLOSED (see
+    # test_dash_C_shell_variable_fails_closed). Regression for the amazon-reviews fail-open.
+    assert rl.git_c_effective_dir('git -C "$R" commit -m x', "/sess") == "/sess"
+
+
+def test_git_c_effective_dir_command_substitution_returns_cwd():
+    # `$(...)` and backticks are command substitution the lexer cannot resolve either; same internal
+    # cwd fallback, and the gate itself fails closed on these (see commit_c_unresolvable).
+    assert rl.git_c_effective_dir('git -C "$(cat p)" commit', "/sess") == "/sess"
+    assert rl.git_c_effective_dir("git -C `pwd`/r commit -m y", "/sess") == "/sess"
+
+
+def test_dash_C_shell_variable_fails_closed(tmp_path, monkeypatch):
+    # End-to-end regression for the amazon-reviews fail-open, HARDENED. A commit issued as
+    # `git -C "$R" commit` from a session whose OWN repo is active must be BLOCKED (fail-closed):
+    # the reviewer parses the command lexically and cannot expand `$R`, so it cannot know which
+    # repository the commit targets. Gating the session cwd (the earlier fix) reviews the WRONG
+    # repo when `$R` points elsewhere -- itself a fail-open -- so an unresolvable target is denied
+    # and the reviewer never runs.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    p = run_hook(
+        _input('git -C "$R" commit -m x', cwd=repo),
+        {
+            "REVIEWER_HOME": home,
+            "REVIEWER_CODEX_BIN": FAKE,
+            "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN",
+            "FAKE_CODEX_EXIT": "0",
+        },
+    )
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip(), "gate silently passed the commit through (fail-open)"
+    out = json.loads(p.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout, "the reviewer must not run on an unknowable repo"
+    assert "shell variable" in out["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+def test_commit_c_unresolvable_flags_only_commit_shell_expansions():
+    # True only when a `-C` target on a COMMIT invocation is shell expansion the gate can't resolve.
+    assert rl.commit_c_unresolvable('git -C "$R" commit -m x') is True
+    assert rl.commit_c_unresolvable('git -C "$(cat p)" commit') is True
+    assert rl.commit_c_unresolvable("git -C `pwd`/r commit -m y") is True
+    # a literal -C path is resolvable; no -C; and a non-commit subcommand are all NOT flagged
+    assert rl.commit_c_unresolvable("git -C /repo commit -m x") is False
+    assert rl.commit_c_unresolvable("git commit -m x") is False
+    assert rl.commit_c_unresolvable('git -C "$R" status') is False
+
+
+def test_dash_C_shell_variable_passes_through_when_reviewer_off_everywhere(tmp_path, monkeypatch):
+    # off means off: with NO project active, an unresolvable `-C` commit is left ALONE (the plugin
+    # is inert), not blocked. The fail-closed only engages when the reviewer is active somewhere.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_staged_repo(tmp_path)  # a repo, but the reviewer is NOT turned on for it
+    p = run_hook(
+        _input('git -C "$R" commit -m x', cwd=repo),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN"},
+    )
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""  # pass-through: no deny, reviewer inert
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout
+
+
+def test_dash_C_shell_variable_fails_closed_from_an_inactive_session(tmp_path, monkeypatch):
+    # The wrong-repo fail-open: the session cwd itself is NOT active, but a shell-variable `-C`
+    # could target the OTHER repo that IS active. Because a project is active, the unknowable commit
+    # fails CLOSED regardless of the session cwd's own activation state.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    active_dir = tmp_path / "active"
+    active_dir.mkdir()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    active = make_staged_repo(active_dir)     # some OTHER repo has the reviewer ON
+    rl.set_active(active)
+    session = make_staged_repo(session_dir)   # the session cwd is NOT active
+    p = run_hook(
+        _input('git -C "$R" commit -m x', cwd=session),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "CODEX_SHOULD_NOT_RUN"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "CODEX_SHOULD_NOT_RUN" not in p.stdout
 
 
 def test_commit_targets_the_dash_C_repo_not_the_session_cwd(tmp_path, monkeypatch):

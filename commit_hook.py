@@ -61,13 +61,43 @@ def main():
     if not rl.is_git_commit(command):
         return 0
 
-    cwd = data.get("cwd") or rl.project_dir()
-    cwd = rl.git_c_effective_dir(command, cwd)  # honor `git -C <path>`: gate the commit's repo
+    raw_cwd = data.get("cwd") or rl.project_dir()
+    # A `git -C <target> commit` whose target is a shell variable / command substitution the gate
+    # cannot resolve: it cannot know which repository the commit targets. Fail CLOSED when the
+    # reviewer is active for ANY project -- an unexpandable $VAR may point at one of those active
+    # repos, and gating the session cwd instead would review the WRONG repo (a fail-open). The
+    # session cwd's own activation does not matter (an inactive session can still target an active
+    # repo). Stay out of the way only when the reviewer is off everywhere (off means off).
+    if rl.commit_c_unresolvable(command) and rl.any_reviewer_active():
+        reason = (
+            "reviewerAgent cannot determine which repository this commit targets: its `git -C` "
+            "path is a shell variable or command substitution the gate cannot resolve, so it "
+            "cannot review the correct staged set. Re-run from the repository directory as a plain "
+            "`git commit`, or pass a literal path (`git -C /absolute/path commit`)."
+        )
+        rl.log("[commit] key={} unresolvable -C target cmd={!r} -> denied (fail-closed)".format(
+            rl.canonical_project_key(raw_cwd), rl.short(command, 120)))
+        print(json.dumps(rl.deny_output(
+            reason,
+            "[reviewerAgent] git commit blocked: the `-C` target is a shell variable the gate "
+            "cannot resolve, so it cannot confirm the target repository. Use a literal path or "
+            "commit from the repo directory.",
+        )))
+        return 0
+    cwd = rl.git_c_effective_dir(command, raw_cwd)  # honor `git -C <path>`: gate the commit's repo
     if not rl.is_active(cwd):  # resolves cwd -> canonical project root internally
         return 0
     claude_sid = rl.claude_session_key(data)
     key = rl.canonical_project_key(cwd)
     retry_audit = rl.commit_retry_pending(cwd, claude_sid)
+    # The rotation carryover (a retired predecessor's preserved findings) is delivered HERE, not in
+    # staged_change_block, so the marker can be consumed only after a review that actually delivered
+    # it. Marker-gated + non-consuming read: "" when not armed or the verdict read fails (the marker
+    # then stays armed for the retry). Prepended to each backend's prompt below. The generation token
+    # is read FIRST so consumption targets exactly the generation this review delivered -- a rotation
+    # that re-arms a newer marker mid-review is then left for its own successor, not unlinked here.
+    carry_gen = rl.commit_carryover_generation(cwd, claude_sid)
+    carry_block = rl.carryover_findings_block(cwd, claude_sid)
 
     if rl.commits_beyond_index(command):
         reason = (
@@ -178,7 +208,7 @@ def main():
         # Same placeholder discipline as pi: on a first turn the id is minted inside
         # run_claude_review, so nothing may be keyed on it until it comes back real.
         sid = "claude:" + (rl.read_claude_session(cwd, claude_sid) or "new")
-        change_block = rl.staged_change_block(cwd, claude_sid, sid)
+        change_block = carry_block + rl.staged_change_block(cwd, claude_sid, sid)
         prompt = (
             change_block
             + "STAGED PATCH -- the complete `git diff --cached` for this commit:\n"
@@ -205,7 +235,7 @@ def main():
         sid = "pi:" + (rl.read_pi_session(cwd, claude_sid) or "new")
         # Kept in its own name so the audit can record WHAT annotation was sent, not just the
         # hash of the assembled whole (DELTA_INLINE_PLAN.md Fix 2).
-        change_block = rl.staged_change_block(cwd, claude_sid, sid)
+        change_block = carry_block + rl.staged_change_block(cwd, claude_sid, sid)
         prompt = (
             change_block
             + rl.apply_context(rl.PI_COMMIT_PROMPT, cwd, transcript_path, claude_sid,
@@ -268,7 +298,7 @@ def main():
             print(json.dumps(rl.deny_output(reason, msg)))
             return 0
         session_known = True  # ensure_session returns a real id or the hook already denied
-        change_block = rl.staged_change_block(
+        change_block = carry_block + rl.staged_change_block(
             cwd, claude_sid, sid, ignore_matcher=ignore_matcher
         )
         prompt = (
@@ -338,6 +368,13 @@ def main():
         # And only when a session actually exists to remember it -- see audit_sid above.
         if session_known:
             rl.record_audited_stage(cwd, claude_sid, sid)
+        # Consume the rotation carryover marker ONLY now, and only when this review actually
+        # DELIVERED it (carry_block is non-empty). A review that did not complete, or one whose
+        # delivery silently failed (a transient verdict read -> empty carry_block), leaves the marker
+        # armed so the retry re-delivers -- a delivery is never lost before it is reviewed. Done
+        # BEFORE the rotation check below, which may arm a fresh marker for the NEXT successor.
+        if carry_block:
+            rl.consume_commit_carryover(cwd, claude_sid, carry_gen)
     else:
         # A timeout, an operational failure and an empty response are all real events in this
         # project's review history, and used to appear only in the log line. They are recorded

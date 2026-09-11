@@ -47,6 +47,7 @@ from reviewer_state import (
     _tunable_int,
     audited_stage_path,
     canonical_project_key,
+    commit_carryover_pending,
     config_get,
     last_review_file,
     reviewer_backend,
@@ -1060,6 +1061,46 @@ def _reread_source(backend):
     return _CLAUDE_REREAD if backend == "claude" else _PI_REREAD
 
 
+def carryover_findings_block(proj, claude_session_id):
+    """Advisory block handed to a FRESH reviewer whose predecessor was retired mid reject/retry
+    cycle (`retire_commit_reviewer_session` armed the one-shot carryover). The predecessor's
+    preserved findings are inherited so the successor does not diverge from them by amnesia, but it
+    is told to VERIFY each against the current index rather than restate them: a fresh session has
+    not itself reviewed the unchanged files, so a blind restatement would leave them unreviewed --
+    exactly the reason a re-briefed reviewer is otherwise given no carryover at all. Returns "" when
+    the carryover is not armed or no findings survived.
+
+    Marker-gated and NON-consuming here: it returns the block whenever the marker is armed and the
+    findings read cleanly. The COMMIT HOOK calls it (not staged_change_block), prepends the block to
+    the review prompt, and CONSUMES the marker only after a review that actually delivered it -- so a
+    timeout, a cancellation that terminates the hook before it returns, or a delivery that silently
+    failed here (a transient read -> "") all leave the marker armed for the retry to re-deliver.
+    Nothing is deleted at read time, so a delivery is never lost before it is reviewed; the marker is
+    cleaned up on rotation/retirement or with the session's state, never by this read."""
+    if not commit_carryover_pending(proj, claude_session_id):
+        return ""
+    path = last_review_file(proj, claude_session_id) if claude_session_id else None
+    if path is None:
+        return ""
+    try:
+        findings = path.read_text(encoding="utf-8").strip() if path.exists() else ""
+    except OSError:
+        return ""  # transient state-path error: no carryover this pass; the marker stays armed
+    if not findings:
+        return ""
+    return (
+        "PRIOR REVIEWER RETIRED -- VERIFY, DO NOT ASSUME. The previous reviewer session for this "
+        "commit was retired (it had rejected this staged set repeatedly, or grew too large). Before "
+        "retirement it left these OUTSTANDING required fixes:\n\n"
+        + findings
+        + "\n\nYou are a FRESH session with no memory of that review. Do your own COMPLETE review of "
+        "the staged diff below. In ADDITION, check each outstanding fix above against the CURRENT "
+        "index: RE-RAISE it if it is still unmet, state it is RESOLVED if the staged code now "
+        "satisfies it, or CORRECT it if it was wrong. Do NOT assume the prior fixes are still unmet "
+        "or correctly stated -- verify each one against what is actually staged now.\n\n"
+    )
+
+
 def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matcher=None):
     """What moved in the staged set since this reviewer session's last audit, or "" when no
     annotation may be sent.
@@ -1068,6 +1109,11 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
     session differs (a re-briefed reviewer holds no prior findings, so asking it to restate
     them would leave unchanged files unreviewed), or HEAD moved (the previous audit's commit
     landed, so whatever is staged now is fresh work).
+
+    The rotation carryover (a retired predecessor's preserved findings, handed to a fresh successor
+    to VERIFY) is NOT emitted here: the commit hook prepends it (`carryover_findings_block`) so it
+    can consume the one-shot marker only after a review that actually delivered it. This function
+    stays silent on the no-record / session-differs paths.
 
     `ignore_matcher` (Channel B, docs/plans/reviewer_ignore_guidance.md): when supplied,
     paths matched by it are dropped from the delta candidate set before commands or inline

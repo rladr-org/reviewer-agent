@@ -353,16 +353,32 @@ mode afterward if you want it back. The same applies to `/stopContinue on [accep
 run a `!` shell pre-exec through a single dispatcher, `reviewer_cmd.py`. In Claude Code `auto` mode a
 pre-exec with no matching allow-rule is blocked before it runs, so add ONE scoped rule to
 `~/.claude/settings.json`. Permission-rule paths are literal (no `${CLAUDE_PLUGIN_ROOT}` expansion),
-so substitute your resolved plugin path — `claude plugin list` shows it:
+and the installed path is version-stamped —
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/reviewer_cmd.py` — so a rule that pins the
+version goes STALE on the next `claude plugin update`. Wildcard the version segment with `*` so the
+rule survives updates: run `claude plugin list` for your install path, then keep every segment
+literal EXCEPT the version, which becomes `*` (a single `*` matches one path segment, so it stays
+scoped to `reviewer_cmd.py` under any version):
 
 ```json
-{ "permissions": { "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer_cmd.py\":*)"] } }
+{ "permissions": { "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*/reviewer_cmd.py\":*)"] } }
 ```
 
-`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell. Note
-that a state-CHANGING invocation (`on`) may still be stopped by auto mode's classifier regardless of
-the allow-rule (above); the rule is what lets the non-state-changing invocations run without turning
-auto mode off.
+`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
+
+**Auto mode blocks `on` regardless of the allow-rule above.** The permission rule lets the
+non-state-changing invocations run; a state-CHANGING invocation (`on`) is independently flagged by
+auto mode's classifier and refused even with the rule. Either turn auto mode off for the single
+`on acceptRisk` invocation, or add an `autoMode.allow` classifier exception — read from
+`~/.claude/settings.json` (and managed settings) only, keep `"$defaults"`, and it survives updates
+because it names the dispatcher rather than a version:
+
+```json
+{ "autoMode": { "allow": [
+  "$defaults",
+  "Running the reviewer-agent dispatcher reviewer_cmd.py (under ~/.claude/plugins/cache/reviewer-agent/) with any subcommand and arguments, including its on/off/acceptRisk toggles: it only reads or flips this tool's own per-project flag files under ~/.claude/reviewer-agent/state and prints status; it never edits code, runs git, or accesses the network."
+] } }
+```
 
 Without auto mode blocking it, the plain `on` invocation must refuse without enabling and display:
 

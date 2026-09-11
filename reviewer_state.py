@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -493,6 +494,108 @@ def clear_commit_retry_pending(proj, claude_session_id):
         f.unlink(missing_ok=True)
 
 
+def _carryover_marker_stem(proj, claude_session_id):
+    """SHORT, bounded, session-scoped stem for the carryover markers. Like `_watchdog_marker_stem`:
+    the readable `_project_session_stem` grows with the project path and the atomic writer adds a
+    temp-UUID sibling on top, so for long (but valid) project paths the sum overflows the 255-byte
+    filename limit -- the atomic write then fails ENAMETOOLONG and the one-shot marker silently
+    never appears (even best-effort), so automatic rotation loses the preserved findings. A
+    fixed-length digest of (canonical project, session) keeps the marker AND its temp sibling
+    comfortably bounded while preserving per-(project, session) isolation."""
+    sid = str(claude_session_id or "").strip()
+    if not sid or not str(proj or "").strip():
+        return None
+    digest = hashlib.sha1(
+        (canonical_project_key(proj) + "\x00" + sid).encode("utf-8")
+    ).hexdigest()
+    return "cc_" + digest[:20]
+
+
+def commit_carryover_file(proj, claude_session_id):
+    """The ARMED one-shot marker: the reviewer session for this (project, Claude session) was
+    RETIRED with outstanding findings preserved, so the SUCCESSOR's first review must be handed
+    those findings to verify. Keyed per (project, Claude session) so two sessions in one repo never
+    cross-carry."""
+    stem = _carryover_marker_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".pending")
+
+
+def commit_carryover_pending(proj, claude_session_id):
+    """Non-consuming existence check (tests, observability, and the commit hook's 're-arm on a
+    failed review' decision). Best-effort: a state-path error reads as not-armed rather than
+    raising."""
+    f = commit_carryover_file(proj, claude_session_id)
+    if f is None:
+        return False
+    try:
+        return f.exists()
+    except OSError:
+        return False
+
+
+def set_commit_carryover(proj, claude_session_id):
+    """ARM the one-shot marker with a FRESH generation token (rotation, on a preserved rejection).
+    The token lets consumption target exactly the generation a review read and delivered, so an
+    overlapping rotation that re-arms is not unlinked undelivered. Best-effort: a state-path error
+    (e.g. ENAMETOOLONG) must not crash the retiring hook."""
+    f = commit_carryover_file(proj, claude_session_id)
+    if f is not None:
+        try:
+            _atomic_write_text(f, uuid.uuid4().hex + "\n")
+        except OSError:
+            pass
+
+
+def commit_carryover_generation(proj, claude_session_id):
+    """The armed marker's generation token (its content), or None when not armed / unreadable. A
+    fresh token is written on each arm, so a review can record WHICH generation it read and delivered
+    and consumption can target exactly that one."""
+    f = commit_carryover_file(proj, claude_session_id)
+    if f is None:
+        return None
+    try:
+        token = f.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return token or None
+
+
+def consume_commit_carryover(proj, claude_session_id, generation):
+    """Delete the marker ONLY if it still holds `generation` (the token this review read and
+    delivered), under the rotation audit lock so an overlapping re-arm of a NEWER generation is left
+    for its own successor rather than unlinked undelivered. Returns whether it deleted."""
+    f = commit_carryover_file(proj, claude_session_id)
+    if f is None or not generation:
+        return False
+    # FULLY best-effort: this must never raise, because commit_hook calls it before emitting its
+    # response. The lock acquisition ITSELF does mkdir/open (see _reviewer_session_audit_lock), so
+    # the `with` is placed INSIDE this `try` -- a lock-acquisition OSError is caught here too, not
+    # only read/unlink errors.
+    try:
+        with _reviewer_session_audit_lock():  # acquisition (mkdir/open) guarded by the try above
+            current = f.read_text(encoding="utf-8").strip()
+            if current != generation:
+                return False  # a newer generation was armed -> do not delete it
+            f.unlink()
+            return True
+    except OSError:
+        return False
+
+
+def clear_commit_carryover(proj, claude_session_id):
+    """Best-effort discard of the (non-consuming) carryover marker -- used on a clean retirement and
+    other cleanup paths. Inheritance is gated by the session-mismatch state, not by deleting this,
+    so clearing it only tidies state; it never affects a fresh successor's inheritance."""
+    f = commit_carryover_file(proj, claude_session_id)
+    if f is not None:
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def project_dir():
     return os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
 
@@ -683,6 +786,26 @@ def set_active(proj):
 
 def clear_active(proj):
     flag_file(proj).unlink(missing_ok=True)
+
+
+def any_reviewer_active():
+    """True if the commit gate is active for ANY project (some `<stem>.active` flag exists,
+    excluding the `.stopcontinue[.watchdog].active` flags, which are a different feature). Used to
+    fail an unresolvable `git -C <target>` commit CLOSED regardless of the session cwd's own
+    activation: the gate cannot expand the target, so it could be committing to one of those active
+    repos unreviewed. When nothing is active the plugin stays inert (off means off) and such a
+    commit is left alone. Best-effort: a state-path error reads as 'nothing active'."""
+    state = reviewer_home() / "state"
+    try:
+        for f in state.glob("*.active"):
+            name = f.name
+            if name.endswith(".stopcontinue.active") or \
+                    name.endswith(".stopcontinue_watchdog.active"):
+                continue
+            return True
+    except OSError:
+        return False
+    return False
 
 
 # --------------------------------------------------------------------------
@@ -1462,6 +1585,7 @@ def rotate_session(proj, claude_session_id):
         audited_stage_path(proj, sid),
         last_review_file(proj, sid),
         reviewer_session_audit_count_file(proj, sid),
+        commit_carryover_file(proj, sid),  # a stale marker must not pair with unrelated new findings
     ]
     targets += legacy_session_files(sid)
     for f in targets:
@@ -1543,6 +1667,17 @@ def retire_commit_reviewer_session(
     for f in targets:
         if f is not None:
             f.unlink(missing_ok=True)
+    if preserve_last_review:
+        # The last review (its outstanding findings) survived the unlink above; arm the carryover so
+        # the SUCCESSOR's first review inherits and re-verifies them, rather than diverging by
+        # amnesia (staged_change_block is otherwise silent on a no-record / session-id mismatch). The
+        # marker is NON-consuming: the successor inherits it while fresh and stops once it records
+        # its own completed audit; a clean retirement (the else below) discards it.
+        set_commit_carryover(proj, claude_session_id)
+    else:
+        # Clean retirement without preserved findings: discard any stale carryover left by a prior
+        # preserved rotation so a fresh successor is not handed findings that no longer apply.
+        clear_commit_carryover(proj, claude_session_id)
     remove_commit_scratch_dir(reviewer_session_id)      # reclaim this generation's scratch
     return True
 
