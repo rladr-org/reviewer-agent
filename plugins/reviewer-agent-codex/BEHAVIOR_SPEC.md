@@ -67,12 +67,19 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Does not inspect source code, diffs, Git state, tests, or unrelated repository files.
 - The Stop hook returns immediately with a one-use token. `stop_continue` creates or resumes the
   dedicated thread and returns the ruling in one cancellable direct MCP call, with no briefing turn.
+- A stop permit covers one completion handoff, bound to operator-input and observed-work
+  generations. It expires after five minutes and is consumed once. New genuine operator prompts,
+  tool calls, and subagent starts invalidate it, including approvals still running when new input
+  or work arrives. The review tool snapshots work after its own PreToolUse event. Rewording the
+  final acknowledgment or receiving a fresh host continuation turn ID does not require another
+  review. Older permit formats are rejected.
 - Escape cancels the MCP request and nested reviewer without granting a stop permit. Because Codex
   may reassign the turn ID while ending an interrupted turn, a fresh one-use repository/session
   abort bypass allows the host's repeated Stop without restarting stopContinue. It expires after
   30 seconds, and `UserPromptSubmit` clears it before every genuine operator prompt, so a later task
   remains supervised.
-- Fails open on reviewer errors or empty output.
+- Fails open on reviewer errors or empty output, with a failure message rather than an approval.
+- Treats quoted transcripts supplied for diagnosis as evidence, not as assignments to execute.
 - Continues Codex when the reviewer judges the user task incomplete.
 - Stops after a bounded number of hook-generated continuations. The budget survives fresh host
   turn IDs within one continuation chain and resets only on a genuine operator prompt.

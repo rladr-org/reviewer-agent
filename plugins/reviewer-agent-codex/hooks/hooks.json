@@ -14,23 +14,13 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^Bash$",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
             "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\"",
             "timeout": 10,
             "statusMessage": "Routing reviewer-agent request"
-          }
-        ]
-      },
-      {
-        "matcher": "^update_plan$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\"",
-            "timeout": 5
           }
         ]
       }

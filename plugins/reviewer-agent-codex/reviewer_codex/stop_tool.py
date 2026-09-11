@@ -53,7 +53,7 @@ def _cancelled(root, ticket, abort_callback_registered):
     return _result("cancelled", "stopContinue was cancelled")
 
 
-def _allow_stop(root, ticket):
+def _allow_stop(root, ticket, outcome):
     session_id = ticket["session_id"]
     background_markers = ticket.get("background_markers") or [
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
@@ -67,13 +67,17 @@ def _allow_stop(root, ticket):
             # Liveness recovery is advisory once the minimal supervisor has ruled.
             # State I/O failures must not defeat stopContinue's fail-open contract.
             pass
-    state.grant_stop_permit(root, session_id)
+    state.grant_stop_permit(
+        root, session_id, ticket.get("turn_id"), ticket["final_message"],
+        outcome=outcome, operator_generation=ticket.get("operator_generation", ""),
+        work_generation=ticket["work_generation"],
+    )
     return True
 
 
-def _complete_allowed_stop(cancel_event, root, ticket):
+def _complete_allowed_stop(cancel_event, root, ticket, outcome="stop_ok"):
     completed, allowed = cancellation.complete(
-        cancel_event, lambda: _allow_stop(root, ticket)
+        cancel_event, lambda: _allow_stop(root, ticket, outcome)
     )
     if not completed:
         return "cancelled"
@@ -97,6 +101,9 @@ def review_stop(cwd, review_token, cancel_event=None):
             "propose the final response again to obtain a new token",
         )
     session_id = ticket["session_id"]
+    # The review tool's own PreToolUse belongs to this handoff. Snapshot after it, but before
+    # the blocking review, so later work still invalidates a late approval.
+    ticket["work_generation"] = state.stop_generation(root, session_id, work=True)
     background_markers = ticket.get("background_markers") or [
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
@@ -119,7 +126,7 @@ def review_stop(cwd, review_token, cancel_event=None):
     except Exception as error:
         if cancel_event is not None and cancel_event.is_set():
             return _cancelled(root, ticket, abort_callback_registered)
-        completion = _complete_allowed_stop(cancel_event, root, ticket)
+        completion = _complete_allowed_stop(cancel_event, root, ticket, outcome="failed_open")
         if completion == "cancelled":
             return _cancelled(root, ticket, abort_callback_registered)
         if completion == "new_work":
@@ -136,7 +143,7 @@ def review_stop(cwd, review_token, cancel_event=None):
     if code == backend.CANCELLED_EXIT or (cancel_event and cancel_event.is_set()):
         return _cancelled(root, ticket, abort_callback_registered)
     if code != 0 or not output.strip():
-        completion = _complete_allowed_stop(cancel_event, root, ticket)
+        completion = _complete_allowed_stop(cancel_event, root, ticket, outcome="failed_open")
         if completion == "cancelled":
             return _cancelled(root, ticket, abort_callback_registered)
         if completion == "new_work":

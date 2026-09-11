@@ -25,7 +25,7 @@ def test_manifest_and_hook_contract():
     assert "SessionStart" not in hooks
     assert "hooks" not in manifest
     pre_tool_matchers = {group["matcher"] for group in hooks["PreToolUse"]}
-    assert pre_tool_matchers == {"^Bash$", "^update_plan$"}
+    assert pre_tool_matchers == {".*"}
 
 
 def test_no_claude_transcript_dependency():
@@ -69,7 +69,6 @@ def test_hook_commands_survive_evicted_plugin_cache(tmp_path):
     cases = [
         (hooks["UserPromptSubmit"][0]["hooks"][0]["command"], "hook_prompt.py", []),
         (hooks["PreToolUse"][0]["hooks"][0]["command"], "hook_pre_tool.py", []),
-        (hooks["PreToolUse"][1]["hooks"][0]["command"], "hook_pre_tool.py", []),
         (hooks["PostToolUse"][0]["hooks"][0]["command"], "hook_post_tool.py", []),
         (hooks["SubagentStart"][0]["hooks"][0]["command"], "hook_subagent.py", ["start"]),
         (hooks["SubagentStop"][0]["hooks"][0]["command"], "hook_subagent.py", ["stop"]),

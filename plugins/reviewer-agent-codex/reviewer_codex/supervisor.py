@@ -46,8 +46,11 @@ def supervise(data):
     final_message = data.get("last_assistant_message") or ""
     if not str(final_message).strip():
         return None
-    if state.consume_stop_permit(cwd, session_id):
+    permit = state.consume_stop_permit(cwd, session_id, data.get("turn_id"), final_message)
+    if permit == "stop_ok":
         return {"systemMessage": "[reviewer-agent-codex] Stop supervisor approved this stop."}
+    if permit == "failed_open":
+        return {"systemMessage": "[reviewer-agent-codex] Stop supervisor failed; allowing this stop under the fail-open policy."}
     used, cap = state.read_nudges(cwd, session_id), state.max_nudges()
     if used >= cap:
         return {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}

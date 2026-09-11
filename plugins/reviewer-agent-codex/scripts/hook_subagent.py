@@ -15,6 +15,10 @@ def main():
     session_id = state.session_key(data)
     agent_id = data.get("agent_id")
     if action == "start":
+        try:
+            state.invalidate_stop_permits(data.get("cwd") or ".", session_id, work=True)
+        except OSError:
+            pass
         liveness.mark(
             data.get("cwd") or ".", session_id, "subagent", agent_id,
             data.get("agent_type") or "",

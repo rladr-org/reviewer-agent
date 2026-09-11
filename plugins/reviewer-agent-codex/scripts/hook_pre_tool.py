@@ -13,6 +13,10 @@ def main():
     data = json.loads(sys.stdin.read() or "{}")
     if data.get("hook_event_name") != "PreToolUse":
         return 0
+    try:
+        state.invalidate_stop_permits(data.get("cwd") or ".", state.session_key(data), work=True)
+    except OSError:
+        pass
     if data.get("tool_name") == "update_plan":
         try:
             state.record_plan(

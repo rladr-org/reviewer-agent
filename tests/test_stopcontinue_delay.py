@@ -238,3 +238,11 @@ def test_stop_prompt_requires_verifying_a_claimed_approval():
     assert "do not take that claim at face value" in norm
     assert "genuinely needs operator authorization" in norm
     assert "not already granted" in norm
+
+
+def test_stop_prompt_prefers_known_tasks_with_generic_fallback():
+    norm = " ".join(rl.STOP_SUPERVISE_PROMPT.split()).lower()
+    assert "name the specific unfinished work" in norm
+    assert "cannot identify the unfinished tasks" in norm
+    assert "do not invent tasks" in norm
+    assert "quoted transcripts" in norm

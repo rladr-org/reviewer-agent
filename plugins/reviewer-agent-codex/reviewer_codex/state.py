@@ -560,6 +560,7 @@ def create_stop_ticket(
                 "session_id": str(session_id),
                 "final_message": str(final_message or ""),
                 "turn_id": str(turn_id or ""),
+                "operator_generation": stop_generation(root, session_id),
                 "background_markers": normalized,
                 "shell_markers": legacy_shells,
                 "created": time.time(),
@@ -630,19 +631,113 @@ def _stop_permit_file(path, session_id):
     )
 
 
-def grant_stop_permit(path, session_id):
+def stop_generation(path, session_id, work=False):
+    name = _scoped_name(path, session_id)
+    directory = "stop-work-generations" if work else "stop-generations"
+    target = state_home() / directory / (name + ".txt") if name else None
+    try:
+        return target.read_text(encoding="utf-8").strip()
+    except (AttributeError, OSError):
+        # AttributeError: no scoped name (target is None). OSError (incl. the common
+        # missing-file case): any read failure fails open to the empty generation rather
+        # than escaping -- callers read this at a pre-review snapshot that is OUTSIDE the
+        # supervisor's fail-open guard, so a bare raise here would defeat that contract.
+        return ""
+
+
+def invalidate_stop_permits(path, session_id, work=False):
+    """Invalidate approvals after new operator input or observed tool/subagent work.
+
+    Serialized with ``consume_stop_permit`` under the mutation lock: once consume has
+    renamed the permit to a claim, the ``target.unlink`` below is a no-op, so the
+    generation bump is the only remaining guard against a stale approval -- the bump and
+    consume's generation read must not interleave. The permit is unlinked in a ``finally``
+    so a failed generation write still revokes the approval; otherwise a caller that
+    swallows the error (every hook does) would leave a live permit whose unchanged
+    generation still matches and approves.
+    """
+    name = _scoped_name(path, session_id)
+    if not name:
+        return
+    directory = "stop-work-generations" if work else "stop-generations"
+    generation = state_home() / directory / (name + ".txt")
+    target = _stop_permit_file(path, session_id)
+    with _mutation_lock():
+        try:
+            _atomic_write(generation, uuid.uuid4().hex)
+        except OSError:
+            # Removing the permit is not enough: a review already running when this
+            # invalidation arrives regrants a fresh permit from its pre-review snapshot
+            # (stop_tool._allow_stop -> grant_stop_permit). A generation left stale after a
+            # failed bump still equals that snapshot, so consume_stop_permit would approve.
+            # Delete the generation instead -- a missing generation reads as "", which no
+            # non-empty snapshot equals, so consume fails CLOSED and the stop is re-reviewed.
+            generation.unlink(missing_ok=True)
+            raise
+        finally:
+            if target is not None:
+                target.unlink(missing_ok=True)
+
+
+def grant_stop_permit(path, session_id, turn_id=None, final_message="", outcome="stop_ok",
+                      operator_generation=None, work_generation=None):
     target = _stop_permit_file(path, session_id)
     if target is not None:
-        _atomic_write(target, uuid.uuid4().hex + "\n")
+        _atomic_write(target, json.dumps({
+            "scope": "completion",
+            "turn_id": str(turn_id or ""),
+            "message_hash": hashlib.sha256(str(final_message or "").strip().encode()).hexdigest(),
+            "operator_generation": (stop_generation(path, session_id)
+                                    if operator_generation is None else operator_generation),
+            "work_generation": (stop_generation(path, session_id, work=True)
+                                if work_generation is None else work_generation),
+            "created": time.time(),
+            "outcome": outcome,
+        }) + "\n")
 
 
-def consume_stop_permit(path, session_id):
+def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_age=300):
+    """Consume one completion handoff while operator input and observed work are unchanged.
+
+    Host continuation turn IDs and final acknowledgments can change after review. The stored
+    turn and message hash are provenance, not equality gates. Legacy permits are invalid.
+    """
     target = _stop_permit_file(path, session_id)
-    try:
-        target.unlink()
-    except (AttributeError, OSError):
-        return False
-    return True
+    if target is None:
+        return None
+    # The rename + generation compare runs under the mutation lock so it is atomic w.r.t.
+    # invalidate_stop_permits: without it, invalidate could bump the generation between
+    # this claim's rename and its generation read while its own unlink lands as a no-op,
+    # letting a stale permit approve after new work.
+    with _mutation_lock():
+        claimed = target.with_suffix("." + uuid.uuid4().hex + ".claim")
+        try:
+            target.rename(claimed)
+        except OSError:
+            return None
+        try:
+            value = json.loads(claimed.read_text(encoding="utf-8"))
+            if not isinstance(value, dict):
+                return None
+            if value.get("scope") != "completion":
+                return None
+            if not 0 <= time.time() - float(value.get("created", 0)) <= max_age:
+                return None
+            if value.get("operator_generation") != stop_generation(path, session_id):
+                return None
+            if value.get("work_generation") != stop_generation(path, session_id, work=True):
+                return None
+            outcome = value.get("outcome")
+            return outcome if outcome in ("stop_ok", "failed_open") else None
+        except (OSError, ValueError, TypeError):
+            return None
+        finally:
+            # The single-use claim is best-effort cleanup; a non-missing unlink error must
+            # not escape and turn an already-decided outcome into a bare exception.
+            try:
+                claimed.unlink()
+            except OSError:
+                pass
 
 
 def _stop_abort_bypass_file(path, session_id):
@@ -1166,7 +1261,8 @@ def clear_session_artifacts(session_id):
     if not token:
         return
     for directory in ("sessions", "prompts", "plans", "nudges",
-                      "stop-permits", "stop-abort-bypasses"):
+                      "stop-permits", "stop-abort-bypasses", "stop-generations",
+                      "stop-work-generations"):
         root = state_home() / directory
         for path in (root.glob(token + ".*") if root.is_dir() else ()):
             path.unlink(missing_ok=True)

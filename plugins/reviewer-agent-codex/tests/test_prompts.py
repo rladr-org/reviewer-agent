@@ -229,3 +229,18 @@ def test_stop_prompt_requires_explicit_shell_and_subagent_reconciliation(
     assert "collaboration registry" in normalized
     assert "no live subagent remains" in normalized
     assert "git diff" not in prompt
+
+
+def test_stop_brief_distinguishes_quoted_incidents_from_current_work():
+    norm = " ".join(prompts.STOP_BRIEF.split()).lower()
+    assert "quoted transcripts" in norm
+    assert "diagnostic evidence" in norm
+    assert "explicitly adopts" in norm
+
+
+def test_stop_prompt_prefers_known_tasks_with_generic_fallback():
+    norm = " ".join(prompts.STOP_BRIEF.split()).lower()
+    assert "name the specific unfinished work" in norm
+    assert "cannot identify the unfinished tasks" in norm
+    assert "do not invent tasks" in norm
+    assert "quoted transcripts" in norm

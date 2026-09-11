@@ -32,8 +32,8 @@ def test_stop_ok_grants_one_use_permit(git_repo, isolated_state, monkeypatch):
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "stop_ok"
-    assert state.consume_stop_permit(git_repo, "root-session")
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_incomplete_stop_returns_directive_without_permit(
@@ -50,7 +50,7 @@ def test_incomplete_stop_returns_directive_without_permit(
 
     assert result["status"] == "incomplete"
     assert "targeted tests" in result["directive"]
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_clears_only_the_persistently_challenged_shell_markers(
@@ -72,7 +72,7 @@ def test_stop_ok_clears_only_the_persistently_challenged_shell_markers(
     assert result["status"] == "stop_ok"
     assert liveness.outstanding(git_repo, "root-session") == []
     assert not liveness.shells_were_challenged(git_repo, "root-session", [marker])
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_incomplete_stop_keeps_persistent_shell_markers(
@@ -96,7 +96,7 @@ def test_incomplete_stop_keeps_persistent_shell_markers(
     assert result["status"] == "incomplete"
     assert [item["id"] for item in liveness.outstanding(git_repo, "root-session")] == ["stale-1"]
     assert liveness.shells_were_challenged(git_repo, "root-session", [marker])
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_clears_exact_mixed_background_markers(
@@ -124,7 +124,7 @@ def test_stop_ok_clears_exact_mixed_background_markers(
     assert result["status"] == "stop_ok"
     assert liveness.outstanding(git_repo, "root-session") == []
     assert not liveness.items_were_challenged(git_repo, "root-session", markers)
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_incomplete_stop_keeps_mixed_background_markers(
@@ -157,7 +157,7 @@ def test_incomplete_stop_keeps_mixed_background_markers(
         ("subagent", "stale-agent"),
     }
     assert liveness.items_were_challenged(git_repo, "root-session", markers)
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_persistent_shell_context_is_sent_to_the_minimal_stop_reviewer(
@@ -214,7 +214,7 @@ def test_stop_cancellation_is_forwarded_to_reviewer(git_repo, isolated_state, mo
     result = stop_tool.review_stop(git_repo, _ticket(git_repo), cancelled)
 
     assert result["status"] == "cancelled"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
     assert state.consume_stop_abort_bypass(git_repo, "root-session", "turn-1")
     assert not state.consume_stop_abort_bypass(git_repo, "root-session", "turn-1")
 
@@ -261,7 +261,7 @@ def test_stop_failure_remains_fail_open(git_repo, isolated_state, monkeypatch):
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "failed_open"
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_failure_clears_adjudicated_persistent_markers_when_failing_open(
@@ -281,7 +281,7 @@ def test_stop_failure_clears_adjudicated_persistent_markers_when_failing_open(
 
     assert result["status"] == "failed_open"
     assert liveness.outstanding(git_repo, "root-session") == []
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_marker_cleanup_error_cannot_defeat_stop_failure_fail_open(
@@ -303,7 +303,7 @@ def test_marker_cleanup_error_cannot_defeat_stop_failure_fail_open(
     )
 
     assert result["status"] == "failed_open"
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_new_work_during_persistent_marker_review_prevents_stop_permit(
@@ -325,7 +325,7 @@ def test_new_work_during_persistent_marker_review_prevents_stop_permit(
 
     assert result["status"] == "incomplete"
     assert [item["id"] for item in liveness.outstanding(git_repo, "root-session")] == ["new-1"]
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_new_subagent_during_mixed_marker_review_prevents_stop_permit(
@@ -355,7 +355,7 @@ def test_new_subagent_during_mixed_marker_review_prevents_stop_permit(
     assert [(item["kind"], item["id"]) for item in liveness.outstanding(git_repo, "root-session")] == [
         ("subagent", "new-agent")
     ]
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_requires_exact_whole_token(git_repo, isolated_state, monkeypatch):
@@ -367,7 +367,7 @@ def test_stop_ok_requires_exact_whole_token(git_repo, isolated_state, monkeypatc
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "incomplete"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_exception_fails_open(git_repo, isolated_state, monkeypatch):
@@ -381,7 +381,7 @@ def test_stop_exception_fails_open(git_repo, isolated_state, monkeypatch):
 
     assert result["status"] == "failed_open"
     assert "crashed" in result["detail"]
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_permit_is_repository_scoped(
@@ -392,10 +392,10 @@ def test_stop_permit_is_repository_scoped(
     import subprocess
 
     subprocess.run(["git", "init", "-q", str(other)], check=True)
-    state.grant_stop_permit(git_repo, "root-session")
+    state.grant_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
-    assert not state.consume_stop_permit(other, "root-session")
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(other, "root-session", "turn-1", "I am done.")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_cancellation_wins_immediately_before_stop_permit(
@@ -418,7 +418,7 @@ def test_cancellation_wins_immediately_before_stop_permit(
     )
 
     assert result["status"] == "cancelled"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_incomplete_ruling_retires_abort_callback(
@@ -456,7 +456,7 @@ def test_stop_ok_on_the_last_line_after_reasoning_grants_permit(
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "stop_ok"
-    assert state.consume_stop_permit(git_repo, "root-session")
+    assert state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_trailing_line_tolerates_emphasis_only(git_repo, isolated_state, monkeypatch):
@@ -485,7 +485,7 @@ def test_stop_ok_first_line_stays_exact_token(git_repo, isolated_state, monkeypa
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "incomplete"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_trailing_line_rejects_quote_wrappers(git_repo, isolated_state, monkeypatch):
@@ -499,7 +499,7 @@ def test_stop_ok_trailing_line_rejects_quote_wrappers(git_repo, isolated_state, 
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "incomplete"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_mentioned_in_a_trailing_sentence_is_incomplete(
@@ -517,7 +517,7 @@ def test_stop_ok_mentioned_in_a_trailing_sentence_is_incomplete(
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "incomplete"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
 
 def test_stop_ok_mid_reply_is_contradictory_and_incomplete(
@@ -535,4 +535,4 @@ def test_stop_ok_mid_reply_is_contradictory_and_incomplete(
     result = stop_tool.review_stop(git_repo, _ticket(git_repo))
 
     assert result["status"] == "incomplete"
-    assert not state.consume_stop_permit(git_repo, "root-session")
+    assert not state.consume_stop_permit(git_repo, "root-session", "turn-1", "I am done.")

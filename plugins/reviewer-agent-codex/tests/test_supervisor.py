@@ -180,7 +180,7 @@ def test_stop_hook_returns_immediately_with_session_bound_token(git_repo, isolat
 
 def test_one_use_stop_permit_allows_next_stop(git_repo, isolated_state):
     state.set_feature(git_repo, "stop")
-    state.grant_stop_permit(git_repo, "root-session")
+    state.grant_stop_permit(git_repo, "root-session", "turn-1", "I am done.")
 
     output = supervisor.supervise(_payload(git_repo))
 

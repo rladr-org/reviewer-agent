@@ -99,6 +99,7 @@ def main():
     )
     if genuine_operator_prompt:
         try:
+            state.invalidate_stop_permits(data.get("cwd") or ".", session_id)
             state.clear_stop_abort_bypass(data.get("cwd") or ".", session_id)
             state.reset_nudges(data.get("cwd") or ".", session_id)
         except OSError:
