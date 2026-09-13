@@ -5,6 +5,37 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [1.2.1-beta.5]
+
+Ships the commit-gate and stopContinue-supervisor hardening committed after `1.2.1-beta.4`. Every
+declared version across both packages moves to `1.2.1-beta.5` in lockstep (checked by
+`tools/release_versions.py`); the Codex plugin's `+codex.<timestamp>` build metadata is refreshed so
+the Codex host notices the reinstall. As with every local (directory-source) release, the version
+bump is what lets an installed copy pick the changes up: the plugin is compared by version *string*,
+so `claude plugin update` is a no-op until the version changes.
+
+### Changed
+
+- Commit gate: a `git -C "$VAR" commit` whose repository path is a shell variable no longer slips
+  the gate. The `-C` target is parsed lexically, so an unexpandable `$VAR`/`$(...)`/backtick was
+  joined onto the cwd as a fabricated path (`cwd/$VAR`), making `is_active` false and silently
+  skipping the fail-closed review (a fail-OPEN). Such a target now falls back to the session cwd.
+  The Codex host already fail-closed on this case. See `tests/test_commit_hook.py`.
+- `AGENT_INSTALL.md`: the single allow rule for the manual commands is now version-independent —
+  wildcard the plugin cache's version segment (`.../reviewer-agent/*/reviewer_cmd.py`) so it
+  survives `claude plugin update`, plus an `autoMode.allow` exception (also version-independent)
+  that clears the state-changing `on` the classifier flags regardless of the permission rule. New
+  regression guard `tests/test_reviewer_cmd_allow_rule.py`.
+- `stopContinue` (Codex host): the stop-permit fast-path is now revocation-safe under concurrency.
+  `consume_stop_permit` and `invalidate_stop_permits` serialize their compare-and-mutate under the
+  shared mutation lock, so an invalidation from new operator input, a tool call, or a subagent start
+  can no longer interleave with a permit consumption and let a stale approval through. A failed
+  generation-file write during invalidation now deletes the generation instead of leaving it stale,
+  so a review already running cannot regrant a permit from its pre-review snapshot (a missing
+  generation reads as empty, which no snapshot matches, so the stop is re-reviewed). Generation
+  reads and claim cleanup fail open to the supervisor's failure path rather than escaping as a bare
+  exception. See `plugins/reviewer-agent-codex/tests/test_stop_permit_regressions.py`.
+
 ## [1.2.1-beta.4]
 
 Opens the `1.2.1` pre-release line. Every declared version across both packages moves to
