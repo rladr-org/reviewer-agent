@@ -5,7 +5,12 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
-## [Unreleased]
+## [1.2.1-beta.6]
+
+Ships the Codex reviewer-launch fix committed after `1.2.1-beta.5`. Every declared version across
+both packages moves to `1.2.1-beta.6` in lockstep (checked by `tools/release_versions.py`); the
+Codex plugin's `+codex.<timestamp>` build metadata is refreshed so the Codex host notices the
+reinstall.
 
 ### Fixed
 
