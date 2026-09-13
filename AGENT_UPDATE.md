@@ -234,9 +234,23 @@ python3 tools/release_cachebuster.py              # refresh +codex.<UTC>; never 
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-Then start a **new** Codex thread (Codex loads tools, skills and hooks at thread start), run
-`/hooks`, and trust the plugin hooks again. State under `~/.codex/reviewer-agent-codex/` survives,
+After installation, run `codex` in a terminal and use `/hooks` in that interactive CLI to trust
+the plugin hooks again.
+Exit the CLI, fully quit and restart the Codex GUI, and start a new GUI chat. `/hooks` is not a
+Codex GUI command. State under `~/.codex/reviewer-agent-codex/` survives,
 so features stay enabled per repository — no re-acceptance.
+
+For a checkout update, run the native plugin suite from `plugins/reviewer-agent-codex` before
+installing (`python3 -m pytest -p no:cacheprovider`; developers use the `amygdala` environment).
+The root suite does not collect it. Its backend and installer regressions exercise review launches
+during cache parking, after restoration, and after cache eviction without model calls.
+
+Older running servers, including `1.2.1-beta.5`, can fail to launch `_process_guard.py` while the
+installer temporarily parks their cache directory. This can occur during a successful documented
+update; the error alone does not establish an incorrect installation. A completed version-changing
+update restores that path, whereas bypassing the installer can leave it absent. Complete the
+restart before treating the update as verified, and distinguish a `failed_open` stop result from
+a supervisor approval.
 
 **Check:** a new thread offers the `reviewer-agent-codex` tools; `/hooks` shows the hooks as
 trusted; and the MCP server advertises the new version (the `codex-native` matrix scenario asserts

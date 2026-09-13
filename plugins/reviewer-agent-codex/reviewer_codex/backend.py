@@ -24,6 +24,25 @@ MAX_COMMIT_REVIEW_TIMEOUT = state.MAX_COMMIT_REVIEW_TIMEOUT
 STOP_REVIEW_TIMEOUT = 300
 
 
+def _snapshot_process_guard():
+    """Keep this server's guard and dependency available after plugin cache eviction."""
+    directory = Path(__file__).parent
+    tree_source = (directory / "process_tree.py").read_text(encoding="utf-8")
+    guard_source = (directory / "_process_guard.py").read_text(encoding="utf-8")
+    return (
+        "import sys, types\n"
+        "tree = types.ModuleType('process_tree')\n"
+        "exec(compile({!r}, '<reviewer-process-tree>', 'exec'), tree.__dict__)\n"
+        "sys.modules['process_tree'] = tree\n"
+        "exec(compile({!r}, '<reviewer-process-guard>', 'exec'))\n"
+    ).format(tree_source, guard_source)
+
+
+# Snapshot at import, while the installed package still exists. Later launches must not
+# reopen its files or mix a running server's code with a replacement plugin version.
+_PROCESS_GUARD_SOURCE = _snapshot_process_guard() if os.name == "posix" else ""
+
+
 def codex_bin():
     configured = os.environ.get("REVIEWER_CODEX_BIN")
     return configured or shutil.which("codex") or str(Path.home() / ".local" / "bin" / "codex")
@@ -80,7 +99,8 @@ def _run(argv, timeout, input_text=None, cancel_event=None):
         lifecycle_read, lifecycle_write = os.pipe()
         guarded_argv = [
             sys.executable,
-            str(Path(__file__).with_name("_process_guard.py")),
+            "-c",
+            _PROCESS_GUARD_SOURCE,
             str(lifecycle_read),
         ] + list(argv)
         popen_options["pass_fds"] = (lifecycle_read,)

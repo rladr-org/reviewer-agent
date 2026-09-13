@@ -2,16 +2,43 @@
 import json
 import os
 import signal
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from reviewer_codex import backend, state
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX lifecycle guard")
+def test_loaded_backend_survives_evicted_plugin_cache(tmp_path):
+    cached_root = tmp_path / "plugin-cache"
+    shutil.copytree(ROOT / "reviewer_codex", cached_root / "reviewer_codex")
+    script = "\n".join([
+        "import json, shutil, sys",
+        "sys.path.insert(0, {!r})".format(str(cached_root)),
+        "from reviewer_codex import backend",
+        "shutil.rmtree({!r})".format(str(cached_root)),
+        "for prompt in ('first ruling', 'resumed ruling'):",
+        "    result = backend._run([sys.executable, '-c', "
+        "'import sys; print(sys.stdin.read().upper())'], timeout=5, input_text=prompt)",
+        "    print(json.dumps(result), flush=True)",
+    ])
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=cached_root,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert [json.loads(line) for line in result.stdout.splitlines()] == [
+        [0, "FIRST RULING\n", ""], [0, "RESUMED RULING\n", ""],
+    ]
 
 
 def _assert_heartbeat_stopped(path, label):
@@ -286,7 +313,8 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path):
                 pass
 
 
-def test_run_terminates_nested_process_when_mcp_parent_dies(tmp_path):
+@pytest.mark.parametrize("evict_cache", [False, True])
+def test_run_terminates_nested_process_when_mcp_parent_dies(tmp_path, evict_cache):
     if os.name != "posix":
         return
 
@@ -319,11 +347,16 @@ def test_run_terminates_nested_process_when_mcp_parent_dies(tmp_path):
             "time.sleep(30)",
         ]
     )
+    server_root = ROOT
+    if evict_cache:
+        server_root = tmp_path / "plugin-cache"
+        shutil.copytree(ROOT / "reviewer_codex", server_root / "reviewer_codex")
     server_script = "\n".join(
         [
-            "import sys",
-            "sys.path.insert(0, {!r})".format(str(ROOT)),
+            "import shutil, sys",
+            "sys.path.insert(0, {!r})".format(str(server_root)),
             "from reviewer_codex import backend",
+            "shutil.rmtree({!r})".format(str(server_root)) if evict_cache else "pass",
             "result = backend._run(",
             "    [sys.executable, '-c', {!r}], timeout=60".format(child_script),
             ")",

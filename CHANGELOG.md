@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [Unreleased]
+
+### Fixed
+
+- Codex review launches retain the process guard and its process-tree helper in memory when the
+  MCP backend starts. A later plugin update can park or remove the original cache without causing
+  a missing `_process_guard.py` failure. This covers the documented installer's temporary parking
+  window as well as cache eviction; cancellation and parent-death cleanup remain covered by
+  subprocess tests. Already-running older servers require a restart to load the fix.
+
 ## [1.2.1-beta.5]
 
 Ships the commit-gate and stopContinue-supervisor hardening committed after `1.2.1-beta.4`. Every

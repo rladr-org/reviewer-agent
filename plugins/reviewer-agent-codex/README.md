@@ -160,6 +160,15 @@ newly installed immutable cache, then through the permanent
 does not become trapped in a missing-hook Stop or PreToolUse loop merely because the plugin was
 upgraded incorrectly.
 
+The MCP backend snapshots its process guard and process-tree helper when it starts. Later
+review launches use that retained code, so temporarily parking or removing the original cache
+does not prevent a running server from launching a review. Cancellation, timeouts, and cleanup
+when the MCP parent exits still apply. Servers loaded from older releases need a restart to gain
+this protection: in `1.2.1-beta.5`, a review launched during the installer's parking window can
+fail on a missing `_process_guard.py` even when the documented update succeeds. Stop supervision
+reports that failure and allows stopping under its fail-open policy; it is not a completion
+approval. A fresh session after a completed update avoids that stale path.
+
 Then open a terminal and run `codex` to start an interactive CLI session. Run `/hooks` there,
 inspect the `reviewer-agent-codex` lifecycle hooks, and trust them. `/hooks` is not a Codex GUI
 command. Exit the CLI, fully quit and restart the GUI, then start a new GUI chat. Codex loads newly

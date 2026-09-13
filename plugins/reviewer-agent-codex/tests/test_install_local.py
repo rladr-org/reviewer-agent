@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: MPL-2.0
 import json
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +12,48 @@ from reviewer_codex.install import InstallError, install_local
 
 
 PLUGIN_NAME = "reviewer-agent-codex"
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX lifecycle guard")
+@pytest.mark.parametrize("install_fails", [False, True])
+def test_live_review_launches_during_and_after_documented_update(tmp_path, install_fails):
+    home = tmp_path / "home"
+    cache = home / ".codex/plugins/cache/personal" / PLUGIN_NAME
+    old = cache / "old-release"
+    shutil.copytree(ROOT / "reviewer_codex", old / "reviewer_codex")
+    script = "\n".join([
+        "import json, shutil, sys",
+        "from pathlib import Path",
+        "sys.path.insert(0, {!r})".format(str(old)),
+        "from reviewer_codex import backend",
+        "from reviewer_codex.install import install_local",
+        "results = []",
+        "def probe():",
+        "    results.append(backend._run([sys.executable, '-c', 'print(123)'], timeout=3))",
+        "def replace_cache(command):",
+        "    shutil.rmtree({!r})".format(str(cache)),
+        "    probe()",
+        "    if {!r}: raise RuntimeError('simulated install failure')".format(install_fails),
+        "    shutil.copytree({!r}, {!r})".format(
+            str(ROOT / "reviewer_codex"), str(cache / "new-release/reviewer_codex")
+        ),
+        "probe()",
+        "try:",
+        "    install_local(Path({!r}), home=Path({!r}), run_command=replace_cache, "
+        "configure_host=lambda: None)".format(str(ROOT), str(home)),
+        "except RuntimeError:",
+        "    if not {!r}: raise".format(install_fails),
+        "probe()",
+        "print(json.dumps(results))",
+    ])
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=old,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [[0, "123\n", ""]] * 3
+    assert old.is_dir()
 
 
 def make_plugin(source: Path) -> None:
