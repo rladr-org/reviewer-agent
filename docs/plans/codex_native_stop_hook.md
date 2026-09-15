@@ -131,3 +131,26 @@ These results establish removal of the synthetic success continuation and verify
 supplied to the app; they do not establish the exact visual treatment or change the app's general
 history-folding behavior. New tasks should load the updated plugin; existing tasks can retain
 their prior hook/MCP definitions until the desktop app is restarted.
+
+## Desktop follow-up — 2026-09-15
+
+The operator reported no prominent Stop output and no history collapse in the original task.
+That alone was insufficient: inspection found no new supervisor review, and a controlled
+premature stop in that task still failed to trigger supervision after a full app restart.
+The cause remains unresolved; restarting alone is not a verified remedy for that task.
+
+Fresh live tests with the desktop's exact backend (`0.154.0-alpha.6.2`), installed package,
+persisted trust, and desktop launch flags passed. A fresh backend session in the original
+repository also passed. These comparisons did not establish operation in the actual app.
+
+The operator then authorized creation of the actual desktop task **Verify desktop Stop
+supervision**, ID `01a0a695-2b75-7d01-9393-e06dbed32e56`, in a project worktree. It passed:
+
+1. The agent answered `WORK_PENDING` and attempted to stop.
+2. Supervisor task `01a0a695-4aee-7ec1-86f7-b4793b7a8a9a` issued a continuation directive.
+3. The agent automatically answered `NATIVE_STOP_RESUMED`.
+4. The supervisor returned `STOP_OK`; the task completed without another routing prompt.
+
+The plugin recorded two reviews and no leftover Stop permit. This verifies automatic
+continuation and approval in a newly created desktop task. It does not resolve the failed
+test in the original task, or establish the desktop app's general history-folding behavior.
