@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
-from .stop_tool import review_stop
+from .stop_tool import review_completion, review_stop
 from .supervisor import supervise_hook
 
 
@@ -79,6 +79,32 @@ STOP_TOOL = {
         "destructiveHint": False,
         "openWorldHint": False,
     },
+}
+
+COMPLETION_TOOL = {
+    "name": "review_completion",
+    "title": "Review completion",
+    "description": (
+        "When stopContinue is enabled, call before publishing the final response. Pass the "
+        "complete draft as proposed_response; omit review_token (the host hook binds it). "
+        "Wait for the result. On incomplete, do the required work and review a revised draft "
+        "within this turn. On stop_ok, publish the exact draft without further tools. "
+        "failed_open or budget_exhausted permits stopping without claiming approval. "
+        "On disabled continue normally; on error leave review to the native Stop fallback "
+        "instead of retrying unbound calls. Supports Escape cancellation."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "cwd": {"type": "string", "description": "Absolute current repository path."},
+            "proposed_response": {"type": "string", "minLength": 1,
+                                  "description": "The entire final response you intend to publish."},
+            "review_token": {"type": "string", "description": "Host-supplied binding; omit this argument."},
+        },
+        "required": ["cwd", "proposed_response"],
+        "additionalProperties": False,
+    },
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
 }
 
 STOP_HOOK_TOOL = {
@@ -249,7 +275,10 @@ def handle_message(
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
                     "Call review_commit or legacy stop_continue once when named by a "
-                    "reviewer-agent hook. The native Stop lifecycle invokes stop_hook "
+                    "reviewer-agent hook. When stopContinue is enabled, call review_completion "
+                    "with the complete draft before every final response. Address incomplete "
+                    "rulings in this turn and review again; after approval publish the exact "
+                    "draft without more tools. The native Stop lifecycle invokes stop_hook "
                     "automatically. All reviews support MCP cancellation, including Escape."
                 ),
             },
@@ -257,9 +286,9 @@ def handle_message(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL]})
+        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL, COMPLETION_TOOL]})
     if method == "tools/call":
-        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"]):
+        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"], COMPLETION_TOOL["name"]):
             return _error(request_id, -32601, "unknown tool")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
@@ -275,6 +304,11 @@ def handle_message(
                     arguments.get("message"),
                     arguments.get("review_token"),
                     cancel_event=cancel_event,
+                )
+            elif params.get("name") == COMPLETION_TOOL["name"]:
+                result = review_completion(
+                    arguments.get("cwd"), arguments.get("proposed_response"),
+                    arguments.get("review_token"), cancel_event=cancel_event,
                 )
             else:
                 result = stop_fn(

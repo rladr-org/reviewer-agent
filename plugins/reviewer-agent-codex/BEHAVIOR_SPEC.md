@@ -65,7 +65,8 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Judges operator prompts, the captured current `update_plan` task list, the proposed final
   message, and only plan/task documents explicitly named in that context.
 - Does not inspect source code, diffs, Git state, tests, or unrelated repository files.
-- The bundled Stop hook calls the hook-specific MCP entry point synchronously. It creates or
+- The bundled Stop hook silently consumes valid pre-final approval. Otherwise it calls the
+  hook-specific MCP entry point synchronously as a fallback. It creates or
   resumes the dedicated reviewer and adjudicates the original final response in that same Stop
   event, with no briefing turn or model-directed routing prompt. The running status is short;
   approval returns an empty hook decision without a routine success warning. Only an incomplete
@@ -78,7 +79,8 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   tool calls, and subagent starts invalidate it, including approvals still running when new input
   or work arrives. The review tool snapshots work after its own PreToolUse event. Rewording the
   final acknowledgment or receiving a fresh host continuation turn ID does not require another
-  review. Older permit formats are rejected.
+  review for legacy handoffs. Pre-final permits additionally require the reviewed draft and
+  exact host turn. Older permit formats are rejected.
 - The native Stop hook consumes its permit in the same invocation, including the generation
   checks. It cannot leave an approval behind for a subsequent stop or approve new work/input
   that arrived while the review was running. MCP hook responses use the hook JSON contract,
@@ -168,12 +170,12 @@ pretend to auto-answer arbitrary unanswered questions. Codex's native automatic 
 can handle eligible permission prompts; stop supervision handles routine decisions that should not
 have been escalated to the operator.
 
-## Planned pre-final review (not implemented yet)
+## Pre-final completion review
 
-The next revision will add `review_completion` before publishing a final response. Trusted
-PreToolUse context will bind a one-use ticket to the host repository/session/turn and draft.
-Required fixes will return as ordinary tool results, with retries in the same turn. Approval
-will cover that draft and turn plus existing generation/expiry checks. The native Stop handler
-will remain a fallback and can still create visible feedback when it rejects. Both paths will
+Enabled sessions use `review_completion` before publishing a final response. Trusted
+PreToolUse context binds a one-use ticket to the host repository/session/turn and draft.
+Required fixes return as ordinary tool results, with retries in the same turn. Approval
+covers that draft and turn plus existing generation/expiry checks. The native Stop handler
+remains a fallback and can still create visible feedback when it rejects. Both paths
 share the bounded review budget and fail-open/cancellation policy. See the
 [implementation and validation plan](../../docs/plans/codex_prefinal_completion_review.md).

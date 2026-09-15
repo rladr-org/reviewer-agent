@@ -7,7 +7,7 @@ import re
 import sys
 
 import _bootstrap  # noqa: F401
-from reviewer_codex import controls, state
+from reviewer_codex import completion, controls, state
 from reviewer_codex.supervisor import CONTINUATION_PREFIX
 
 
@@ -113,6 +113,10 @@ def main():
             state.record_prompt(data.get("cwd") or ".", session_id, prompt)
         except OSError:
             pass
+    if state.feature_enabled(data.get("cwd") or ".", "stop"):
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit", "additionalContext": completion.GUIDANCE,
+        }}))
     return 0
 
 

@@ -55,6 +55,11 @@ def _cancelled(root, ticket, abort_callback_registered):
 
 def _allow_stop(root, ticket, outcome):
     session_id = ticket["session_id"]
+    if ticket.get("strict_completion") and (
+        ticket["operator_generation"] != state.stop_generation(root, session_id, strict_io=True)
+        or ticket["work_generation"] != state.stop_generation(root, session_id, work=True, strict_io=True)
+    ):
+        return False
     background_markers = ticket.get("background_markers") or [
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
@@ -71,6 +76,7 @@ def _allow_stop(root, ticket, outcome):
         root, session_id, ticket.get("turn_id"), ticket["final_message"],
         outcome=outcome, operator_generation=ticket.get("operator_generation", ""),
         work_generation=ticket["work_generation"],
+        strict_completion=ticket.get("strict_completion", False),
     )
     return True
 
@@ -84,7 +90,12 @@ def _complete_allowed_stop(cancel_event, root, ticket, outcome="stop_ok"):
     return "allowed" if allowed else "new_work"
 
 
-def review_stop(cwd, review_token, cancel_event=None):
+def review_completion(cwd, proposed_response, review_token=None, cancel_event=None):
+    return review_stop(cwd, review_token, cancel_event=cancel_event,
+                       completion=True, proposed_response=proposed_response)
+
+
+def review_stop(cwd, review_token, cancel_event=None, *, completion=False, proposed_response=None):
     cwd = Path(str(cwd or ""))
     if not cwd.is_absolute():
         return _result("error", "cwd must be an absolute repository path")
@@ -101,13 +112,30 @@ def review_stop(cwd, review_token, cancel_event=None):
             "propose the final response again to obtain a new token",
         )
     session_id = ticket["session_id"]
+    if completion and (
+        not ticket.get("strict_completion")
+        or not isinstance(proposed_response, str) or not proposed_response.strip()
+        or ticket["final_message"].strip() != proposed_response.strip()
+    ):
+        return _result("error", "pre-final review requires a host-bound draft; do not invent a token")
     # The review tool's own PreToolUse belongs to this handoff. Snapshot after it, but before
     # the blocking review, so later work still invalidates a late approval.
-    ticket["work_generation"] = state.stop_generation(root, session_id, work=True)
+    if not ticket.get("strict_completion"):
+        ticket["work_generation"] = state.stop_generation(root, session_id, work=True)
     background_markers = ticket.get("background_markers") or [
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
     abort_callback_registered = _register_abort_bypass(cancel_event, root, ticket)
+    if completion:
+        if state.read_nudges(root, session_id) >= state.max_nudges():
+            outcome = _complete_allowed_stop(cancel_event, root, ticket, outcome="budget_exhausted")
+            if outcome == "cancelled":
+                return _cancelled(root, ticket, abort_callback_registered)
+            if outcome == "new_work":
+                return _result("incomplete", "task changed during review",
+                               directive="Address the new input or work before stopping.")
+            return _result("budget_exhausted", "completion review budget exhausted; stopping is allowed without approval")
+        state.bump_nudges(root, session_id)
     try:
         code, output, stderr = backend.review_turn(
             root,
@@ -132,8 +160,8 @@ def review_stop(cwd, review_token, cancel_event=None):
         if completion == "new_work":
             return _result(
                 "incomplete",
-                "new background work appeared while stopContinue was running",
-                directive="Wait for and inspect the newly started background work.",
+                "task input or work changed while stopContinue was running",
+                directive="Address the new input or work and inspect newly started background work.",
             )
         return _result(
             "failed_open",
@@ -149,8 +177,8 @@ def review_stop(cwd, review_token, cancel_event=None):
         if completion == "new_work":
             return _result(
                 "incomplete",
-                "new background work appeared while stopContinue was running",
-                directive="Wait for and inspect the newly started background work.",
+                "task input or work changed while stopContinue was running",
+                directive="Address the new input or work and inspect newly started background work.",
             )
         detail = stderr.strip() or "empty ruling"
         return _result(
@@ -165,8 +193,8 @@ def review_stop(cwd, review_token, cancel_event=None):
         if completion == "new_work":
             return _result(
                 "incomplete",
-                "new background work appeared while stopContinue was running",
-                directive="Wait for and inspect the newly started background work.",
+                "task input or work changed while stopContinue was running",
+                directive="Address the new input or work and inspect newly started background work.",
             )
         return _result("stop_ok", "the stop supervisor approved completion", ruling=output.strip())
     completed, _unused = cancellation.complete(cancel_event, lambda: None)

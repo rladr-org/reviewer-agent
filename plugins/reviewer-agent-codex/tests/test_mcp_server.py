@@ -155,7 +155,7 @@ def test_approval_labels_suggestions_as_nonblocking():
 def test_server_advertises_review_tools_and_native_stop_hook():
     response = mcp_server.handle_message(_request("tools/list"))
     tools = response["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["review_commit", "stop_continue", "stop_hook", "interrupt_stop"]
+    assert [tool["name"] for tool in tools] == ["review_commit", "stop_continue", "stop_hook", "interrupt_stop", "review_completion"]
     assert tools[0]["inputSchema"]["required"] == ["cwd", "message", "review_token"]
 
 

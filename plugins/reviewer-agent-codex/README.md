@@ -423,7 +423,7 @@ presents the decision, options, recommendation, and exact reply needed to unbloc
 ## Blocking calls and cancellation
 
 Commit attempts return immediately with a one-use token tied to the owning Codex session. Codex
-then calls the named MCP tool once. The bundled Stop hook instead calls the reviewer server
+then calls the named MCP tool once. When fallback review is needed, the bundled Stop hook calls the reviewer server
 directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking completion` while
 it runs. It consumes its review permit within that same hook invocation. Approval adds no routing
 prompt or routine success warning, preserving the original final answer. An incomplete ruling
@@ -550,10 +550,18 @@ that the plugin was exercised with the CLI as its active developer host.
 Mozilla Public License 2.0 — see [`LICENSE`](LICENSE) in this directory, which carries the
 unmodified license text and is the notice location for the source files in this package.
 
-## Planned desktop completion review
+## Desktop completion review
 
-The current native Stop handler still creates a visible continuation prompt when it rejects,
-which can collapse earlier work in the desktop app. A planned `review_completion` tool will
-review drafts before publication and return required work within the existing turn. It is not
-available yet. The native Stop fallback will remain and its rejection can still produce that
-UI behavior. See the [design and validation plan](../../docs/plans/codex_prefinal_completion_review.md).
+`review_completion` reviews the complete draft before publication and returns required work as
+an ordinary tool result. The agent addresses findings and retries within the same turn, then
+publishes the approved draft without more tool calls. Its one-use approval requires the same
+host turn and draft (apart from surrounding whitespace); new input or work invalidates it.
+Enabled sessions receive this protocol through UserPromptSubmit developer context. PreToolUse
+binds each call to the genuine host session; the model does not supply session identities.
+
+The native Stop handler consumes matching approval silently. If review is skipped or approval
+is invalid, it performs a fallback review. A rejected fallback still creates a visible
+continuation prompt and may collapse earlier work in the desktop app. The plugin cannot control
+that UI behavior. The shared budget, fail-open policy, and cancellation remain in effect; budget
+exhaustion or review failure permits stopping without claiming approval. See the
+[design and validation plan](../../docs/plans/codex_prefinal_completion_review.md).

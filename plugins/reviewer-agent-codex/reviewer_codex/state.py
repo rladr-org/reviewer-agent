@@ -535,6 +535,7 @@ def create_stop_ticket(
     turn_id=None,
     shell_markers=None,
     background_markers=None,
+    strict_completion=False,
 ):
     root = project_root(path)
     if not root or not session_id:
@@ -561,6 +562,8 @@ def create_stop_ticket(
                 "final_message": str(final_message or ""),
                 "turn_id": str(turn_id or ""),
                 "operator_generation": stop_generation(root, session_id),
+                "strict_completion": bool(strict_completion),
+                "work_generation": stop_generation(root, session_id, work=True),
                 "background_markers": normalized,
                 "shell_markers": legacy_shells,
                 "created": time.time(),
@@ -683,11 +686,12 @@ def invalidate_stop_permits(path, session_id, work=False):
 
 
 def grant_stop_permit(path, session_id, turn_id=None, final_message="", outcome="stop_ok",
-                      operator_generation=None, work_generation=None):
+                      operator_generation=None, work_generation=None, strict_completion=False):
     target = _stop_permit_file(path, session_id)
     if target is not None:
         _atomic_write(target, json.dumps({
             "scope": "completion",
+            "strict_completion": bool(strict_completion),
             "turn_id": str(turn_id or ""),
             "message_hash": hashlib.sha256(str(final_message or "").strip().encode()).hexdigest(),
             "operator_generation": (stop_generation(path, session_id)
@@ -704,7 +708,8 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
     """Consume one completion handoff while operator input and observed work are unchanged.
 
     Host continuation turn IDs and final acknowledgments can change after review. The stored
-    turn and message hash are provenance, not equality gates. Legacy permits are invalid.
+    turn and message hash are provenance for legacy handoffs. Pre-final permits additionally
+    require exact turn and draft equality. Legacy permits without a scope are invalid.
     Native hooks use strict_io to distinguish an operational failure (raise OSError) from a
     missing, stale, or invalid permit (None), so only the latter requests more work.
     """
@@ -737,6 +742,10 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
                 return None
             if value.get("scope") != "completion":
                 return None
+            if value.get("strict_completion"):
+                message_hash = hashlib.sha256(str(final_message or "").strip().encode()).hexdigest()
+                if value.get("turn_id") != str(turn_id or "") or value.get("message_hash") != message_hash:
+                    return None
             if not 0 <= time.time() - float(value.get("created", 0)) <= max_age:
                 return None
             if value.get("operator_generation") != stop_generation(path, session_id, strict_io=strict_io):
@@ -744,7 +753,9 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
             if value.get("work_generation") != stop_generation(path, session_id, work=True, strict_io=strict_io):
                 return None
             outcome = value.get("outcome")
-            return outcome if outcome in ("stop_ok", "failed_open") else None
+            if outcome == "budget_exhausted" and value.get("strict_completion") is not True:
+                return None
+            return outcome if outcome in ("stop_ok", "failed_open", "budget_exhausted") else None
         except OSError:
             if strict_io:
                 raise

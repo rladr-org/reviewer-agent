@@ -44,6 +44,18 @@ cannot guarantee hidden rejection or control desktop history expansion with that
    prove review happened and normal retries did not generate a hook prompt. Ask the operator to
    confirm visible history behavior; backend events alone cannot prove the UI stayed expanded.
 
-## Status
+## Validation history
 
-Specification only; implementation and live verification are pending.
+- Documentation committed as `68349d5`; 22 failing behavioral cases were run and committed as
+  `a3e308d` before implementation.
+- The initial candidate passed all 360 then-existing plugin tests, 50 release/export tests,
+  and plugin validation. Installation metadata was updated through the cachebuster helper.
+- Implementation review found that budget exhaustion accepted non-strict legacy permits.
+  Regression commit `36d9e29` covers matching/changed drafts, changed turns, and legacy rejection.
+  It failed against the candidate; the fix requires `strict_completion` to be exactly true.
+  All 61 affected completion/state/native Stop checks passed after that restriction.
+- The next independent commit review ran the full suite: 361 tests passed in 437.65 seconds.
+  It requested consistent surrounding-whitespace normalization at the ticket-to-tool boundary.
+  Regression commit `a529ae0` reproduces that rejection and also rejects internal-whitespace
+  changes. The comparison now normalizes only surrounding whitespace, matching permit validation.
+- All 24 completion tests pass after normalization (58.41 seconds). Live verification is pending.
