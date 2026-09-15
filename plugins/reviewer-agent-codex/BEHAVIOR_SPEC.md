@@ -167,3 +167,13 @@ Codex does not expose Claude Code's `AskUserQuestion` AFK timeout contract. This
 pretend to auto-answer arbitrary unanswered questions. Codex's native automatic approval reviewer
 can handle eligible permission prompts; stop supervision handles routine decisions that should not
 have been escalated to the operator.
+
+## Planned pre-final review (not implemented yet)
+
+The next revision will add `review_completion` before publishing a final response. Trusted
+PreToolUse context will bind a one-use ticket to the host repository/session/turn and draft.
+Required fixes will return as ordinary tool results, with retries in the same turn. Approval
+will cover that draft and turn plus existing generation/expiry checks. The native Stop handler
+will remain a fallback and can still create visible feedback when it rejects. Both paths will
+share the bounded review budget and fail-open/cancellation policy. See the
+[implementation and validation plan](../../docs/plans/codex_prefinal_completion_review.md).

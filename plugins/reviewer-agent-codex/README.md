@@ -549,3 +549,11 @@ that the plugin was exercised with the CLI as its active developer host.
 
 Mozilla Public License 2.0 — see [`LICENSE`](LICENSE) in this directory, which carries the
 unmodified license text and is the notice location for the source files in this package.
+
+## Planned desktop completion review
+
+The current native Stop handler still creates a visible continuation prompt when it rejects,
+which can collapse earlier work in the desktop app. A planned `review_completion` tool will
+review drafts before publication and return required work within the existing turn. It is not
+available yet. The native Stop fallback will remain and its rejection can still produce that
+UI behavior. See the [design and validation plan](../../docs/plans/codex_prefinal_completion_review.md).
