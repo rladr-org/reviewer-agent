@@ -88,4 +88,12 @@ Stop with no third review. Passing artifact directory:
 `/var/folders/84/ks9457dn2gg0sqww5cdrn0cw0000gn/T/prefinal-reviewer-check-4bweg5va`.
 Release/export checks (50 tests) and plugin validation pass for this correction.
 The local full-suite run after the correction passed all 362 tests.
-The installed desktop-backend rerun is pending.
+The installed desktop-backend rerun passed with version
+`1.2.1-beta.6+codex.20260915215809`. It invoked two real `review_completion` calls in one
+turn: incomplete, then STOP_OK. The developer published only the completed final draft;
+the native Stop event had no feedback entries, no continuation prompt was created, and no
+permit remained. Artifact directory:
+`/var/folders/84/ks9457dn2gg0sqww5cdrn0cw0000gn/T/reviewer-prefinal-live-0tbjuifm`.
+The test used the desktop-bundled Codex backend with normal installed plugin configuration and
+persisted hook trust. These lifecycle events verify the functional path; visual expansion of
+the actual app history still requires operator confirmation.
