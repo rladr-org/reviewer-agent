@@ -5,6 +5,7 @@ import io
 import json
 import queue
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -76,7 +77,7 @@ def test_background_markers_are_adjudicated_in_the_same_review(git_repo, review,
     liveness.mark(git_repo, "native-session", "subagent", "agent-1", "worker")
 
     def ruling(*args, **kwargs):
-        assert "agent-1" in args[4]
+        assert "- subagent: worker" in args[4]
         return 0, outcome, ""
 
     monkeypatch.setattr(backend, "review_turn", ruling)
@@ -118,6 +119,46 @@ def test_reviewer_failures_allow_stop_with_warning(git_repo, review, monkeypatch
     assert "decision" not in result
     assert "failed" in result["systemMessage"].lower()
     assert "approved" not in result["systemMessage"].lower()
+    assert not state.consume_stop_permit(git_repo, "native-session")
+
+
+@pytest.mark.parametrize("fault", ["permit-rename", "permit-read", "operator-read", "work-read"])
+def test_permit_io_failure_is_fail_open_not_a_continuation(git_repo, review, monkeypatch, fault):
+    # Use non-empty generations so an unreadable generation cannot look unchanged.
+    state.invalidate_stop_permits(git_repo, "native-session")
+    state.invalidate_stop_permits(git_repo, "native-session", work=True)
+    active = [False]
+    reviewed = []
+    original_rename, original_read = Path.rename, Path.read_text
+
+    def ruling(*args, **kwargs):
+        reviewed.append(True)
+        active[0] = True
+        return 0, "STOP_OK", ""
+
+    def rename(path, target):
+        if active[0] and fault == "permit-rename" and path.suffix == ".permit":
+            raise PermissionError("permit rename denied")
+        return original_rename(path, target)
+
+    def read(path, *args, **kwargs):
+        if active[0]:
+            if fault == "permit-read" and path.suffix == ".claim":
+                raise PermissionError("permit read denied")
+            directory = {"operator-read": "stop-generations", "work-read": "stop-work-generations"}.get(fault)
+            if directory and path.parent.name == directory:
+                raise PermissionError("generation read denied")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(backend, "review_turn", ruling)
+    monkeypatch.setattr(Path, "rename", rename)
+    monkeypatch.setattr(Path, "read_text", read)
+    result = supervisor.supervise_hook(event(git_repo))
+    assert reviewed == [True]
+    assert "decision" not in result
+    assert "failed" in result["systemMessage"].lower()
+    assert "approved" not in result["systemMessage"].lower()
+    active[0] = False
     assert not state.consume_stop_permit(git_repo, "native-session")
 
 
@@ -230,4 +271,3 @@ def test_native_stdio_cancellation_has_no_late_response(git_repo, review, monkey
     assert not server.is_alive()
     assert output.getvalue() == ""
     assert not state.consume_stop_permit(git_repo, "native-session")
-
