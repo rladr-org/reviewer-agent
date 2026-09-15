@@ -98,3 +98,36 @@ and preservation of the existing commit path. Then rerun a live `turn/interrupt`
 host and MCP connection alive, and verify the nested reviewer exits and no permit remains.
 
 Reference: [Interrupt lifecycle contract](https://learn.chatgpt.com/docs/hooks#interrupt).
+
+## Validation result — 2026-09-15
+
+Implementation is committed in `e758d10` (native Stop) and `54178a0` (explicit Interrupt).
+The preceding documentation and red-test commits are `dbb5c1e`, `2ed3574`, `4f34864`,
+`87d1356`, and `0e6a337`. Each commit passed the independent commit gate.
+
+- Full plugin suite: **338 passed** in the amygdala environment.
+- Release metadata/export checks: **50 passed**; plugin manifest validation passed.
+- Live approval with a real nested reviewer: one native Stop call, empty hook result, original
+  final response preserved, no routing prompt and no reusable permit.
+- Live unfinished task: the reviewer returned an actionable continuation; the agent completed
+  the requested second step, and the next native review approved silently.
+- Live reviewer launch failure: the stop failed open with a warning, preserving the final answer.
+- Live persistent app-server interruption after the fix: `turn/interrupt` reached the matching
+  cancellation token, the nested process exited, no stop permit remained, and the host continued
+  responding. This exercised the explicit Interrupt hook, not CLI process shutdown.
+- Installed package: `1.2.1-beta.6+codex.20260915121313`. The exact Stop and Interrupt definitions
+  were trusted through Codex's configuration RPC and independently re-read as trusted.
+- Live installed-package app-server test, without injected MCP tools or a trust bypass: one
+  review ran from the installed plugin. The Stop lifecycle record reported `handlerType: mcpTool`,
+  `statusMessage: Checking completion`, `status: completed`, and an empty `entries` array.
+
+The live host was Codex 0.154.0. Standalone `codex exec` did not invoke the installed bundled
+hooks in this setup, although explicit session-configured hooks worked; the package's existing
+caveat about CLI as the active developer host remains. The installed app-server path did run
+the bundled hooks successfully.
+
+Desktop visual inspection remains unverified: computer-use reported that the Mac was locked.
+These results establish removal of the synthetic success continuation and verify the hook data
+supplied to the app; they do not establish the exact visual treatment or change the app's general
+history-folding behavior. New tasks should load the updated plugin; existing tasks can retain
+their prior hook/MCP definitions until the desktop app is restarted.
