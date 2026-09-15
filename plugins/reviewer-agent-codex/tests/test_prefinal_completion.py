@@ -194,3 +194,15 @@ def test_only_draft_bound_permit_can_authorize_budget_exhaustion(git_repo, isola
     state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted')
     assert supervisor.supervise_hook(event(git_repo)) == {}
     assert len(reviewed[0]) == 1, 'non-strict budget permit must not bypass fallback review'
+
+
+def test_bound_draft_tolerates_only_surrounding_whitespace(git_repo, isolated_state, reviewed):
+    args = bind(git_repo, isolated_state, '\n' + DRAFT + '\n')
+    args['proposed_response'] = DRAFT
+    assert call(args)['status'] == 'stop_ok'
+    assert supervisor.supervise_hook(event(git_repo)) == {}
+    assert len(reviewed[0]) == 1
+    args = bind(git_repo, isolated_state, DRAFT.replace(' ', '  ', 1))
+    args['proposed_response'] = DRAFT
+    assert call(args)['status'] == 'error'
+    assert len(reviewed[0]) == 1
