@@ -147,6 +147,7 @@ def review_stop(cwd, review_token, cancel_event=None, *, completion=False, propo
                 session_id,
                 ticket["final_message"],
                 background_markers=background_markers,
+                prefinal=completion,
             ),
             timeout=backend.STOP_REVIEW_TIMEOUT,
             cancel_event=cancel_event,

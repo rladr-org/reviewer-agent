@@ -78,3 +78,14 @@ other requested actions (such as tests, commits, external publication, or a dist
 Native Stop review must retain its current context. A real-reviewer regression will require an
 incomplete calculation draft to be rejected and its completed answer to be approved in the same
 reviewer session. It will be opt-in because it invokes the real Codex model and needs host access.
+
+The finding was documented in `505bf09`. The regression was moved outside the stub-only unit
+suite, into the explicitly invoked `scripts/check_prefinal_reviewer.py --run`, and committed as
+`9d3a888`. It reproduced the loop against the pre-fix code. The correction now supplies invocation
+context only to host-bound pre-final calls and includes that context in the stop-role fingerprint.
+The same real-reviewer check passes after the correction: incomplete, then STOP_OK, then silent
+Stop with no third review. Passing artifact directory:
+`/var/folders/84/ks9457dn2gg0sqww5cdrn0cw0000gn/T/prefinal-reviewer-check-4bweg5va`.
+Release/export checks (50 tests) and plugin validation pass for this correction.
+The local full-suite run after the correction passed all 362 tests.
+The installed desktop-backend rerun is pending.

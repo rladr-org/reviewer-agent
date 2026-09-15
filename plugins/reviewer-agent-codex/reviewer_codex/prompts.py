@@ -222,10 +222,29 @@ _PROJECT_BRIEF_SEPARATOR = (
 )
 
 
+PREFINAL_REVIEW_CONTEXT = """
+
+HOST-SUPPLIED CONTEXT FOR THIS INVOCATION
+
+The developer is currently calling review_completion with the proposed draft below. You are
+the reviewer executing that call. This invocation performs the completion-review step; do not
+instruct the developer to call review_completion again merely to obtain the review you are
+performing now. Evaluate the proposed draft as the response the operator will receive if you
+approve it. Publishing this draft after approval is the final handoff, not an unfinished
+prerequisite to your approval. Do not require the developer to publish an unapproved draft.
+
+This context does not fulfill other requested work: tests, commits, a distinct review, external
+publication, and other substantive actions still require the usual completion evidence. If
+such authorized work remains, direct it. If the proposed response completes the request and
+only this completion review and publication of this response remain, return STOP_OK.
+--- end host-supplied invocation context ---
+"""
+
+
 def session_revision(role):
     """Fingerprint static role prompts so upgraded instructions start a fresh child thread."""
     if role == "stop":
-        seed = STOP_BRIEF
+        seed = STOP_BRIEF + "\0" + PREFINAL_REVIEW_CONTEXT
     else:
         seed = "\0".join(
             (
@@ -388,6 +407,7 @@ def stop_prompt(
     final_message,
     shell_markers=None,
     background_markers=None,
+    prefinal=False,
 ):
     if background_markers is None:
         marker_context = _persistent_shell_context(shell_markers)
@@ -395,6 +415,7 @@ def stop_prompt(
         marker_context = _background_liveness_context(background_markers)
     return (
         STOP_BRIEF
+        + (PREFINAL_REVIEW_CONTEXT if prefinal else "")
         + operator_context(project_path, session_id)
         + plan_context(project_path, session_id)
         + marker_context

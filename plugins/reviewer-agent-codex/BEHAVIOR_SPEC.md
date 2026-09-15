@@ -179,3 +179,9 @@ covers that draft and turn plus existing generation/expiry checks. The native St
 remains a fallback and can still create visible feedback when it rejects. Both paths
 share the bounded review budget and fail-open/cancellation policy. See the
 [implementation and validation plan](../../docs/plans/codex_prefinal_completion_review.md).
+
+Host-bound pre-final calls identify the current invocation as the completion review and ask the
+reviewer to evaluate the draft as the response that will be published upon approval. The reviewer
+must not demand another invocation of itself or prior publication of the draft. Other requested
+work still needs completion evidence. This context is absent from native/legacy Stop calls and
+participates in the stop reviewer's prompt fingerprint.
