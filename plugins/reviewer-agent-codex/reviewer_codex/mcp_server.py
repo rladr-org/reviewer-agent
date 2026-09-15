@@ -4,6 +4,7 @@
 import json
 import sys
 import threading
+from pathlib import Path
 
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
@@ -104,6 +105,84 @@ STOP_HOOK_TOOL = {
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
 }
 
+INTERRUPT_TOOL = {
+    "name": "interrupt_stop",
+    "title": "Cancel interrupted completion review",
+    "description": (
+        "Invoked automatically by the Interrupt lifecycle hook to cancel native Stop reviews "
+        "for the interrupted cwd, session, and turn. Do not call manually."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "cwd": {"type": "string"},
+            "session_id": {"type": "string", "minLength": 1},
+            "turn_id": {"type": "string", "minLength": 1},
+            "hook_event_name": {"type": "string", "enum": ["Interrupt"]},
+        },
+        "required": ["cwd", "session_id", "turn_id", "hook_event_name"],
+        "additionalProperties": False,
+    },
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+}
+
+# Native hook cancellation is not forwarded by every host. Interrupt uses the same
+# connection and can reach these tokens while the Stop workers remain blocked.
+_active_stops = {}
+_active_stops_lock = threading.Lock()
+
+
+def _stop_key(arguments, event_name):
+    if arguments.get("hook_event_name") != event_name:
+        return None
+    fields = [arguments.get(name) for name in ("cwd", "session_id", "turn_id")]
+    if not all(isinstance(value, str) and value.strip() for value in fields):
+        return None
+    cwd, session_id, turn_id = fields
+    if not Path(cwd).is_absolute():
+        return None
+    try:
+        return str(Path(cwd).resolve()), session_id, turn_id
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _native_stop(arguments, cancel_event):
+    token = cancel_event if cancel_event is not None else Cancellation()
+    key = _stop_key(arguments, "Stop")
+    if key is not None:
+        with _active_stops_lock:
+            _active_stops.setdefault(key, set()).add(token)
+    try:
+        return supervise_hook(arguments, cancel_event=token)
+    finally:
+        if key is not None:
+            with _active_stops_lock:
+                tokens = _active_stops.get(key)
+                if tokens is not None:
+                    tokens.discard(token)
+                    if not tokens:
+                        _active_stops.pop(key, None)
+
+
+def _interrupt_stop(arguments):
+    key = _stop_key(arguments, "Interrupt")
+    with _active_stops_lock:
+        tokens = tuple(_active_stops.get(key, ()))
+    # Callbacks may write bypass state and must not run while holding the registry lock.
+    # A token that completed between snapshot and cancellation rejects cancellation itself.
+    for token in tokens:
+        token.set()
+    return {}
+
+
+def _hook_response(request_id, result):
+    return _response(request_id, {
+        "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+        "structuredContent": result,
+        "isError": False,
+    })
+
 
 def _response(request_id, result):
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -178,20 +257,17 @@ def handle_message(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL]})
+        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL]})
     if method == "tools/call":
-        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"]):
+        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"]):
             return _error(request_id, -32601, "unknown tool")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
             return _error(request_id, -32602, "arguments must be an object")
         if params.get("name") == STOP_HOOK_TOOL["name"]:
-            result = supervise_hook(arguments, cancel_event=cancel_event)
-            return _response(request_id, {
-                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
-                "structuredContent": result,
-                "isError": False,
-            })
+            return _hook_response(request_id, _native_stop(arguments, cancel_event))
+        if params.get("name") == INTERRUPT_TOOL["name"]:
+            return _hook_response(request_id, _interrupt_stop(arguments))
         try:
             if params.get("name") == TOOL["name"]:
                 result = commit_fn(

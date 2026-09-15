@@ -80,6 +80,24 @@
         ]
       }
     ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "reviewer-agent",
+            "tool": "interrupt_stop",
+            "input": {
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "turn_id": "${turn_id}",
+              "hook_event_name": "${hook_event_name}"
+            },
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [
