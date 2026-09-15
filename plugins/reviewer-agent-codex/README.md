@@ -452,6 +452,11 @@ without starting a second stop review. The bypass expires after 30 seconds and a
 prompt clears it before that prompt runs. This is not completion approval and cannot bypass
 supervision for a later task. Escape likewise cancels `review_commit` without committing.
 
+The native Interrupt hook cancels matching active Stop reviews explicitly. This is needed on
+hosts that do not forward ordinary MCP cancellation to lifecycle tool calls. Matching uses the
+canonical working directory, session ID, and interrupted turn ID; it does not cancel commit
+reviews or work in other turns. The handler returns silently within a three-second hook budget.
+
 One developer session reuses its commit-reviewer thread across attempts. After every completed
 verdict the plugin records the staged path/blob set. A retry on the same HEAD tells that same
 reviewer which paths are changed, unchanged, added, or removed and inlines bounded exact index

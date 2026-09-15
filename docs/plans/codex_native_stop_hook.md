@@ -70,3 +70,31 @@ sessions, but new sessions use the native registration. Verify plugin server-nam
 hook trust, cancellation propagation, and timeout behavior live before describing this as tested.
 Use the local plugin cachebuster/reinstall workflow for pickup in new sessions. Do not patch the
 desktop application or edit its conversation history.
+
+## Live finding: native cancellation needs an Interrupt hook
+
+Live Codex 0.154.0 tests on 2026-09-15 confirmed silent approval, actionable continuation, and
+fail-open reviewer errors. A persistent app-server `turn/interrupt` test exposed a host behavior:
+the native MCP Stop call did not receive `notifications/cancelled`, and its nested reviewer ran
+to completion after interruption. CLI shutdown did terminate the process through lifecycle-pipe
+cleanup, but that does not prove cancellation while the desktop host remains alive.
+
+Add a native MCP `Interrupt` handler to cancel active native Stop reviews in the same reviewer
+server. It receives `cwd`, `session_id`, `turn_id`, and `hook_event_name: "Interrupt"`, validates
+the event, and cancels only active reviews with that exact canonical working directory, session,
+and interrupted turn. Keep an in-memory registry of active request cancellation tokens, register
+before starting review, and unregister in `finally`. Support multiple matching requests without
+overwriting one another. Snapshot matching tokens under a lock and invoke cancellation outside
+that registry lock. Ignore unrelated, malformed, repeated, and already-completed interruptions.
+
+The Interrupt tool must return empty hook JSON promptly, use a maximum three-second hook timeout,
+and never launch another reviewer, grant approval, cancel a commit review, or restart work. Reuse
+the existing cancellation callback to grant the bounded abort bypass, terminate the nested process,
+and suppress late MCP output. Regular MCP cancellation continues to work independently.
+
+Follow the same documentation / red tests / implementation commit sequence for this correction.
+Test exact event scoping, simultaneous reviews, idempotence, registry cleanup, no late response,
+and preservation of the existing commit path. Then rerun a live `turn/interrupt` while keeping the
+host and MCP connection alive, and verify the nested reviewer exits and no permit remains.
+
+Reference: [Interrupt lifecycle contract](https://learn.chatgpt.com/docs/hooks#interrupt).

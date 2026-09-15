@@ -88,6 +88,11 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   abort bypass allows the host's repeated Stop without restarting stopContinue. It expires after
   30 seconds, and `UserPromptSubmit` clears it before every genuine operator prompt, so a later task
   remains supervised.
+- A native MCP Interrupt handler explicitly cancels active native Stop requests matching the
+  canonical cwd, session ID, and interrupted turn ID. This covers hosts that do not forward MCP
+  cancellation when interrupting lifecycle hooks. An in-memory registry is cleaned up after every
+  outcome; unrelated turns, repositories, and commit reviews are unaffected. The Interrupt handler
+  is silent and bounded to three seconds, and cannot restart or prevent interruption.
 - Fails open on reviewer errors or empty output, with a failure message rather than an approval.
 - Treats quoted transcripts supplied for diagnosis as evidence, not as assignments to execute.
 - Continues Codex when the reviewer judges the user task incomplete.
