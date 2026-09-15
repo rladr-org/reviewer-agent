@@ -8,6 +8,7 @@ import threading
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
 from .stop_tool import review_stop
+from .supervisor import supervise_hook
 
 
 SERVER_NAME = "reviewer-agent-codex"
@@ -79,6 +80,30 @@ STOP_TOOL = {
     },
 }
 
+STOP_HOOK_TOOL = {
+    "name": "stop_hook",
+    "title": "Check task completion",
+    "description": (
+        "Invoked automatically by the native Stop lifecycle hook. Receives the host's Stop "
+        "event and returns a hook decision after cancellable completion review. Do not call "
+        "this tool manually or invent a Stop event."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "cwd": {"type": "string", "description": "Absolute repository working directory."},
+            "session_id": {"type": "string", "minLength": 1},
+            "turn_id": {"type": ["string", "null"]},
+            "hook_event_name": {"type": "string", "enum": ["Stop"]},
+            "stop_hook_active": {"type": "boolean"},
+            "last_assistant_message": {"type": ["string", "null"]},
+        },
+        "required": ["cwd", "session_id", "hook_event_name"],
+        "additionalProperties": False,
+    },
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+}
+
 
 def _response(request_id, result):
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -144,21 +169,29 @@ def handle_message(
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Call the one tool named by a reviewer-agent hook exactly once. Both long "
-                    "rulings support MCP cancellation, including Escape from Codex."
+                    "Call review_commit or legacy stop_continue once when named by a "
+                    "reviewer-agent hook. The native Stop lifecycle invokes stop_hook "
+                    "automatically. All reviews support MCP cancellation, including Escape."
                 ),
             },
         )
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": [TOOL, STOP_TOOL]})
+        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL]})
     if method == "tools/call":
-        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"]):
+        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"]):
             return _error(request_id, -32601, "unknown tool")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
             return _error(request_id, -32602, "arguments must be an object")
+        if params.get("name") == STOP_HOOK_TOOL["name"]:
+            result = supervise_hook(arguments, cancel_event=cancel_event)
+            return _response(request_id, {
+                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                "structuredContent": result,
+                "isError": False,
+            })
         try:
             if params.get("name") == TOOL["name"]:
                 result = commit_fn(

@@ -445,7 +445,7 @@ original group. Kernel child enumeration reaches tests or shell commands that cr
 sessions, so a detached audit cannot survive as an orphan or consume capacity after its caller is
 gone.
 
-When Escape cancels `stop_continue`, the plugin records a one-use abort bypass scoped to the Git
+When Escape cancels a stop review, the plugin records a one-use abort bypass scoped to the Git
 repository and developer session. Codex may assign a new turn ID when it emits another Stop event
 while ending the interrupted turn; the hook consumes a fresh bypass and lets that event finish
 without starting a second stop review. The bypass expires after 30 seconds and any genuine operator
@@ -472,7 +472,7 @@ Codex exposes no lifecycle API for enumerating a unified-exec session whose `ses
 and either a shell completion event or a `SubagentStop` event can be missed. Sandboxed hooks cannot
 safely use the host process table or collaboration registry to prove whether such a marker is still
 live. A stop with shell and/or subagent markers therefore routes the exact `(kind, id)` set directly
-through the same minimal, cancellable `stop_continue` supervisor instead of first dumping a stale
+through the same minimal, cancellable completion supervisor instead of first dumping a stale
 marker list into the developer conversation. The supervisor may approve shell markers only when
 the proposed final states that the named work was inspected or polled and no process or
 unified-exec session remains; for subagent markers it must state that the collaboration registry

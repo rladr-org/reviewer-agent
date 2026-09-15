@@ -631,17 +631,20 @@ def _stop_permit_file(path, session_id):
     )
 
 
-def stop_generation(path, session_id, work=False):
+def stop_generation(path, session_id, work=False, *, strict_io=False):
     name = _scoped_name(path, session_id)
     directory = "stop-work-generations" if work else "stop-generations"
     target = state_home() / directory / (name + ".txt") if name else None
     try:
         return target.read_text(encoding="utf-8").strip()
-    except (AttributeError, OSError):
-        # AttributeError: no scoped name (target is None). OSError (incl. the common
-        # missing-file case): any read failure fails open to the empty generation rather
-        # than escaping -- callers read this at a pre-review snapshot that is OUTSIDE the
-        # supervisor's fail-open guard, so a bare raise here would defeat that contract.
+    except (AttributeError, FileNotFoundError):
+        return ""
+    except OSError:
+        if strict_io:
+            raise
+        # Legacy callers read pre-review snapshots outside the supervisor's fail-open
+        # guard, so preserve their tolerant behavior. Native permit consumption opts in
+        # to raising operational errors and handles them at its own fail-open boundary.
         return ""
 
 
@@ -696,11 +699,14 @@ def grant_stop_permit(path, session_id, turn_id=None, final_message="", outcome=
         }) + "\n")
 
 
-def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_age=300):
+def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_age=300,
+                        *, strict_io=False):
     """Consume one completion handoff while operator input and observed work are unchanged.
 
     Host continuation turn IDs and final acknowledgments can change after review. The stored
     turn and message hash are provenance, not equality gates. Legacy permits are invalid.
+    Native hooks use strict_io to distinguish an operational failure (raise OSError) from a
+    missing, stale, or invalid permit (None), so only the latter requests more work.
     """
     target = _stop_permit_file(path, session_id)
     if target is None:
@@ -713,7 +719,17 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
         claimed = target.with_suffix("." + uuid.uuid4().hex + ".claim")
         try:
             target.rename(claimed)
+        except FileNotFoundError:
+            return None
         except OSError:
+            if strict_io:
+                # No later Stop may reuse this failed handoff. Cleanup is best-effort if
+                # the filesystem also refuses deletion; never turn I/O failure into a loop.
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
             return None
         try:
             value = json.loads(claimed.read_text(encoding="utf-8"))
@@ -723,13 +739,17 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
                 return None
             if not 0 <= time.time() - float(value.get("created", 0)) <= max_age:
                 return None
-            if value.get("operator_generation") != stop_generation(path, session_id):
+            if value.get("operator_generation") != stop_generation(path, session_id, strict_io=strict_io):
                 return None
-            if value.get("work_generation") != stop_generation(path, session_id, work=True):
+            if value.get("work_generation") != stop_generation(path, session_id, work=True, strict_io=strict_io):
                 return None
             outcome = value.get("outcome")
             return outcome if outcome in ("stop_ok", "failed_open") else None
-        except (OSError, ValueError, TypeError):
+        except OSError:
+            if strict_io:
+                raise
+            return None
+        except (ValueError, TypeError):
             return None
         finally:
             # The single-use claim is best-effort cleanup; a non-missing unlink error must
