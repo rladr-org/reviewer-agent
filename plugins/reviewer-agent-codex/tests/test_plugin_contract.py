@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from reviewer_codex import backend
+from reviewer_codex import backend, mcp_server
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,14 +37,33 @@ def test_no_claude_transcript_dependency():
     assert "transcript_path" not in source
 
 
-def test_nested_reviews_run_outside_short_hook_timeouts():
+def test_native_stop_timeout_covers_the_bounded_reviewer():
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     stop_hook_timeout = hooks["Stop"][0]["hooks"][0]["timeout"]
     mcp = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
     tool_timeout = mcp["mcpServers"]["reviewer-agent"]["tool_timeout_sec"]
-    assert stop_hook_timeout <= 10
+    assert backend.STOP_REVIEW_TIMEOUT < stop_hook_timeout < tool_timeout
     assert tool_timeout > backend.STOP_REVIEW_TIMEOUT
     assert tool_timeout > backend.MAX_COMMIT_REVIEW_TIMEOUT
+
+
+def test_native_stop_registration_resolves_to_hook_tool():
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    handlers = [handler for group in hooks["Stop"] for handler in group["hooks"]]
+    assert len(handlers) == 1
+    hook = handlers[0]
+    assert hook["type"] == "mcp_tool"
+    assert hook["statusMessage"] == "Checking completion"
+    assert "command" not in hook
+    servers = json.loads((ROOT / ".mcp.json").read_text())["mcpServers"]
+    assert hook["server"] in servers
+    tools = mcp_server.handle_message({"method": "tools/list", "id": 1})["result"]["tools"]
+    tool = next(tool for tool in tools if tool["name"] == hook["tool"])
+    assert tool["name"] == "stop_hook"
+    fields = {"cwd", "session_id", "turn_id", "hook_event_name", "stop_hook_active", "last_assistant_message"}
+    assert hook["input"] == {field: "${" + field + "}" for field in fields}
+    assert set(tool["inputSchema"]["properties"]) == fields
+    assert {"cwd", "session_id", "hook_event_name"} <= set(tool["inputSchema"]["required"])
 
 
 def test_session_start_never_launches_a_reviewer():
@@ -59,6 +78,7 @@ def test_plugin_root_paths_are_quoted():
         for groups in hooks.values()
         for group in groups
         for hook in group["hooks"]
+        if hook["type"] == "command"
     ]
     assert commands
     assert all('"${PLUGIN_ROOT}"' in command for command in commands)
@@ -72,7 +92,6 @@ def test_hook_commands_survive_evicted_plugin_cache(tmp_path):
         (hooks["PostToolUse"][0]["hooks"][0]["command"], "hook_post_tool.py", []),
         (hooks["SubagentStart"][0]["hooks"][0]["command"], "hook_subagent.py", ["start"]),
         (hooks["SubagentStop"][0]["hooks"][0]["command"], "hook_subagent.py", ["stop"]),
-        (hooks["Stop"][0]["hooks"][0]["command"], "hook_stop.py", []),
         (hooks["SessionEnd"][0]["hooks"][0]["command"], "hook_session_end.py", []),
     ]
     home = tmp_path / "home"
@@ -113,7 +132,7 @@ def test_hook_commands_survive_evicted_plugin_cache(tmp_path):
 
 def test_hook_command_prefers_replacement_cache_over_source_fallback(tmp_path):
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    command = hooks["Stop"][0]["hooks"][0]["command"]
+    command = hooks["PreToolUse"][0]["hooks"][0]["command"]
     home = tmp_path / "home"
     cache_root = (
         home
@@ -124,8 +143,8 @@ def test_hook_command_prefers_replacement_cache_over_source_fallback(tmp_path):
         / "reviewer-agent-codex"
     )
     evicted_root = cache_root / "0.1.0+codex.evicted"
-    replacement_script = cache_root / "0.1.0+codex.new" / "scripts" / "hook_stop.py"
-    source_script = home / "plugins" / "reviewer-agent-codex" / "scripts" / "hook_stop.py"
+    replacement_script = cache_root / "0.1.0+codex.new" / "scripts" / "hook_pre_tool.py"
+    source_script = home / "plugins" / "reviewer-agent-codex" / "scripts" / "hook_pre_tool.py"
     for script, marker in ((replacement_script, "cache"), (source_script, "source")):
         script.parent.mkdir(parents=True)
         script.write_text('print("{}")\n'.format(marker), encoding="utf-8")
