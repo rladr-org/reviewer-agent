@@ -11,10 +11,11 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
    `review_commit` MCP call. The developer model is suspended until an isolated reviewer audits
    the staged index; an approved index is committed by the tool and every other outcome fails
    closed. Escape cancels the call and its nested reviewer process.
-2. **stopContinue:** immediately redirects a proposed stop to one blocking, cancellable
-   `stop_continue` MCP call. Its dedicated supervisor checks operator prompts, the current Codex
+2. **stopContinue:** checks a proposed stop inside a synchronous, cancellable MCP lifecycle hook.
+   Its dedicated supervisor checks operator prompts, the current Codex
    plan/task list, and the proposed final message, then continues Codex when work remains. It does
-   not receive `reviewerAgent.md` or perform a general repository audit.
+   not receive `reviewerAgent.md` or perform a general repository audit. Approval finishes silently
+   with the original answer; only unfinished work adds a continuation prompt.
 
 Both features are off by default.
 
@@ -421,9 +422,19 @@ presents the decision, options, recommendation, and exact reply needed to unbloc
 
 ## Blocking calls and cancellation
 
-Lifecycle hooks never run a reviewer model. A commit attempt or proposed stop returns immediately
-with a one-use token tied to the owning Codex session. Codex then calls the named MCP tool once and
-the developer model remains suspended until the result. The installer marks the reviewer MCP
+Commit attempts return immediately with a one-use token tied to the owning Codex session. Codex
+then calls the named MCP tool once. The bundled Stop hook instead calls the reviewer server
+directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking completion` while
+it runs. It consumes its review permit within that same hook invocation. Approval adds no routing
+prompt or routine success warning, preserving the original final answer. An incomplete ruling
+adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
+Removing synthetic review turns reduces desktop clutter; the plugin cannot force the app's
+previous-message dropdown to remain expanded.
+
+Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
+The legacy command hook and `stop_continue` tool remain for existing sessions; they still route
+via a one-use token. The developer model remains suspended during either review path.
+The installer marks the reviewer MCP
 namespace direct-only in Codex code mode, so the call cannot yield into a JavaScript cell that
 reactivates the developer model for polling or narration. The stdio server continues reading MCP
 messages while the review runs; on `notifications/cancelled` (including Escape), it terminates the

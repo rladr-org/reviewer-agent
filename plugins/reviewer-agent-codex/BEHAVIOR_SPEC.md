@@ -65,14 +65,24 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Judges operator prompts, the captured current `update_plan` task list, the proposed final
   message, and only plan/task documents explicitly named in that context.
 - Does not inspect source code, diffs, Git state, tests, or unrelated repository files.
-- The Stop hook returns immediately with a one-use token. `stop_continue` creates or resumes the
-  dedicated thread and returns the ruling in one cancellable direct MCP call, with no briefing turn.
+- The bundled Stop hook calls the hook-specific MCP entry point synchronously. It creates or
+  resumes the dedicated reviewer and adjudicates the original final response in that same Stop
+  event, with no briefing turn or model-directed routing prompt. The running status is short;
+  approval returns an empty hook decision without a routine success warning. Only an incomplete
+  ruling creates a continuation prompt, containing the actionable directive and the existing
+  internal continuation marker. The plugin does not control desktop history expansion.
+- Legacy command-hook and token-based `stop_continue` entry points remain available for existing
+  sessions. New bundled configuration registers only the native MCP Stop handler.
 - A stop permit covers one completion handoff, bound to operator-input and observed-work
   generations. It expires after five minutes and is consumed once. New genuine operator prompts,
   tool calls, and subagent starts invalidate it, including approvals still running when new input
   or work arrives. The review tool snapshots work after its own PreToolUse event. Rewording the
   final acknowledgment or receiving a fresh host continuation turn ID does not require another
   review. Older permit formats are rejected.
+- The native Stop hook consumes its permit in the same invocation, including the generation
+  checks. It cannot leave an approval behind for a subsequent stop or approve new work/input
+  that arrived while the review was running. MCP hook responses use the hook JSON contract,
+  rather than human-readable review-tool text.
 - Escape cancels the MCP request and nested reviewer without granting a stop permit. Because Codex
   may reassign the turn ID while ending an interrupted turn, a fresh one-use repository/session
   abort bypass allows the host's repeated Stop without restarting stopContinue. It expires after
