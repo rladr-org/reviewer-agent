@@ -59,3 +59,22 @@ cannot guarantee hidden rejection or control desktop history expansion with that
   Regression commit `a529ae0` reproduces that rejection and also rejects internal-whitespace
   changes. The comparison now normalizes only surrounding whitespace, matching permit validation.
 - All 24 completion tests pass after normalization (58.41 seconds). Live verification is pending.
+
+## Live finding: review requests become circular
+
+The installed desktop backend test invoked the real completion reviewer, but failed: it made
+10 incomplete rulings followed by the bounded budget-exhaustion result. After calculating the
+answer, the developer repeatedly submitted `17 × 19 = 323.`; the reviewer told it to call
+`review_completion` again or publish the approved draft. The user test had explicitly requested
+those steps, while the reviewer lacked context that its current invocation performs that review.
+This is a failed functional test, not approval. Artifact directory:
+`/var/folders/84/ks9457dn2gg0sqww5cdrn0cw0000gn/T/reviewer-prefinal-live-5l2tbni2`.
+
+The next correction will supply trusted pre-final review context: this invocation fulfills the
+completion-review step, and the proposed draft is the response that will be published if approved.
+The reviewer must evaluate whether that response completes the substantive request, without
+demanding another invocation of itself or prior publication of the draft. This does not fulfill
+other requested actions (such as tests, commits, external publication, or a distinct review).
+Native Stop review must retain its current context. A real-reviewer regression will require an
+incomplete calculation draft to be rejected and its completed answer to be approved in the same
+reviewer session. It will be opt-in because it invokes the real Codex model and needs host access.
