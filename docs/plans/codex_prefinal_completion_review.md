@@ -97,3 +97,11 @@ permit remained. Artifact directory:
 The test used the desktop-bundled Codex backend with normal installed plugin configuration and
 persisted hook trust. These lifecycle events verify the functional path; visual expansion of
 the actual app history still requires operator confirmation.
+
+An in-task `review_completion` check then failed open with an active-writer conflict on the
+original reviewer `01a0a4b4-6abf-77a0-9582-a5d0c42c34f2`. Process inspection confirmed that the
+desktop's current MCP connections still run cached version `20260915202450`, while the installed
+correction is `20260915215809`. The old stop-role fingerprint is `1632629815749f0c`; the corrected
+version uses `2a82afcb2220a52f`, with no reviewer mapping yet for this developer task. Reloading the
+desktop is required before validating this exact task on the corrected code and fresh reviewer
+identity. The conflicting writer was not terminated, and this failed-open result is not approval.
