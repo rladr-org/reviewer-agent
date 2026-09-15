@@ -66,6 +66,23 @@ def test_native_stop_registration_resolves_to_hook_tool():
     assert {"cwd", "session_id", "hook_event_name"} <= set(tool["inputSchema"]["required"])
 
 
+def test_interrupt_registration_is_scoped_silent_and_bounded():
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+    handlers = [handler for group in hooks["Interrupt"] for handler in group["hooks"]]
+    assert len(handlers) == 1
+    hook = handlers[0]
+    assert hook["type"] == "mcp_tool"
+    assert hook["server"] == "reviewer-agent"
+    assert hook["tool"] == "interrupt_stop"
+    assert 1 <= hook["timeout"] <= 3
+    assert not hook.get("statusMessage")
+    fields = {"cwd", "session_id", "turn_id", "hook_event_name"}
+    assert hook["input"] == {field: "${" + field + "}" for field in fields}
+    tools = mcp_server.handle_message({"method": "tools/list", "id": 1})["result"]["tools"]
+    tool = next(tool for tool in tools if tool["name"] == hook["tool"])
+    assert set(tool["inputSchema"]["required"]) == fields
+
+
 def test_session_start_never_launches_a_reviewer():
     hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
     assert "SessionStart" not in hooks
