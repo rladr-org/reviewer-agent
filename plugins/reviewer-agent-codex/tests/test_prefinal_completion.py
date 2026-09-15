@@ -177,3 +177,20 @@ def test_tool_schema_and_instructions_explain_prefinal_protocol():
     assert not {'session_id', 'turn_id'} & set(completion['inputSchema']['properties'])
     instructions = mcp_server.handle_message({'id': 2, 'method': 'initialize'})['result']['instructions']
     assert 'review_completion' in instructions and 'final' in instructions
+
+
+def test_only_draft_bound_permit_can_authorize_budget_exhaustion(git_repo, isolated_state, reviewed):
+    state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted',
+                            strict_completion=True)
+    assert state.consume_stop_permit(git_repo, SESSION, TURN, DRAFT) == 'budget_exhausted'
+    state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted',
+                            strict_completion=True)
+    assert state.consume_stop_permit(git_repo, SESSION, TURN, 'A changed draft.') is None
+    state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted',
+                            strict_completion=True)
+    assert state.consume_stop_permit(git_repo, SESSION, 'another-turn', DRAFT) is None
+    state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted')
+    assert state.consume_stop_permit(git_repo, SESSION, TURN, DRAFT) is None
+    state.grant_stop_permit(git_repo, SESSION, TURN, DRAFT, outcome='budget_exhausted')
+    assert supervisor.supervise_hook(event(git_repo)) == {}
+    assert len(reviewed[0]) == 1, 'non-strict budget permit must not bypass fallback review'
