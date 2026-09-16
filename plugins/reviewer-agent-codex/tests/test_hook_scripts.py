@@ -436,7 +436,7 @@ def test_prompt_hook_arms_stop_after_the_enabling_turn(
         "stop_hook_active": False,
         "last_assistant_message": "stopContinue: ON",
     }
-    assert supervisor.supervise(stop_payload) is None
+    assert supervisor.supervise_hook(stop_payload) == {}
 
 
 def test_stop_activation_marker_does_not_skip_a_later_turn(
@@ -459,10 +459,13 @@ def test_stop_activation_marker_does_not_skip_a_later_turn(
         "last_assistant_message": "Finished later work.",
     }
 
-    output = supervisor.supervise(later_stop)
+    from reviewer_codex import backend
+    monkeypatch.setattr(backend, "review_turn", lambda *a, **k: (0, "Finish later work.", ""))
+    output = supervisor.supervise_hook(later_stop)
 
     assert output["decision"] == "block"
-    assert "stop_continue" in output["reason"]
+    assert "Finish later work." in output["reason"]
+    assert "stop_continue" not in output["reason"]
 
 
 def test_subagent_hooks_track_agent_lifetime(git_repo, isolated_state):

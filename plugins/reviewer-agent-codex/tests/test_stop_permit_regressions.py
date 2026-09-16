@@ -7,16 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from reviewer_codex import state, stop_tool, supervisor
+from reviewer_codex import state, stop_tool
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def payload(repo, **changes):
-    result = dict(cwd=str(repo), session_id='root', turn_id='turn-1',
-                  last_assistant_message='I am done.')
-    result.update(changes)
-    return result
 
 
 def approve(repo, monkeypatch, ruling=(0, 'STOP_OK', '')):
@@ -39,7 +32,7 @@ def new_prompt(repo):
 def test_new_operator_prompt_invalidates_approval(git_repo, isolated_state, monkeypatch):
     approve(git_repo, monkeypatch)
     new_prompt(git_repo)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 @pytest.mark.parametrize('message', [
@@ -49,10 +42,9 @@ def test_new_operator_prompt_invalidates_approval(git_repo, isolated_state, monk
 ])
 def test_reworded_acknowledgment_consumes_approval(git_repo, isolated_state, monkeypatch, message):
     approve(git_repo, monkeypatch)
-    result = supervisor.supervise(payload(git_repo, turn_id='host-continuation',
-                                         last_assistant_message=message))
-    assert 'approved' in result['systemMessage']
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    result = state.consume_stop_permit(git_repo, 'root', 'host-continuation', message)
+    assert result == 'stop_ok'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def pre_tool(repo, name):
@@ -69,17 +61,16 @@ def pre_tool(repo, name):
 def test_resumed_tool_work_invalidates_approval(git_repo, isolated_state, monkeypatch, tool):
     approve(git_repo, monkeypatch)
     pre_tool(git_repo, tool)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
-def test_review_tool_itself_does_not_break_completion(git_repo, isolated_state, monkeypatch):
+def test_internal_review_snapshots_work_before_review(git_repo, isolated_state, monkeypatch):
     state.set_feature(git_repo, 'stop')
     ticket = state.create_stop_ticket(git_repo, 'root', 'I am done.', turn_id='turn-1')
-    pre_tool(git_repo, 'mcp__reviewer_agent__stop_continue')
+    pre_tool(git_repo, 'apply_patch')
     monkeypatch.setattr(stop_tool.backend, 'review_turn', lambda *a, **k: (0, 'STOP_OK', ''))
     assert stop_tool.review_stop(git_repo, ticket)['status'] == 'stop_ok'
-    assert 'approved' in supervisor.supervise(payload(git_repo, turn_id='host-turn',
-                                        last_assistant_message='Completion approved.'))['systemMessage']
+    assert state.consume_stop_permit(git_repo, 'root') == 'stop_ok'
 
 
 def test_work_during_review_invalidates_late_approval(git_repo, isolated_state, monkeypatch):
@@ -90,13 +81,13 @@ def test_work_during_review_invalidates_late_approval(git_repo, isolated_state, 
         return 0, 'STOP_OK', ''
     monkeypatch.setattr(stop_tool.backend, 'review_turn', review)
     stop_tool.review_stop(git_repo, ticket)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def test_matching_approval_is_one_use(git_repo, isolated_state, monkeypatch):
     approve(git_repo, monkeypatch)
-    assert 'approved' in supervisor.supervise(payload(git_repo))['systemMessage']
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert state.consume_stop_permit(git_repo, 'root') == 'stop_ok'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def test_old_review_cannot_approve_new_operator_prompt(git_repo, isolated_state, monkeypatch):
@@ -107,15 +98,13 @@ def test_old_review_cannot_approve_new_operator_prompt(git_repo, isolated_state,
         return 0, 'STOP_OK', ''
     monkeypatch.setattr(stop_tool.backend, 'review_turn', review)
     stop_tool.review_stop(git_repo, ticket)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 @pytest.mark.parametrize('ruling', [(1, '', 'reviewer failed'), (0, '', '')])
 def test_failed_open_is_not_reported_as_approval(git_repo, isolated_state, monkeypatch, ruling):
     assert approve(git_repo, monkeypatch, ruling)['status'] == 'failed_open'
-    message = supervisor.supervise(payload(git_repo))['systemMessage'].lower()
-    assert 'approved' not in message
-    assert 'failed' in message
+    assert state.consume_stop_permit(git_repo, 'root') == 'failed_open'
 
 
 def test_legacy_permit_is_not_an_approval(git_repo, isolated_state):
@@ -123,14 +112,14 @@ def test_legacy_permit_is_not_an_approval(git_repo, isolated_state):
     target = state._stop_permit_file(git_repo, 'root')
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text('old-permit-token\n')
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def test_expired_permit_requires_review(git_repo, isolated_state, monkeypatch):
     approve(git_repo, monkeypatch)
     now = state.time.time()
     monkeypatch.setattr(state.time, 'time', lambda: now + 3601)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def test_subagent_start_invalidates_approval(git_repo, isolated_state, monkeypatch):
@@ -141,7 +130,7 @@ def test_subagent_start_invalidates_approval(git_repo, isolated_state, monkeypat
         text=True, capture_output=True,
     )
     assert result.returncode == 0, result.stderr
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def _require_flock():
@@ -268,7 +257,7 @@ def test_failed_generation_write_during_review_denies_regranted_stop(git_repo, i
 
     monkeypatch.setattr(stop_tool.backend, 'review_turn', review)
     stop_tool.review_stop(git_repo, ticket)
-    assert supervisor.supervise(payload(git_repo))['decision'] == 'block'
+    assert not state.consume_stop_permit(git_repo, 'root')
 
 
 def test_consume_survives_claim_unlink_failure(git_repo, isolated_state, monkeypatch):
