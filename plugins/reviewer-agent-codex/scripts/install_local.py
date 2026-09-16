@@ -40,10 +40,17 @@ def main() -> int:
     print(f"{action} {result.plugin_id}")
     print(f"Marketplace: {result.marketplace_path}")
     print("Open an interactive Codex CLI session by running `codex`, then run /hooks and")
-    print("trust the reviewer-agent-codex hooks. /hooks is not a Codex GUI command.")
-    print("Then exit the CLI, fully quit and restart the Codex GUI, and start a new GUI chat")
-    print("so it loads the trusted hooks and current plugin components.")
-    print("Active-host use inside the CLI has not been validated.")
+    print("trust any reviewer-agent-codex hooks requiring approval. /hooks is not a Codex GUI command.")
+    print("GUI users: exit the CLI, fully quit and restart the Codex GUI, then start a fresh chat.")
+    print("CLI users: start a fresh interactive CLI session to load the current plugin.")
+    print("Upgrades preserve repository feature settings and risk-acceptance receipts.")
+    print("Completion review runs only from Stop; Interrupt cancels active reviews.")
+    print("Codex invokes stop_hook and interrupt_stop automatically; do not call them manually.")
+    print("Verify the connected reviewer server, hook mappings, and actual review outcomes.")
+    print("An absent continuation prompt does not prove a review ran; continuation feedback may be visible.")
+    print("CLI stop supervision was exercised on macOS with Codex 0.154.0;")
+    print("this does not establish CLI commit-gate or general terminal UI coverage.")
+    print(f"Verification steps: {PLUGIN_ROOT / 'README.md'} (Post-install verification)")
     return 0
 
 

@@ -377,8 +377,10 @@ python3 plugins/reviewer-agent-codex/scripts/install_local.py
 When installing from a private fork or mirror, grant the installer’s user access before cloning.
 The plugin has been exercised with the Codex GUI as the developer host. An installed, authenticated
 `codex` CLI is still required for installation and the one-time hook review and trust step because
-`/hooks` is an interactive CLI command, not a GUI slash command. Using the plugin with the CLI as
-the active developer host may work, but has not been validated.
+`/hooks` is an interactive CLI command, not a GUI slash command. Stop supervision has also been
+exercised with Codex CLI 0.154.0 on macOS, including native Stop rejection and retry without
+an agent-initiated review call. This does not establish CLI commit-gate or general terminal UI coverage.
+See the package's [CLI completion checks](plugins/reviewer-agent-codex/README.md#cli-completion-checks).
 
 Codex stopContinue runs automatically when Codex emits its Stop event, without an
 agent-initiated early review. Request receipt and ordinary tool execution only record context.
@@ -391,9 +393,9 @@ After installation:
 
 1. In a terminal, run `codex` to start a new interactive CLI session.
 2. In that CLI session, run `/hooks`, inspect the `reviewer-agent-codex` hooks, and trust them.
-3. Exit the CLI, fully quit and reopen the Codex GUI, then start a new GUI chat in the repository
-   to protect.
-4. From that new GUI chat, enable the desired features:
+3. For the GUI, exit the CLI, fully quit and reopen the Codex GUI, then start a new GUI chat in the
+   repository to protect. For CLI use, start a fresh interactive CLI session in that repository.
+4. From that new session, enable the desired features:
 
    ```text
    $reviewer-agent-codex:reviewer-agent on
@@ -411,8 +413,8 @@ After installation:
    `$reviewer-agent-codex:stop-continue on acceptRisk`.
 
 Those settings persist across Codex restarts. They do not need to be re-enabled in each thread.
-A new GUI chat is required after installing or updating the plugin so Codex loads its current
-tools, skills, and hooks.
+A fresh host session is required after installing or updating the plugin so Codex loads its
+current tools, skills, and hooks. GUI users must fully quit and reopen the app first.
 
 The repository also contains a Codex marketplace manifest for discovery:
 

@@ -11,11 +11,12 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
    `review_commit` MCP call. The developer model is suspended until an isolated reviewer audits
    the staged index; an approved index is committed by the tool and every other outcome fails
    closed. Escape cancels the call and its nested reviewer process.
-2. **stopContinue:** checks a proposed stop inside a synchronous, cancellable MCP lifecycle hook.
-   Its dedicated supervisor checks operator prompts, the current Codex
-   plan/task list, and the proposed final message, then continues Codex when work remains. It does
-   not receive `reviewerAgent.md` or perform a general repository audit. Approval finishes silently
-   with the original answer; only unfinished work adds a continuation prompt.
+2. **stopContinue:** automatically reviews attempted stops and directs Codex to continue when
+   authorized work remains. Its dedicated supervisor checks operator prompts, the current Codex
+   plan/task list, and the proposed final message. It does not receive `reviewerAgent.md` or perform
+   a general repository audit. Codex invokes the supervisor automatically at Stop. A rejected
+   response can already be visible when Codex resumes work. This is continuation
+   supervision, not a guarantee that every displayed response has been approved.
 
 Both features are off by default.
 
@@ -28,22 +29,23 @@ Both features are off by default.
 
 ## Requirements
 
-- The Codex GUI as the developer host, plus an installed and authenticated Codex CLI with lifecycle
-  hooks enabled. The CLI is required for installation and hook review/trust because `/hooks` is not
-  a GUI slash command. Active-host use inside the CLI may work, but has not been validated.
+- An installed and authenticated Codex CLI with lifecycle hooks enabled. The GUI may be used as
+  the developer host; CLI stop supervision has also been exercised in the limited checks below.
+  The CLI is required for hook review/trust because `/hooks` is not a GUI slash command.
 - Python 3.9 or newer; runtime code uses only the standard library.
 - An authenticated `codex` executable available on `PATH`, or `REVIEWER_CODEX_BIN`.
 
 ## Platform support
 
-The Codex GUI on macOS is tested. Using the plugin with Codex CLI as the active developer host has
-not been validated; the CLI has only been exercised as the installer, hook-trust UI, and nested
-reviewer process. Native Linux and Windows through WSL2 are untested beta platforms that are
-expected to work, but this plugin does not yet have Linux/WSL2 CI or live-host coverage. Native
+The Codex GUI on macOS is tested. On macOS, Codex CLI 0.154.0 has also been exercised as the active
+host for stop supervision through automatic Stop rejection and retry. These smoke checks do not establish coverage of every
+interactive terminal, key binding, or the CLI commit-gate flow. See
+[CLI completion checks](#cli-completion-checks) for the repeatable procedure.
+Native Linux and Windows through WSL2 remain untested live-host beta platforms. Unit tests run
+in Linux and macOS CI; live Linux/WSL2 host coverage is still absent. Native
 Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
-will not work for a different reason: starting with
-[Codex 0.115](https://learn.chatgpt.com/docs/windows/wsl), Codex's Linux sandbox uses `bubblewrap`
-and no longer supports WSL1.
+will not work because [Codex's Linux sandbox](https://learn.chatgpt.com/docs/windows/wsl) uses
+`bubblewrap`, which requires WSL2.
 
 ### Native Linux (untested)
 
@@ -124,7 +126,7 @@ codex plugin marketplace add rladr-org/reviewer-agent
 
 Registration alone is not the whole installation. A bare `codex plugin add` cannot run
 this plugin's host-configuration step, so use the checkout installer above to configure the
-blocking reviewer tools as direct calls.
+agent-invoked commit review as a blocking direct call.
 
 The marketplace layout follows Codex's official
 [plugin distribution documentation](https://developers.openai.com/plugins/build/plugins/): the
@@ -133,8 +135,7 @@ directory.
 
 ### Existing checkout or local development
 
-If the current directory is already `plugins/reviewer-agent-codex` (or the former standalone Codex
-checkout), run:
+If the current directory is already `plugins/reviewer-agent-codex`, run:
 
 ```bash
 python3 scripts/install_local.py
@@ -150,31 +151,29 @@ version name, the new directory remains canonical and the displaced live inode r
 dot-prefixed sibling parking directory. It also uses Codex app-server's atomic configuration RPC
 to merge `mcp__reviewer_agent` into
 `features.code_mode.direct_only_tool_namespaces`, preserving other configured namespaces. This
-makes both reviewer tools native direct calls instead of yieldable code-mode operations. Use this
+makes the agent's `review_commit` call a blocking direct call instead of a yieldable code-mode
+operation. Completion review is invoked automatically by the Stop lifecycle hook. Use this
 installer for updates rather than invoking `codex plugin add` directly.
 
-Each lifecycle-hook command also carries its own cache-eviction fallback. It uses the immutable
+Each command-based lifecycle hook also carries its own cache-eviction fallback. It uses the immutable
 `PLUGIN_ROOT` selected when the thread started while that directory exists. If a direct
 `codex plugin add` removes that version anyway, the command resolves the same hook through the
 newly installed immutable cache, then through the permanent
-`~/plugins/reviewer-agent-codex` source link as a last resort. An already-running thread therefore
-does not become trapped in a missing-hook Stop or PreToolUse loop merely because the plugin was
-upgraded incorrectly.
+`~/plugins/reviewer-agent-codex` source link as a last resort. This protects command hooks such as
+PreToolUse from missing-script failures during cache replacement. Stop and Interrupt use the
+connected MCP server directly.
 
 The MCP backend snapshots its process guard and process-tree helper when it starts. Later
 review launches use that retained code, so temporarily parking or removing the original cache
 does not prevent a running server from launching a review. Cancellation, timeouts, and cleanup
-when the MCP parent exits still apply. Servers loaded from older releases need a restart to gain
-this protection: in `1.2.1-beta.5`, a review launched during the installer's parking window can
-fail on a missing `_process_guard.py` even when the documented update succeeds. Stop supervision
-reports that failure and allows stopping under its fail-open policy; it is not a completion
-approval. A fresh session after a completed update avoids that stale path.
+when the MCP parent exits apply throughout installation.
 
 Then open a terminal and run `codex` to start an interactive CLI session. Run `/hooks` there,
-inspect the `reviewer-agent-codex` lifecycle hooks, and trust them. `/hooks` is not a Codex GUI
-command. Exit the CLI, fully quit and restart the GUI, then start a new GUI chat. Codex loads newly
-installed plugin skills and hooks at that session boundary. Using the plugin with the CLI as the
-active developer host may work, but has not been validated.
+inspect the `reviewer-agent-codex` lifecycle hooks, and trust any entries requiring approval.
+`/hooks` is not a Codex GUI command. Exit the CLI, fully quit and restart the GUI, then start a new
+GUI chat. Codex loads newly
+installed plugin skills and hooks at that session boundary. CLI users instead start a fresh
+interactive CLI session. The CLI smoke coverage and its limits are described above.
 
 To update, pull the combined repository and re-run the same installer:
 
@@ -185,6 +184,7 @@ python3 plugins/reviewer-agent-codex/scripts/install_local.py
 
 The `reviewer-agent` and `stop-continue` flags are stored per repository and survive Codex restarts.
 You only need to enable them once unless you explicitly turn them off or delete the state directory.
+Upgrades also preserve risk-acceptance receipts; a current receipt does not require accepting again.
 
 Starting or resuming a thread never launches a reviewer model. Reviewer sessions are initialized
 only when an enabled commit gate or stop supervisor performs an actual review.
@@ -269,9 +269,12 @@ python3 tools/release_cachebuster.py          # from the repository root
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-Afterwards, open an interactive `codex` CLI session, run `/hooks`, and trust the plugin hooks again.
+Afterwards, open an interactive `codex` CLI session, run `/hooks`, and trust any plugin hooks
+requiring approval.
 Then exit the CLI, fully quit and restart the GUI, and start a new GUI chat. `/hooks` is not a Codex
-GUI command; active-host use inside the CLI has not been validated.
+GUI command. CLI users instead start a fresh interactive CLI session.
+Then complete the [post-install verification](#post-install-verification); a successful install
+does not prove that an existing task has loaded the new server or hook definitions.
 
 **Disable without uninstalling**, per repository:
 
@@ -428,14 +431,11 @@ directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking 
 it runs. It consumes its review permit within that same hook invocation. Approval adds no routing
 prompt or routine success warning, preserving the original final answer. An incomplete ruling
 adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
-Removing synthetic review turns reduces desktop clutter; the plugin cannot force the app's
-previous-message dropdown to remain expanded.
+The plugin cannot force the app's previous-message dropdown to remain expanded.
 
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
-Completion supervision is invoked only by the Stop hook. The legacy command-hook routing
-script and agent-callable `stop_continue` tool have been removed. Existing sessions must reload
-the updated plugin to discard old tools and instructions. The developer model remains suspended
-while the hook review runs. The Interrupt handler continues to cancel matching active reviews.
+Completion supervision is invoked only by the Stop hook. The developer model remains suspended
+while the hook review runs. The Interrupt handler cancels matching active reviews.
 The installer marks the reviewer MCP
 namespace direct-only in Codex code mode, so the call cannot yield into a JavaScript cell that
 reactivates the developer model for polling or narration. The stdio server continues reading MCP
@@ -479,8 +479,7 @@ Codex exposes no lifecycle API for enumerating a unified-exec session whose `ses
 and either a shell completion event or a `SubagentStop` event can be missed. Sandboxed hooks cannot
 safely use the host process table or collaboration registry to prove whether such a marker is still
 live. A stop with shell and/or subagent markers therefore routes the exact `(kind, id)` set directly
-through the same minimal, cancellable completion supervisor instead of first dumping a stale
-marker list into the developer conversation. The supervisor may approve shell markers only when
+through the same minimal, cancellable completion supervisor. The supervisor may approve shell markers only when
 the proposed final states that the named work was inspected or polled and no process or
 unified-exec session remains; for subagent markers it must state that the collaboration registry
 was reconciled and no live subagent remains. Otherwise it directs the developer agent to perform
@@ -541,11 +540,10 @@ See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 
 ## Host versions it has been run against
 
-The 1.2.0-beta.1 release matrix was run against Codex CLI 0.147.0 and Python 3.9 (the macOS
-system interpreter). `scripts/install_local.py` detects both and prints a warning below either
-floor, then continues: these are the oldest versions exercised, not the oldest that can work. The
-CLI version records the installer, hook-trust UI, and nested reviewer dependency; it is not evidence
-that the plugin was exercised with the CLI as its active developer host.
+The installer warns when Codex CLI is below 0.147.0 or Python is below 3.9, then continues.
+These warning thresholds reflect versions exercised for installation and nested review; they do
+not establish a minimum host version for every feature. Active-host CLI stop-supervision coverage
+is described under [Platform support](#platform-support).
 
 ## License
 
@@ -554,21 +552,48 @@ unmodified license text and is the notice location for the source files in this 
 
 ## Completion review in the desktop app and CLI
 
-Codex invokes the supervisor automatically at its Stop event. The `review_completion` tool and
-its early-review instructions have been removed. UserPromptSubmit and ordinary tool hooks retain
-request and work context without initiating completion review. The legacy `stop_continue` tool
-and instructions telling the agent to invoke it have also been removed. Every eligible Stop,
+Codex invokes the supervisor automatically at its Stop event. UserPromptSubmit and ordinary tool
+hooks retain request and work context without initiating completion review. Every eligible Stop,
 including a completed question answer, is reviewed using the same shared prompt as Claude Code.
 
 Approval adds no continuation prompt. Rejection directs further work, and Codex can display the
 rejected answer and collapse earlier messages. The plugin cannot control that desktop behavior.
 A completed question answer also emits Stop: this lifecycle event does not distinguish that from
-abandoning an active assignment. Removing early review does not implement a question exemption.
-See the [approved Stop-hook scope](../../docs/plans/codex_stop_hook_parity.md).
+abandoning an active assignment.
 
 Codex and Claude Code read one [shared supervisor prompt](prompts/stop_supervisor.txt).
-There are no pre-final or native-only instruction variants. Application-specific context supplies
-the request, work evidence, and final response. Fail-open limits and cancellation remain in effect.
+Application-specific context supplies the request, work evidence, and final response.
+Fail-open limits and cancellation apply to completion review.
+
+## Post-install verification
+
+After installation or an upgrade, verify that the reviewer MCP server is connected and the host
+supports `mcp_tool` lifecycle hooks. Check the loaded hook mappings: `Stop` calls
+`reviewer-agent.stop_hook`, and `Interrupt` calls `reviewer-agent.interrupt_stop`. The server's
+tool inventory should contain exactly `review_commit`, `stop_hook`, and `interrupt_stop`.
+Only Codex lifecycle events invoke `stop_hook` and `interrupt_stop`.
+Do not ask the agent to call them manually.
+
+With stopContinue enabled for the test repository, exercise these cases through the actual host.
+Use read-only tasks for completion checks and a harmless long-running operation for interruption.
+These checks consume reviewer model usage. Record the reviewer verdict or documented lifecycle
+events, together with the host/version tested:
+
+| Case | Required evidence |
+| --- | --- |
+| Completed answer | Stop launches a review and the reviewer approves it. |
+| Unfinished authorized work | Stop launches a review that requests continuation; work resumes, and a later Stop is approved after completion. |
+| Interrupt ordinary work before Stop | The turn is interrupted without launching a completion review. |
+| Interrupt an active completion review | The running review is cancelled, without a late continuation from that cancelled review. |
+
+The [CLI completion check](#cli-completion-checks) below automates the unfinished-work and later
+approval sequence; it does not cover either interruption case or desktop rendering. Record any
+unperformed case as pending. Unit tests alone do not establish that the installed host ran a hook.
+
+An absent continuation prompt does not prove approval: missing hooks, a disconnected server,
+or a fail-open error can also let a turn finish. Approval adds no continuation message. When the
+reviewer requests more work, Codex can show its continuation directive and collapse earlier
+messages. The plugin cannot guarantee hidden feedback or keep that dropdown expanded.
 
 ## CLI completion checks
 
@@ -583,8 +608,7 @@ python3 plugins/reviewer-agent-codex/scripts/check_cli_stop.py --run \
 
 The check runs one read-only CLI session. It requires observed events in this order: incomplete
 response, automatic Stop request, rejection, corrected response, another Stop request, approval.
-Missing hooks, manual lifecycle calls, obsolete early reviews, fail-open results, and exhausted
+Missing hooks, manual lifecycle calls, reviews outside Stop, fail-open results, and exhausted
 budgets cannot pass. Saved configuration, enablement receipts, and installed files are unchanged.
-The default timeout is 180 seconds (`--timeout` accepts 10–900). `--scenario fallback` and
-`--scenario all` remain aliases for the automatic Stop check; `prefinal` is no longer accepted.
+The default timeout is 180 seconds (`--timeout` accepts 10–900).
 The printed artifact directory records documented CLI and MCP events, not internal rollout files.

@@ -12,8 +12,8 @@ software's risks on a human's behalf.
 
 Before starting:
 
-1. Install and authenticate the developer host to be protected: Claude Code, or the Codex GUI plus
-   the Codex CLI used for installation and hook trust.
+1. Install and authenticate the developer host to be protected: Claude Code, or Codex CLI
+   (optionally with the Codex GUI). The CLI is required for Codex hook trust.
 2. Confirm that the machine's Git client can read `rladr-org/reviewer-agent`; authentication is
    needed only when installing from a private fork or mirror.
 3. For Claude Code only, install and authenticate at least one desired reviewer backend: `codex`,
@@ -22,9 +22,10 @@ Before starting:
    and account consequences are controlled by Anthropic and the user's plan.
 4. Start the developer host in the repository you want to protect.
 
-For the Codex package, the exercised developer host is the Codex GUI. The CLI is required for
-installation and hook trust, but using the plugin with the CLI itself as the active developer host
-has not been validated.
+For the Codex package, the GUI has been exercised as the developer host. Stop supervision has also
+been exercised with Codex CLI 0.154.0 on macOS; this does not establish CLI commit-gate or general
+terminal UI coverage. See the package's
+[CLI completion checks](plugins/reviewer-agent-codex/README.md#cli-completion-checks).
 
 Then give the agent this prompt:
 
@@ -86,7 +87,7 @@ Run the applicable package tests before installing. Do not continue when a requi
 
 ### 4A. Claude Code installation
 
-Follow `AGENT_INSTALL.md`, including legacy-hook detection, backend selection, Pi extension setup
+Follow `AGENT_INSTALL.md`, including existing-hook checks, backend selection, Pi extension setup
 when selected, and project-specific brief creation. Use the non-interactive host CLI for the plugin
 installation:
 
@@ -118,9 +119,15 @@ Refuse to overwrite `<TARGET_REPO>/reviewerAgent.md`. If it is absent, copy
 `<INSTALLER_REPO>/plugins/reviewer-agent-codex/reviewerAgent.md.template` there and edit it for the
 target repository. Do not run the source checkout's toggle CLI: it cannot record operator risk
 acceptance. The operator must read the plugin's `DISCLAIMER.md` and personally invoke the exact
-`acceptRisk` command from a new Codex GUI chat after completing hook trust in the CLI. Do not
-substitute `codex plugin add`: the local installer also configures the blocking reviewer MCP
+`acceptRisk` command from a fresh Codex GUI chat or interactive CLI session after completing hook
+trust in the CLI, if no current acceptance receipt exists. Do not substitute `codex plugin add`:
+the local installer also configures the blocking reviewer MCP
 namespace as a direct-only tool.
+
+For an upgrade, rerun this same installer and preserve the target repository's feature settings,
+risk-acceptance receipt, and project brief. Completion supervision runs only through Codex's
+automatic `Stop` hook. `Interrupt` cancels active reviews and does not start a review. Neither
+`stop_hook` nor `interrupt_stop` should be called manually.
 
 ### 5. Human-only checkpoint and final report
 
@@ -128,12 +135,15 @@ After all agent-executable checks pass, tell the human exactly what remains:
 
 - Claude Code: restart Claude Code in `<TARGET_REPO>` so the installed hooks are loaded.
 - Codex: run `codex` in a terminal to open an interactive CLI session, then run `/hooks`, inspect
-  the `reviewer-agent-codex` entries, and trust them. `/hooks` is not a Codex GUI command. If the
-  operator uses the validated GUI flow, exit the CLI, fully quit and restart the GUI, then start a
-  new chat in `<TARGET_REPO>`. Report that active-host use inside the CLI has not been validated.
+  the `reviewer-agent-codex` entries, and trust any entries requiring approval. `/hooks` is not a
+  Codex GUI command. If the operator uses the GUI, exit the CLI, fully quit and restart the GUI,
+  then start a new chat in `<TARGET_REPO>`. For CLI use, start a fresh interactive CLI session there.
+  Explain that CLI smoke
+  coverage is limited to stop supervision and does not cover every terminal UI or the commit gate.
 
-Then tell the human to invoke plain `on` first. It must refuse without enabling and display the
-exact accepting form. After reading `DISCLAIMER.md`, the human may type that exact form:
+For a first installation without a current repository acceptance receipt, tell the human to
+invoke plain `on` first. It must refuse without enabling and display the exact accepting form.
+After reading `DISCLAIMER.md`, the human may type that exact form:
 
 ```text
 /reviewerAgent on
@@ -147,9 +157,27 @@ Show only the pair for the installed host. One current repository receipt covers
 the human may then use plain `/stopContinue on` or
 `$reviewer-agent-codex:stop-continue on` if stop supervision was selected. If stopContinue is
 enabled first, its plain `on` response supplies its own `on acceptRisk` form.
+An upgrade with a current receipt does not require accepting again; preserve enabled and disabled
+features unless the operator requests a change.
+
+For Codex stop supervision, verify the connected reviewer MCP server and automatic hook mappings
+after reload: `Stop` calls `reviewer-agent.stop_hook`, and `Interrupt` calls
+`reviewer-agent.interrupt_stop`. The server exposes `review_commit`, `stop_hook`, and
+`interrupt_stop`. A host with `mcp_tool` lifecycle-hook support is required.
+Missing hooks or a disconnected server can leave
+Stop supervision inactive without preventing the turn from ending.
+
+When stop supervision was selected and enabled, follow the package's
+[post-install verification](plugins/reviewer-agent-codex/README.md#post-install-verification).
+Record review or lifecycle evidence for approval of a completed answer, continuation of unfinished
+authorized work, and both interruption cases. Run checks through actual host events, never manual
+lifecycle-tool calls. An absent continuation prompt alone does not prove a review ran. Approval
+adds no continuation message; a continuation directive can appear in the conversation, and the
+desktop app may collapse earlier messages. Installation cannot guarantee hidden feedback.
 
 Report the host, selected backend where applicable, requested features, canonical target root,
 installed version, test results, every external path changed, and any warning. State that the first
-real commit after operator acceptance is the end-to-end gate verification. Say plainly: enablement
-and live gate verification are pending until then. Do not claim hooks ran in the old thread: both
-hosts load newly installed plugin components at a new-session boundary.
+real commit after operator acceptance is the end-to-end commit-gate verification. Report
+enablement, commit-gate verification, and Stop verification separately, marking any unperformed
+check as pending. Do not infer that an existing task has reloaded from the installer succeeding;
+verify the loaded components after restarting the host, or use a fresh session.

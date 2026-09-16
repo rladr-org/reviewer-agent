@@ -15,6 +15,19 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   rejection feedback and desktop history expansion remain controlled by Codex.
 - Advance both plugin versions so installations already on beta.6 receive the update.
 
+## [Unreleased]
+
+### Added
+
+- An opt-in live CLI completion check covering automatic Stop rejection and continuation. It records actual MCP hook verdicts and CLI
+  output, rejects missing hooks and fail-open results, and leaves saved configuration unchanged.
+
+### Documentation
+
+- Clarify the Codex stopContinue release behavior: automatic continuation after premature stops,
+  with possible visible rejected responses. Record the limited macOS CLI smoke coverage and its
+  repeatable procedure. The early-review path is removed in beta.7; rejection can still produce visible feedback.
+
 ## [1.2.1-beta.6]
 
 Ships the Codex reviewer-launch fix committed after `1.2.1-beta.5`. Every declared version across
