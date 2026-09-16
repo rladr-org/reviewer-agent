@@ -1,5 +1,9 @@
 # Review completion before publishing the final response
 
+This design is superseded by [Stop-event timing](codex_stop_event_only.md) and
+[one shared supervisor prompt](shared_stop_supervisor_prompt.md). The early-review
+tool has been removed. The observations below document the previous implementation.
+
 ## Problem and API boundary
 
 The desktop live test of the native Stop hook verified that rejection continues work, but the

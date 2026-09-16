@@ -73,6 +73,7 @@ def assess(records, scenario, returncode):
         if not condition:
             raise ValueError(message)
 
+    require(scenario in ("native", "fallback"), "unsupported completion review scenario")
     require(returncode == 0, "CLI failed with exit code {}".format(returncode))
     cli = [r["message"] for r in records if r["kind"] == "cli"]
     threads = [r["thread_id"] for r in cli if r.get("type") == "thread.started"]
@@ -92,7 +93,6 @@ def assess(records, scenario, returncode):
     require(len(responses) == len(response_records) == len(requests)
             == len({r["id"] for r in requests}), "missing or duplicate MCP exchanges")
     completion, stops = [], []
-    approved_at = None
     for request in requests:
         response = responses.get(request["id"], {})
         require("error" not in response, "MCP error")
@@ -103,39 +103,25 @@ def assess(records, scenario, returncode):
         args = request["params"]["arguments"]
         if request["params"]["name"] == "review_completion":
             completion.append((args.get("proposed_response"), content.get("status")))
-            if content.get("status") == "stop_ok":
-                approved_at = response_times[request["id"]]
         else:
             require(args.get("session_id") == threads[0], "Stop belongs to another thread")
             stops.append((args.get("last_assistant_message"), content))
-    if scenario == "prefinal":
-        require(completion == [(INCOMPLETE, "incomplete"), (FINAL, "stop_ok")],
-                "expected rejected draft then approved draft; fail-open is not approval")
-        require(stops == [(FINAL, {})], "expected one silent native Stop after pre-final approval")
-        require(INCOMPLETE not in messages, "pre-final rejection was published")
-        published_at = [r["at"] for r in records if r["kind"] == "cli"
-                        and r["message"].get("type") == "item.completed"
-                        and r["message"].get("item", {}).get("type") == "agent_message"
-                        and r["message"]["item"].get("text") == FINAL]
-        require(approved_at is not None and approved_at < min(published_at),
-                "final response was emitted before pre-final approval")
-    else:
-        require(not completion, "fallback unexpectedly used pre-final review")
-        require(len(stops) == 2 and stops[0][0] == INCOMPLETE
-                and stops[0][1].get("decision") == "block" and stops[0][1].get("reason"),
-                "native Stop did not reject the incomplete response")
-        require(stops[1] == (FINAL, {}), "native Stop did not allow the corrected response")
-        published = [(r["message"]["item"].get("text"), r["at"]) for r in records
-                     if r["kind"] == "cli" and r["message"].get("type") == "item.completed"
-                     and r["message"].get("item", {}).get("type") == "agent_message"]
-        require([text for text, _ in published] == [INCOMPLETE, FINAL],
-                "fallback output order must contain the incomplete and corrected responses")
-        first, second = requests
-        observed_order = [published[0][1], request_times[first["id"]],
-                          response_times[first["id"]], published[1][1],
-                          request_times[second["id"]], response_times[second["id"]]]
-        require(all(before < after for before, after in zip(observed_order, observed_order[1:])),
-                "fallback event order does not show rejection before continuation")
+    require(not completion, "fallback unexpectedly used pre-final review")
+    require(len(stops) == 2 and stops[0][0] == INCOMPLETE
+            and stops[0][1].get("decision") == "block" and stops[0][1].get("reason"),
+            "native Stop did not reject the incomplete response")
+    require(stops[1] == (FINAL, {}), "native Stop did not allow the corrected response")
+    published = [(r["message"]["item"].get("text"), r["at"]) for r in records
+                 if r["kind"] == "cli" and r["message"].get("type") == "item.completed"
+                 and r["message"].get("item", {}).get("type") == "agent_message"]
+    require([text for text, _ in published] == [INCOMPLETE, FINAL],
+            "fallback output order must contain the incomplete and corrected responses")
+    first, second = requests
+    observed_order = [published[0][1], request_times[first["id"]],
+                      response_times[first["id"]], published[1][1],
+                      request_times[second["id"]], response_times[second["id"]]]
+    require(all(before < after for before, after in zip(observed_order, observed_order[1:])),
+            "fallback event order does not show rejection before continuation")
     return {"scenario": scenario, "rejected_response_emitted": INCOMPLETE in messages,
             "completion_reviews": len(completion), "native_stops": len(stops)}
 
@@ -164,17 +150,10 @@ def run_scenario(args, scenario, directory):
                "-c", "mcp_servers.reviewer-agent.args=" + json.dumps(proxy_args)]
     common = ("Controlled CLI integration test. Do not edit files, invoke skills, run shell commands, "
               "or call native lifecycle tools manually. The substantive task is to calculate 17 times 19. ")
-    if scenario == "prefinal":
-        prompt = (common + 'First call review_completion with proposed_response exactly "' + INCOMPLETE
-                  + '" before doing the calculation. After rejection, calculate the result and review "'
-                  + FINAL + '". Publish only the approved final draft. The first draft is intentional '
-                  'test input, not completion of the substantive task. Follow the host review protocol.')
-    else:
-        command += ["-c", 'mcp_servers.reviewer-agent.disabled_tools=["review_completion"]']
-        prompt = (common + 'The pre-final tool is intentionally unavailable. First attempt to end with '
-                  'exactly "' + INCOMPLETE + '". If the native Stop hook returns a missing-work directive, '
-                  'calculate and report exactly "' + FINAL + '". The incomplete first draft is intentional '
-                  'test input, not completion of the substantive task. Use the native Stop fallback.')
+    prompt = (common + 'First attempt to end with exactly "' + INCOMPLETE
+              + '". If the Stop hook returns a missing-work directive, calculate and report '
+              'exactly "' + FINAL + '". The incomplete first response is intentional test '
+              'input, not completion of the substantive task. Let Codex invoke Stop automatically.')
     command.append(prompt)
     errors = []
     with (directory / "stderr.txt").open("w", encoding="utf-8") as stderr:
@@ -215,7 +194,7 @@ def main():
     parser.add_argument("--cwd", type=Path, help="Repository with stopContinue already enabled")
     parser.add_argument("--plugin-root", type=Path, help="Installed, trusted reviewer-agent-codex directory")
     parser.add_argument("--codex", default=os.environ.get("REVIEWER_CODEX_BIN", "codex"))
-    parser.add_argument("--scenario", choices=("all", "prefinal", "fallback"), default="all")
+    parser.add_argument("--scenario", choices=("native", "fallback", "all"), default="native")
     parser.add_argument("--timeout", type=int, default=180, help="Maximum seconds per scenario")
     parser.add_argument("--proxy", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--events", type=Path, help=argparse.SUPPRESS)
@@ -243,7 +222,7 @@ def main():
     print("Artifacts: " + str(root), flush=True)
     summary = {"codex": version, "plugin_version": manifest["version"],
                "plugin_root": str(args.plugin_root), "results": []}
-    scenarios = ("prefinal", "fallback") if args.scenario == "all" else (args.scenario,)
+    scenarios = ("native",) if args.scenario == "all" else (args.scenario,)
     try:
         for scenario in scenarios:
             print("Running " + scenario, flush=True)

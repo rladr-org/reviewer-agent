@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [1.2.1-beta.7] — unreleased
+
+- Run Codex completion supervision from its automatic Stop event; remove the early
+  review tool, request-time instructions, and pre-final binding.
+- Use one canonical stop-supervisor prompt in both Codex and Claude Code, with no
+  route-specific instruction variants.
+- Check automatic rejection and continuation with the live CLI harness. Visible
+  rejection feedback and desktop history expansion remain controlled by Codex.
+- Advance both plugin versions so installations already on beta.6 receive the update.
+
 ## [1.2.1-beta.6]
 
 Ships the Codex reviewer-launch fix committed after `1.2.1-beta.5`. Every declared version across

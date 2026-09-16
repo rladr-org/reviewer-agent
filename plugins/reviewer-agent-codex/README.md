@@ -405,7 +405,7 @@ timeout recovery.
 
 ## stopContinue context
 
-The stop supervisor has its own prompt and thread. Each ruling receives only:
+The stop supervisor has its own thread and uses the same canonical prompt as Claude Code. Each ruling receives only:
 
 - captured operator prompts;
 - the latest `update_plan` plan/task list, when the agent used that Codex tool;
@@ -423,7 +423,7 @@ presents the decision, options, recommendation, and exact reply needed to unbloc
 ## Blocking calls and cancellation
 
 Commit attempts return immediately with a one-use token tied to the owning Codex session. Codex
-then calls the named MCP tool once. When fallback review is needed, the bundled Stop hook calls the reviewer server
+then calls the named MCP tool once. At an attempted turn ending, the bundled Stop hook calls the reviewer server
 directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking completion` while
 it runs. It consumes its review permit within that same hook invocation. Approval adds no routing
 prompt or routine success warning, preserving the original final answer. An incomplete ruling
@@ -550,18 +550,38 @@ that the plugin was exercised with the CLI as its active developer host.
 Mozilla Public License 2.0 — see [`LICENSE`](LICENSE) in this directory, which carries the
 unmodified license text and is the notice location for the source files in this package.
 
-## Desktop completion review
+## Completion review in the desktop app and CLI
 
-`review_completion` reviews the complete draft before publication and returns required work as
-an ordinary tool result. The agent addresses findings and retries within the same turn, then
-publishes the approved draft without more tool calls. Its one-use approval requires the same
-host turn and draft (apart from surrounding whitespace); new input or work invalidates it.
-Enabled sessions receive this protocol through UserPromptSubmit developer context. PreToolUse
-binds each call to the genuine host session; the model does not supply session identities.
+Codex invokes the supervisor automatically at its Stop event. The `review_completion` tool and
+its early-review instructions have been removed. UserPromptSubmit and ordinary tool hooks retain
+request and work context without initiating completion review. The legacy `stop_continue` tool
+is only for sessions whose Stop hook explicitly routes a continuation through it.
 
-The native Stop handler consumes matching approval silently. If review is skipped or approval
-is invalid, it performs a fallback review. A rejected fallback still creates a visible
-continuation prompt and may collapse earlier work in the desktop app. The plugin cannot control
-that UI behavior. The shared budget, fail-open policy, and cancellation remain in effect; budget
-exhaustion or review failure permits stopping without claiming approval. See the
-[design and validation plan](../../docs/plans/codex_prefinal_completion_review.md).
+Approval adds no continuation prompt. Rejection directs further work, and Codex can display the
+rejected answer and collapse earlier messages. The plugin cannot control that desktop behavior.
+A completed question answer also emits Stop: this lifecycle event does not distinguish that from
+abandoning an active assignment. Removing early review does not implement a question exemption.
+See the [timing specification](../../docs/plans/codex_stop_event_only.md).
+
+Codex and Claude Code read one [shared supervisor prompt](prompts/stop_supervisor.txt).
+There are no pre-final or native-only instruction variants. Application-specific context supplies
+the request, work evidence, and final response. Fail-open limits and cancellation remain in effect.
+
+## CLI completion checks
+
+The unit suite uses controlled reviewers. This separate check consumes real model usage and
+requires stopContinue already enabled and the installed hooks trusted:
+
+```bash
+python3 plugins/reviewer-agent-codex/scripts/check_cli_stop.py --run \
+  --cwd /path/to/enabled-repository \
+  --plugin-root /path/to/installed/reviewer-agent-codex
+```
+
+The check runs one read-only CLI session. It requires observed events in this order: incomplete
+response, automatic Stop request, rejection, corrected response, another Stop request, approval.
+Missing hooks, manual lifecycle calls, obsolete early reviews, fail-open results, and exhausted
+budgets cannot pass. Saved configuration, enablement receipts, and installed files are unchanged.
+The default timeout is 180 seconds (`--timeout` accepts 10–900). `--scenario fallback` and
+`--scenario all` remain aliases for the automatic Stop check; `prefinal` is no longer accepted.
+The printed artifact directory records documented CLI and MCP events, not internal rollout files.

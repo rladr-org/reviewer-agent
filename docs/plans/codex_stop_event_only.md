@@ -50,3 +50,32 @@ work. Run the relevant suite and a live automatic-Stop smoke test.
 
 An already running desktop process retains its loaded plugin instructions until
 the updated plugin is loaded. Report that distinction explicitly when delivering.
+
+## Verification record
+
+- Timing red checkpoint: six expected failures and 30 passes. The failures showed
+  injected early-review instructions, the advertised early tool, and a smoke
+  harness still selecting early review.
+- After removing that path, 64 targeted timing, MCP, lifecycle, and CLI-harness
+  checks passed. Another 69 shared-prompt and release checks passed.
+- Installed build `1.2.1-beta.6+codex.20260916084059` passed the live CLI check:
+  zero early-review calls; two automatic Stop calls; incomplete response rejected,
+  corrected response approved, with rejection observed before continuation.
+- Six installed real-reviewer cases passed: two incomplete/complete pairs,
+  cancellation, and quoted historical work.
+- The desktop app's bundled backend passed an ephemeral read-only test with the
+  installed plugin: two automatic Stop reviews, zero early-review calls, an
+  incomplete final response followed by a blocking hook and then the corrected
+  response and approval. The rejection emitted a `hookPrompt`, as expected; this
+  does not establish that visible feedback or history collapse has disappeared.
+  The test did not navigate or alter an existing desktop task.
+- Final Codex suite: 372 passed. The 21 CLI-harness checks also passed after
+  removing unused early-review bookkeeping. Plugin validation and Python 3.9
+  syntax checks passed. Changed installed runtime files matched the source tree
+  at the tested build before the release identity change below.
+- Commit review identified that Claude installations already on beta.6 would
+  treat an unchanged version as current. A live update command reproduced
+  `up_to_date`. The package declarations were advanced consistently to beta.7;
+  the parity checker rejected the intermediate mismatch and passed after all
+  declarations were updated. The final Codex identity is
+  `1.2.1-beta.7+codex.20260916090227`.

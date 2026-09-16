@@ -90,13 +90,7 @@ def _complete_allowed_stop(cancel_event, root, ticket, outcome="stop_ok"):
     return "allowed" if allowed else "new_work"
 
 
-def review_completion(cwd, proposed_response, review_token=None, cancel_event=None):
-    return review_stop(cwd, review_token, cancel_event=cancel_event,
-                       completion=True, proposed_response=proposed_response)
-
-
-def review_stop(cwd, review_token, cancel_event=None, *, completion=False, proposed_response=None,
-                native=False):
+def review_stop(cwd, review_token, cancel_event=None, *, native=False):
     cwd = Path(str(cwd or ""))
     if not cwd.is_absolute():
         return _result("error", "cwd must be an absolute repository path")
@@ -113,12 +107,6 @@ def review_stop(cwd, review_token, cancel_event=None, *, completion=False, propo
             "propose the final response again to obtain a new token",
         )
     session_id = ticket["session_id"]
-    if completion and (
-        not ticket.get("strict_completion")
-        or not isinstance(proposed_response, str) or not proposed_response.strip()
-        or ticket["final_message"].strip() != proposed_response.strip()
-    ):
-        return _result("error", "pre-final review requires a host-bound draft; do not invent a token")
     # The review tool's own PreToolUse belongs to this handoff. Snapshot after it, but before
     # the blocking review, so later work still invalidates a late approval.
     if not ticket.get("strict_completion"):
@@ -127,16 +115,6 @@ def review_stop(cwd, review_token, cancel_event=None, *, completion=False, propo
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
     abort_callback_registered = _register_abort_bypass(cancel_event, root, ticket)
-    if completion:
-        if state.read_nudges(root, session_id) >= state.max_nudges():
-            outcome = _complete_allowed_stop(cancel_event, root, ticket, outcome="budget_exhausted")
-            if outcome == "cancelled":
-                return _cancelled(root, ticket, abort_callback_registered)
-            if outcome == "new_work":
-                return _result("incomplete", "task changed during review",
-                               directive="Address the new input or work before stopping.")
-            return _result("budget_exhausted", "completion review budget exhausted; stopping is allowed without approval")
-        state.bump_nudges(root, session_id)
     try:
         code, output, stderr = backend.review_turn(
             root,
@@ -148,7 +126,6 @@ def review_stop(cwd, review_token, cancel_event=None, *, completion=False, propo
                 session_id,
                 ticket["final_message"],
                 background_markers=background_markers,
-                prefinal=completion,
                 native=native,
             ),
             timeout=backend.STOP_REVIEW_TIMEOUT,

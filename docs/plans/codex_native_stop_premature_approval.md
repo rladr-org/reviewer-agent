@@ -1,5 +1,10 @@
 # Native Stop: reject an incomplete intermediate response
 
+The route-specific prompt design below is historical. It is superseded by
+[One stop-supervisor prompt](shared_stop_supervisor_prompt.md): the completion
+rules now live in one resource shared by both applications and all review routes.
+The recorded failure and live-test evidence remain relevant.
+
 ## Observed failure
 
 The 2026-09-15 CLI audit ran Codex 0.154.0 against installed plugin build

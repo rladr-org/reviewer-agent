@@ -6,7 +6,7 @@ import json
 import sys
 
 import _bootstrap  # noqa: F401
-from reviewer_codex import completion, gate, liveness, state
+from reviewer_codex import gate, liveness, state
 
 
 def main():
@@ -17,10 +17,6 @@ def main():
         state.invalidate_stop_permits(data.get("cwd") or ".", state.session_key(data), work=True)
     except OSError:
         pass
-    binding = completion.bind_review(data)
-    if binding is not None:
-        print(json.dumps(binding))
-        return 0
     if data.get("tool_name") == "update_plan":
         try:
             state.record_plan(

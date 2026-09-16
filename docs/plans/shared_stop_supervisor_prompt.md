@@ -33,3 +33,21 @@ cancelled, and quoted-work cases with the actual reviewer after unit tests pass.
 
 Invocation timing is a separate requirement; the pending distinction about
 question-only turn endings does not block unifying the prompt.
+
+## Verification record
+
+- Red checkpoint: four expected failures (two missing-resource checks and two
+  checks detecting route-specific instructions); three other route checks passed.
+- After implementation: 40 Claude/shared-resource checks and 46 Codex
+  prompt/completion checks passed.
+- Six real reviewer cases passed: two incomplete/complete pairs, explicit
+  cancellation, and quoted historical work. The incomplete responses received
+  continuation directives; completed and cancelled work and quoted evidence
+  received `STOP_OK`.
+- The intermediate compatibility check of the old pre-final path failed twice:
+  it requested another review or publication of an already reviewed answer.
+  General shared clarification alone did not resolve that path. The early-review
+  tool and its binding were then removed as required by the timing specification;
+  the failed checks are not counted as passing evidence.
+- Both installed plugin distributions contain the same canonical prompt bytes
+  (SHA-256 `26bd93397125bb6fd9035696c11cc7fdf67ccb3f44984e9b01284860afe943b8`).

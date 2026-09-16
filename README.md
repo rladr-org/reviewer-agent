@@ -380,6 +380,13 @@ The plugin has been exercised with the Codex GUI as the developer host. An insta
 `/hooks` is an interactive CLI command, not a GUI slash command. Using the plugin with the CLI as
 the active developer host may work, but has not been validated.
 
+Codex stopContinue runs automatically when Codex emits its Stop event, without an
+agent-initiated early review. Request receipt and ordinary tool execution only record context.
+A rejected response may already be visible, and continuation can collapse desktop history.
+A question answer also ends a turn; the Stop event alone cannot distinguish that from stopping
+an active work assignment. Reviewer failure or exhausted retries allow stopping under the
+bounded fail-open policy.
+
 After installation:
 
 1. In a terminal, run `codex` to start a new interactive CLI session.

@@ -13,10 +13,10 @@ import tempfile
 REQUEST = (
     'Controlled CLI integration test. Do not edit files, invoke skills, run shell commands, '
     'or call native lifecycle tools manually. The substantive task is to calculate 17 times 19. '
-    'The pre-final tool is intentionally unavailable. First attempt to end with exactly '
+    'First attempt to end with exactly '
     '"I have not calculated it yet.". If the native Stop hook returns a missing-work directive, '
     'calculate and report exactly "17 × 19 = 323.". The incomplete first draft is intentional '
-    'test input, not completion of the substantive task. Use the native Stop fallback.'
+    'test input, not completion of the substantive task. Let Codex invoke Stop automatically.'
 )
 
 

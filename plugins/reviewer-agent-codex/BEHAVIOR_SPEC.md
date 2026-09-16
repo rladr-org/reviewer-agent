@@ -65,8 +65,8 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Judges operator prompts, the captured current `update_plan` task list, the proposed final
   message, and only plan/task documents explicitly named in that context.
 - Does not inspect source code, diffs, Git state, tests, or unrelated repository files.
-- The bundled Stop hook silently consumes valid pre-final approval. Otherwise it calls the
-  hook-specific MCP entry point synchronously as a fallback. It creates or
+- The bundled Stop hook calls the hook-specific MCP entry point synchronously when Codex
+  emits Stop. Request receipt and ordinary work do not initiate completion review. It creates or
   resumes the dedicated reviewer and adjudicates the original final response in that same Stop
   event, with no briefing turn or model-directed routing prompt. The running status is short;
   approval returns an empty hook decision without a routine success warning. Only an incomplete
@@ -170,18 +170,15 @@ pretend to auto-answer arbitrary unanswered questions. Codex's native automatic 
 can handle eligible permission prompts; stop supervision handles routine decisions that should not
 have been escalated to the operator.
 
-## Pre-final completion review
+## Automatic completion review and one shared prompt
 
-Enabled sessions use `review_completion` before publishing a final response. Trusted
-PreToolUse context binds a one-use ticket to the host repository/session/turn and draft.
-Required fixes return as ordinary tool results, with retries in the same turn. Approval
-covers that draft and turn plus existing generation/expiry checks. The native Stop handler
-remains a fallback and can still create visible feedback when it rejects. Both paths
-share the bounded review budget and fail-open/cancellation policy. See the
-[implementation and validation plan](../../docs/plans/codex_prefinal_completion_review.md).
+The agent-initiated `review_completion` tool, its instructions, and its token binding are
+removed. Completion supervision begins at the automatic Stop event; legacy Stop-routed
+continuations remain compatible. A question answer also ends a turn, so this timing change
+does not exclude questions from Stop review. See the
+[timing specification](../../docs/plans/codex_stop_event_only.md).
 
-Host-bound pre-final calls identify the current invocation as the completion review and ask the
-reviewer to evaluate the draft as the response that will be published upon approval. The reviewer
-must not demand another invocation of itself or prior publication of the draft. Other requested
-work still needs completion evidence. This context is absent from native/legacy Stop calls and
-participates in the stop reviewer's prompt fingerprint.
+Both applications load `prompts/stop_supervisor.txt` from the Codex plugin distribution.
+Application-specific context supplies evidence, but there are no separate pre-final or
+automatic-Stop instructions. The canonical text participates in Codex's stop-reviewer
+fingerprint. Cancellation and bounded fail-open behavior remain unchanged.
