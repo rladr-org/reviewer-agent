@@ -425,6 +425,10 @@ presents the decision, options, recommendation, and exact reply needed to unbloc
 
 ## Blocking calls and cancellation
 
+The commit tool advertises the display title
+`Commit review - when completed, results are available here`. Its result includes the reviewer
+verdict, findings, and Git output. Codex controls how the tool title and result are displayed.
+
 Commit attempts return immediately with a one-use token tied to the owning Codex session. Codex
 then calls the named MCP tool once. At an attempted turn ending, the bundled Stop hook calls the reviewer server
 directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking completion` while

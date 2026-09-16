@@ -17,7 +17,7 @@ PROTOCOL_VERSION = "2025-06-18"
 
 TOOL = {
     "name": "review_commit",
-    "title": "Review and commit staged changes",
+    "title": "Commit review - when completed, results are available here",
     "description": (
         "Use instead of shell git commit when reviewer-agent is enabled. This is one "
         "blocking operation: Codex remains suspended until the independent staged-index "
