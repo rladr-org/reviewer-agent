@@ -85,6 +85,7 @@ def assess(records, scenario, returncode):
     require(not any(r.get("type") == "mcp_tool_call" and r.get("tool") == "stop_hook"
                     for r in items), "agent called native Stop manually")
     requests = [r["message"] for r in records if r["kind"] == "mcp_request"]
+    request_times = {r["message"]["id"]: r["at"] for r in records if r["kind"] == "mcp_request"}
     response_records = [r for r in records if r["kind"] == "mcp_response"]
     responses = {r["message"]["id"]: r["message"] for r in response_records}
     response_times = {r["message"]["id"]: r["at"] for r in response_records}
@@ -124,6 +125,17 @@ def assess(records, scenario, returncode):
                 and stops[0][1].get("decision") == "block" and stops[0][1].get("reason"),
                 "native Stop did not reject the incomplete response")
         require(stops[1] == (FINAL, {}), "native Stop did not allow the corrected response")
+        published = [(r["message"]["item"].get("text"), r["at"]) for r in records
+                     if r["kind"] == "cli" and r["message"].get("type") == "item.completed"
+                     and r["message"].get("item", {}).get("type") == "agent_message"]
+        require([text for text, _ in published] == [INCOMPLETE, FINAL],
+                "fallback output order must contain the incomplete and corrected responses")
+        first, second = requests
+        observed_order = [published[0][1], request_times[first["id"]],
+                          response_times[first["id"]], published[1][1],
+                          request_times[second["id"]], response_times[second["id"]]]
+        require(all(before < after for before, after in zip(observed_order, observed_order[1:])),
+                "fallback event order does not show rejection before continuation")
     return {"scenario": scenario, "rejected_response_emitted": INCOMPLETE in messages,
             "completion_reviews": len(completion), "native_stops": len(stops)}
 

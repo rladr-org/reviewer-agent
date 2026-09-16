@@ -226,29 +226,32 @@ def test_abort_bypass_is_written_before_cancel_notification_returns(
     cancellation = Cancellation()
     reviewer_started = threading.Event()
     release_reviewer = threading.Event()
+    ticket = _ticket(git_repo)
 
     def review(*args, **kwargs):
         reviewer_started.set()
-        assert release_reviewer.wait(1)
+        assert release_reviewer.wait(10)
         return 130, "", "reviewer cancelled"
 
     monkeypatch.setattr(stop_tool.backend, "review_turn", review)
     results = []
     worker = threading.Thread(
         target=lambda: results.append(
-            stop_tool.review_stop(git_repo, _ticket(git_repo), cancellation)
+                stop_tool.review_stop(git_repo, ticket, cancellation)
         )
     )
     worker.start()
-    assert reviewer_started.wait(1)
-
     try:
+        # This checks synchronous cancellation, not Git/setup latency. Keep the
+        # handshake bounded while allowing a loaded host to schedule the worker.
+        assert reviewer_started.wait(10)
         assert cancellation.cancel()
         assert state.consume_stop_abort_bypass(git_repo, "root-session", "turn-1")
     finally:
         release_reviewer.set()
-        worker.join(1)
+        worker.join(10)
 
+    assert not worker.is_alive()
     assert results[0]["status"] == "cancelled"
 
 

@@ -95,7 +95,8 @@ def review_completion(cwd, proposed_response, review_token=None, cancel_event=No
                        completion=True, proposed_response=proposed_response)
 
 
-def review_stop(cwd, review_token, cancel_event=None, *, completion=False, proposed_response=None):
+def review_stop(cwd, review_token, cancel_event=None, *, completion=False, proposed_response=None,
+                native=False):
     cwd = Path(str(cwd or ""))
     if not cwd.is_absolute():
         return _result("error", "cwd must be an absolute repository path")
@@ -148,6 +149,7 @@ def review_stop(cwd, review_token, cancel_event=None, *, completion=False, propo
                 ticket["final_message"],
                 background_markers=background_markers,
                 prefinal=completion,
+                native=native,
             ),
             timeout=backend.STOP_REVIEW_TIMEOUT,
             cancel_event=cancel_event,

@@ -81,3 +81,67 @@ known ordering defect is intentionally retained until the next implementation co
 as required by the operator's red-before-green sequence. Fixing it in this checkpoint
 would erase the requested red state. The opt-in native reviewer script is a test driver,
 not a runtime change, and ordinary pytest never invokes real reviewer calls.
+
+## Implementation and live evidence
+
+The native prompt now identifies the active review, distinguishes an intermediate stop
+attempt from the substantive requested outcome, preserves explicit cancellation and
+quoted-evidence boundaries, and requires the reviewer to decide now. Its context is
+included in the stop-role fingerprint (`ef06bf03cd641b89`). Fallback smoke assessment
+now requires the observed six-event sequence in order.
+
+Initial implementation build: `1.2.1-beta.6+codex.20260916062300`. The installed prompt, smoke harness,
+and manifest bytes match the checkout. The following checks used real reviewer calls:
+
+- `scripts/check_native_stop_reviewer.py --run --attempts 5`: all twelve cases passed
+  (five original incomplete/completed pairs, explicit cancellation, and quoted evidence).
+  Artifact: `native-stop-reviewer-check-kl_9213g/results.json` in the host temporary directory.
+- CLI pre-final and native fallback both passed, including strict observed event order.
+  Artifact: `cli-stop-check-_g0r_1z0/summary.json` in the host temporary directory.
+  Two additional fresh fallback sessions also passed (`cli-stop-check-zplm6qej` and
+  `cli-stop-check-dyiwjfkk`), giving three passing installed-host fallback runs.
+- A fresh desktop app-server exercised the installed plugin: two completion reviews
+  (`incomplete`, then `stop_ok`), one approved final answer, no hookPrompt, and silent
+  native Stop in one turn. Artifact: `reviewer-prefinal-live-z5n7cw_l/host-events.json`.
+  This is backend-event evidence, not a new visual inspection of the desktop window.
+
+The original failed CLI run is retained as `cli-stop-check-wi6w7x4o`; its passing retry
+is `cli-stop-check-9eameue0`. Four further diagnostic runs of the old build also passed,
+so this was one observed failure in six old-build fallback runs. Those passes did not
+erase the confirmed erroneous approval. Prompt clarification and finite live regressions
+reduce this observed failure mode; they do not establish infallible model decisions.
+
+The targeted suite first reported 106 passes and one existing cancellation-test startup
+timeout (`reviewer_started.wait(1)`) while tests ran concurrently. A targeted rerun of
+that test and all new regressions passed all 26 cases. Release metadata/export checks
+passed all 50 tests and the plugin validator passed. The complete canonical plugin
+suite then passed all 387 tests in 472.35 seconds, including the cancellation test.
+Changed Python sources also parse with the Python 3.9 grammar; `git diff --check` passed.
+
+### Commit-review correction: legacy call distinction
+
+The implementation reviewer found that `stop_prompt(prefinal=False)` is also used by
+legacy `stop_continue`, so selecting native guidance for every non-prefinal call was
+incorrect. The added MCP-level legacy regression failed on that implementation (one
+failure, four passes). `supervisor._review_in_hook` now explicitly passes `native=True`
+through `stop_tool.review_stop` to the prompt builder. Legacy calls default to false;
+pre-final calls keep their existing context. This selects the invocation context without
+changing review-result processing, budgets, or permit handling in either path.
+
+The new regression and all other new tests then passed (26 cases). Installed build
+`1.2.1-beta.6+codex.20260916064352` includes the correction. The full suite is rerun for
+this build, and the final host smoke tests will be rerun after its implementation commit.
+
+The full rerun reported 387 passes and the same one-second cancellation-test startup
+timeout. That recurrence is not dismissed. The test created its Git-backed ticket inside
+the worker's one-second startup window, conflating setup/scheduling latency with the
+property under test. Ticket creation is now outside the worker, both event waits and
+the join remain bounded at ten seconds, and cleanup also runs on startup failure.
+The cancellation assertion remains before releasing the reviewer: the abort bypass must
+already exist when `cancel()` returns. No runtime cancellation behavior is changed.
+The corrected test and new regressions passed together (27 cases), and a separate
+fault-injection run adding 1.5 seconds to ticket creation also passed. The final installed
+package is `1.2.1-beta.6+codex.20260916065354`; its runtime, changed tests, harness, and
+manifest match the checkout. The 50 release checks passed again for that package.
+The final canonical plugin run passed all 388 tests in 467.85 seconds, including the
+corrected cancellation test and the native/legacy routing regression.

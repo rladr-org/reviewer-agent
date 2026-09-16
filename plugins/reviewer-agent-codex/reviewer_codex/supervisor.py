@@ -49,7 +49,7 @@ def supervise_hook(data, cancel_event=None):
 
 
 def _review_in_hook(cwd, session_id, token, cancel_event):
-    result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event)
+    result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True)
     status = result.get("status")
     if status in ("stop_ok", "failed_open"):
         # No second Stop is needed. Consume now to validate generations and avoid leaving
