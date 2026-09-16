@@ -51,11 +51,11 @@ def evidence(check, scenario):
     return records
 
 
-@pytest.mark.parametrize("scenario", ["prefinal", "fallback"])
+@pytest.mark.parametrize("scenario", ["native", "fallback"])
 def test_correlated_real_hook_round_trip(check, scenario):
     result = check.assess(evidence(check, scenario), scenario, 0)
     assert result["scenario"] == scenario
-    assert result["rejected_response_emitted"] is (scenario == "fallback")
+    assert result["rejected_response_emitted"]
 
 
 @pytest.mark.parametrize("fault", ["no-hooks", "fail-open", "no-final", "no-turn-end",
@@ -80,18 +80,30 @@ def test_incomplete_evidence_never_passes(check, fault):
         check.assess(records, "fallback", 1 if fault == "failed-process" else 0)
 
 
-def test_prefinal_failure_is_not_approval(check):
+def test_removed_prefinal_scenario_is_rejected(check):
     records = evidence(check, "prefinal")
-    records[4]["message"]["result"]["structuredContent"] = {"status": "failed_open"}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unsupported"):
         check.assess(records, "prefinal", 0)
 
 
-def test_prefinal_answer_must_follow_approval(check):
-    records = evidence(check, "prefinal")
-    records[5]["at"] = 2
-    with pytest.raises(ValueError):
-        check.assess(records, "prefinal", 0)
+def test_default_live_check_runs_only_automatic_stop(check, git_repo, isolated_state, monkeypatch):
+    from reviewer_codex import state
+    state.set_feature(git_repo, "stop")
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--run", "--cwd", str(git_repo),
+                                     "--plugin-root", str(SCRIPT.parents[1])])
+    original_run = check.subprocess.run
+    def run_command(args, **kwargs):
+        if args[-1] == "--version":
+            return subprocess.CompletedProcess(args, 0, stdout="codex test\n")
+        return original_run(args, **kwargs)
+    monkeypatch.setattr(check.subprocess, "run", run_command)
+    calls = []
+    def run(args, scenario, directory):
+        calls.append(scenario)
+        return {"scenario": scenario}
+    monkeypatch.setattr(check, "run_scenario", run)
+    assert check.main() == 0
+    assert calls == ["native"]
 
 
 @pytest.mark.parametrize("fault", ["missing-incomplete", "answer-before-rejection",
