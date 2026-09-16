@@ -568,8 +568,9 @@ def _codex_scenario_body(result, repo, workspace, state, env, codex_state):
 
         listed = client.call("tools/list", {}, timeout=60)
         names = {tool["name"] for tool in (listed.get("result") or {}).get("tools", [])}
-        result.check("both blocking tools are offered",
-                     {"review_commit", "stop_continue"} <= names, ", ".join(sorted(names)))
+        result.check("commit review and lifecycle-only completion tools are offered",
+                     names == {"review_commit", "stop_hook", "interrupt_stop"},
+                     ", ".join(sorted(names)))
 
         stage(repo, "helper.py", DEFECT)
         token = codex_state.create_commit_ticket(repo, "matrix-codex-session")

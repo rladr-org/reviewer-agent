@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
-from .stop_tool import review_stop
 from .supervisor import supervise_hook
 
 
@@ -47,35 +46,6 @@ TOOL = {
     },
     "annotations": {
         "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-}
-
-STOP_TOOL = {
-    "name": "stop_continue",
-    "title": "Check whether the current task may stop",
-    "description": (
-        "Use once when the Stop hook routes completion checking here. The call remains pending "
-        "until the dedicated minimal stop supervisor rules. It can be cancelled with Escape."
-    ),
-    "inputSchema": {
-        "type": "object",
-        "properties": {
-            "cwd": {
-                "type": "string",
-                "description": "Absolute path inside the current Git repository.",
-            },
-            "review_token": {
-                "type": "string",
-                "description": "One-use token returned by the Stop hook.",
-            },
-        },
-        "required": ["cwd", "review_token"],
-        "additionalProperties": False,
-    },
-    "annotations": {
-        "readOnlyHint": True,
         "destructiveHint": False,
         "openWorldHint": False,
     },
@@ -232,7 +202,7 @@ def _render(result):
 
 
 def handle_message(
-    message, commit_fn=reviewed_commit, stop_fn=review_stop, cancel_event=None
+    message, commit_fn=reviewed_commit, cancel_event=None
 ):
     method = message.get("method")
     request_id = message.get("id")
@@ -248,7 +218,7 @@ def handle_message(
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
-                    "Call review_commit or legacy stop_continue once when named by a "
+                    "Call review_commit once when named by a "
                     "reviewer-agent hook. Completion supervision runs automatically when "
                     "Codex emits its Stop event. Do not initiate a completion review during "
                     "ongoing work or manually call stop_hook. All reviews support MCP "
@@ -259,9 +229,9 @@ def handle_message(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": [TOOL, STOP_TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL]})
+        return _response(request_id, {"tools": [TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL]})
     if method == "tools/call":
-        if params.get("name") not in (TOOL["name"], STOP_TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"]):
+        if params.get("name") not in (TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"]):
             return _error(request_id, -32601, "unknown tool")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
@@ -271,19 +241,12 @@ def handle_message(
         if params.get("name") == INTERRUPT_TOOL["name"]:
             return _hook_response(request_id, _interrupt_stop(arguments))
         try:
-            if params.get("name") == TOOL["name"]:
-                result = commit_fn(
-                    arguments.get("cwd"),
-                    arguments.get("message"),
-                    arguments.get("review_token"),
-                    cancel_event=cancel_event,
-                )
-            else:
-                result = stop_fn(
-                    arguments.get("cwd"),
-                    arguments.get("review_token"),
-                    cancel_event=cancel_event,
-                )
+            result = commit_fn(
+                arguments.get("cwd"),
+                arguments.get("message"),
+                arguments.get("review_token"),
+                cancel_event=cancel_event,
+            )
         except Exception as error:
             result = {"status": "error", "message": "reviewer tool failed: {}".format(error)}
         return _response(
@@ -297,7 +260,7 @@ def handle_message(
     return _error(request_id, -32601, "method not found")
 
 
-def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit, stop_fn=review_stop):
+def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
     input_stream = input_stream or sys.stdin
     output_stream = output_stream or sys.stdout
     active = {}
@@ -315,7 +278,6 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit, stop
         response = handle_message(
             message,
             commit_fn=commit_fn,
-            stop_fn=stop_fn,
             cancel_event=cancelled,
         )
         with active_lock:
@@ -349,7 +311,7 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit, stop
                     active[message["id"]] = (cancelled, worker)
                 worker.start()
                 continue
-            send(handle_message(message, commit_fn=commit_fn, stop_fn=stop_fn))
+            send(handle_message(message, commit_fn=commit_fn))
     finally:
         with active_lock:
             running = list(active.values())

@@ -1,6 +1,6 @@
 {
   "name": "reviewer-agent-codex",
-  "version": "1.2.1-beta.7+codex.20260916090227",
+  "version": "1.2.1-beta.7+codex.20260916100826",
   "description": "Codex-native autonomous commit reviewer and stop supervisor.",
   "author": {
     "name": "RLADR"

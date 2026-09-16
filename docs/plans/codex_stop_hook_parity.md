@@ -1,8 +1,8 @@
 # Stop-hook-only supervision: approved sprint scope
 
-Status: documentation-first checkpoint. The removals below are approved requirements,
-not a claim that the current runtime already implements them. Tests and code follow
-in separate commits under the operator's required protocol.
+The documentation-first checkpoint was committed before tests and runtime changes.
+The implementation checkpoint removes the legacy paths described below. Live
+verification follows that commit under the operator's required protocol.
 
 ## Decisions
 
@@ -61,3 +61,20 @@ judgment and report any live-test limitation honestly.
 
 References: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
 [Claude Code Stop](https://code.claude.com/docs/en/hooks#stop).
+
+## Checkpoint evidence
+
+- Documentation: `6d80e08`; red behavioral tests: `8e61052`.
+- Red run: five expected failures and 113 passes. The failures demonstrate the
+  still-callable old tool, advertised old tool, legacy command script, and old
+  permit bypass. The new-file rerun after correcting test isolation had four
+  expected failures and eight passes.
+- Initial green run: 56 focused Stop, MCP, and interruption checks passed; the
+  two cross-application shared-prompt checks passed. Plugin validation and Python
+  3.9 syntax checks passed.
+- The hook configuration, cancellation transport, backend process cancellation,
+  abort-bypass state, dedicated interruption test file, and shared prompt are
+  byte-identical to the pre-change versions. The three MCP functions that register,
+  identify, and cancel active Stop reviews are structurally unchanged.
+- The full Codex suite and installed live checks are separate verification steps;
+  their final outcomes are reported with delivery, not inferred from unit tests.

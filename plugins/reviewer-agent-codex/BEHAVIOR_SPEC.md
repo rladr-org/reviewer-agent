@@ -72,15 +72,16 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   approval returns an empty hook decision without a routine success warning. Only an incomplete
   ruling creates a continuation prompt, containing the actionable directive and the existing
   internal continuation marker. The plugin does not control desktop history expansion.
-- Legacy command-hook and token-based `stop_continue` entry points remain available for existing
-  sessions. New bundled configuration registers only the native MCP Stop handler.
+- Completion review is exposed only through the native MCP Stop handler. The token-based
+  `stop_continue` tool and legacy command-hook routing script are removed, including instructions
+  telling the developer agent to call them. Completed question answers receive the same Stop
+  review as completed work; there is no question classifier or active-assignment gate.
 - A stop permit covers one completion handoff, bound to operator-input and observed-work
   generations. It expires after five minutes and is consumed once. New genuine operator prompts,
   tool calls, and subagent starts invalidate it, including approvals still running when new input
-  or work arrives. The review tool snapshots work after its own PreToolUse event. Rewording the
-  final acknowledgment or receiving a fresh host continuation turn ID does not require another
-  review for legacy handoffs. Pre-final permits additionally require the reviewed draft and
-  exact host turn. Older permit formats are rejected.
+  or work arrives. The internal review snapshots work before invoking the reviewer. Its permit
+  validates the result within the same Stop invocation; it is not an agent-facing handoff.
+  Old handoff permits cannot skip a new Stop review. Older permit formats are rejected.
 - The native Stop hook consumes its permit in the same invocation, including the generation
   checks. It cannot leave an approval behind for a subsequent stop or approve new work/input
   that arrived while the review was running. MCP hook responses use the hook JSON contract,
@@ -173,10 +174,10 @@ have been escalated to the operator.
 ## Automatic completion review and one shared prompt
 
 The agent-initiated `review_completion` tool, its instructions, and its token binding are
-removed. Completion supervision begins at the automatic Stop event; legacy Stop-routed
-continuations remain compatible. A question answer also ends a turn, so this timing change
-does not exclude questions from Stop review. See the
-[timing specification](../../docs/plans/codex_stop_event_only.md).
+removed, as are the legacy `stop_continue` tool and command-hook routing path. Completion
+supervision runs entirely within the automatic Stop event. A question answer also ends a turn
+and receives the same review as completed work. See the
+[approved sprint scope](../../docs/plans/codex_stop_hook_parity.md).
 
 Both applications load `prompts/stop_supervisor.txt` from the Codex plugin distribution.
 Application-specific context supplies evidence, but there are no separate pre-final or

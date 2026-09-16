@@ -432,8 +432,10 @@ Removing synthetic review turns reduces desktop clutter; the plugin cannot force
 previous-message dropdown to remain expanded.
 
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
-The legacy command hook and `stop_continue` tool remain for existing sessions; they still route
-via a one-use token. The developer model remains suspended during either review path.
+Completion supervision is invoked only by the Stop hook. The legacy command-hook routing
+script and agent-callable `stop_continue` tool have been removed. Existing sessions must reload
+the updated plugin to discard old tools and instructions. The developer model remains suspended
+while the hook review runs. The Interrupt handler continues to cancel matching active reviews.
 The installer marks the reviewer MCP
 namespace direct-only in Codex code mode, so the call cannot yield into a JavaScript cell that
 reactivates the developer model for polling or narration. The stdio server continues reading MCP
@@ -555,13 +557,14 @@ unmodified license text and is the notice location for the source files in this 
 Codex invokes the supervisor automatically at its Stop event. The `review_completion` tool and
 its early-review instructions have been removed. UserPromptSubmit and ordinary tool hooks retain
 request and work context without initiating completion review. The legacy `stop_continue` tool
-is only for sessions whose Stop hook explicitly routes a continuation through it.
+and instructions telling the agent to invoke it have also been removed. Every eligible Stop,
+including a completed question answer, is reviewed using the same shared prompt as Claude Code.
 
 Approval adds no continuation prompt. Rejection directs further work, and Codex can display the
 rejected answer and collapse earlier messages. The plugin cannot control that desktop behavior.
 A completed question answer also emits Stop: this lifecycle event does not distinguish that from
 abandoning an active assignment. Removing early review does not implement a question exemption.
-See the [timing specification](../../docs/plans/codex_stop_event_only.md).
+See the [approved Stop-hook scope](../../docs/plans/codex_stop_hook_parity.md).
 
 Codex and Claude Code read one [shared supervisor prompt](prompts/stop_supervisor.txt).
 There are no pre-final or native-only instruction variants. Application-specific context supplies

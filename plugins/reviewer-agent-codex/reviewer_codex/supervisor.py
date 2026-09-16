@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""Native Stop review, with legacy routing for already-running Codex sessions."""
+"""Completion review runs synchronously inside the Codex Stop hook."""
 
 import time
 from pathlib import Path
@@ -41,9 +41,9 @@ def supervise_hook(data, cancel_event=None):
             or not isinstance(data.get("stop_hook_active", False), bool)
         ):
             return _failed_open()
-        return supervise(data, direct=True, cancel_event=cancel_event) or {}
+        return _supervise(data, cancel_event=cancel_event) or {}
     except Exception:
-        # Match the legacy command hook's fail-open boundary, without exposing a traceback
+        # Keep the fail-open boundary, without exposing a traceback
         # as a continuation or silently reporting approval after a state/backend error.
         return _failed_open()
 
@@ -78,7 +78,7 @@ def _settled_outstanding(cwd, session_id):
     return active
 
 
-def supervise(data, *, direct=False, cancel_event=None):
+def _supervise(data, cancel_event=None):
     cwd = data.get("cwd") or "."
     if not state.feature_enabled(cwd, "stop"):
         return None
@@ -88,24 +88,13 @@ def supervise(data, *, direct=False, cancel_event=None):
     if not session_id:
         return None
     if state.consume_stop_abort_bypass(cwd, session_id, data.get("turn_id")):
-        if direct:
-            return {}
-        return {
-            "systemMessage": (
-                "[reviewer-agent-codex] Cancelled stopContinue acknowledged; "
-                "allowing the interrupted turn to end."
-            )
-        }
+        return {}
     final_message = data.get("last_assistant_message") or ""
     if not str(final_message).strip():
         return None
-    permit = state.consume_stop_permit(cwd, session_id, data.get("turn_id"), final_message)
-    if permit == "stop_ok":
-        return {} if direct else {"systemMessage": "[reviewer-agent-codex] Stop supervisor approved this stop."}
-    if permit == "budget_exhausted":
-        return {} if direct else {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}
-    if permit == "failed_open":
-        return {"systemMessage": "[reviewer-agent-codex] Stop supervisor failed; allowing this stop under the fail-open policy."}
+    # Discard any old agent-handoff permit. Each Stop is reviewed here; approval
+    # is consumed only inside _review_in_hook, within that same invocation.
+    state.consume_stop_permit(cwd, session_id, data.get("turn_id"), final_message)
     used, cap = state.read_nudges(cwd, session_id), state.max_nudges()
     if used >= cap:
         return {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}
@@ -117,22 +106,4 @@ def supervise(data, *, direct=False, cancel_event=None):
         background_markers=active,
     )
     state.bump_nudges(cwd, session_id)
-    if direct:
-        return _review_in_hook(cwd, session_id, token, cancel_event)
-    if active:
-        return _block(
-            "Call the reviewer-agent `stop_continue` MCP tool once with this repository cwd "
-            "and review_token={}. Wait for that blocking call to return; it will adjudicate "
-            "the reported background markers together with your proposed final response.".format(
-                token
-            ),
-            "[reviewer-agent-codex] Background completion routed to cancellable "
-            "stop_continue tool.",
-        )
-
-    return _block(
-        "Call the reviewer-agent `stop_continue` MCP tool once with this repository cwd and "
-        "review_token={}. Wait for that blocking call to return; its result either permits the "
-        "next stop or tells you exactly what remains.".format(token),
-        "[reviewer-agent-codex] Stop routed to cancellable stop_continue tool.",
-    )
+    return _review_in_hook(cwd, session_id, token, cancel_event)
