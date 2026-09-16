@@ -33,7 +33,7 @@ def test_unparseable_output_is_not_guessed_at(text):
 
 
 def test_a_current_host_produces_no_warning():
-    assert hv.version_warning("Codex", (0, 147, 0), hv.CODEX_MIN) is None
+    assert hv.version_warning("Codex", (0, 154, 0), hv.CODEX_MIN) is None
     assert hv.version_warning("Codex", (1, 0, 0), hv.CODEX_MIN) is None
 
 
@@ -41,12 +41,12 @@ def test_an_older_host_is_named_and_still_allowed():
     warning = hv.version_warning("Codex", (0, 140, 0), hv.CODEX_MIN)
 
     assert warning
-    assert "0.140.0" in warning and "0.147.0" in warning
+    assert "0.140.0" in warning and "0.154.0" in warning
     assert "continuing" in warning.lower()
 
 
 def test_the_floors_match_the_versions_the_release_was_exercised_on():
-    assert hv.CODEX_MIN == (0, 147, 0)
+    assert hv.CODEX_MIN == (0, 154, 0)
     assert hv.PYTHON_MIN == (3, 9, 0)
 
 
@@ -67,7 +67,7 @@ def test_an_old_codex_makes_the_installer_warn_without_failing(tmp_path):
     )
 
     assert "0.100.0" in result.stderr
-    assert "0.147.0" in result.stderr
+    assert "0.154.0" in result.stderr
     # Prepare-only still has to succeed: the warning is advisory.
     assert result.returncode == 0, result.stderr
 
@@ -111,3 +111,7 @@ def test_a_missing_codex_binary_is_not_warned_about(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "Codex" not in result.stderr
+
+
+def test_hosts_without_native_hook_support_are_not_silently_accepted():
+    assert hv.version_warning("Codex", (0, 147, 0), hv.CODEX_MIN)
