@@ -58,3 +58,26 @@ inputs to this work. Preserve them; do not mix unrelated existing work into thes
 commits. This fix does not claim infallible model judgments or control over desktop
 history rendering. A new live failure requires diagnosis rather than dismissal as
 variation.
+
+## Red checkpoint
+
+The protocol source is an earlier user message in desktop task
+`01a0a4b0-e341-7003-8fcb-04dd267b8e1c` ("Improve desktop stop-continue UX"), turn
+`01a0a4b2-d01f-7221-ac46-e63272ee35df`, item
+`01a0a4b5-2234-7842-a579-944a9078aa0c`, retrieved through the documented `read_thread`
+API during this fix. It is older than the current shortened operator-prompt ledger.
+That message explicitly required: "documentation update -> commit", then "write red
+TDD tests that actually test the proper working of the functionality -> commit", then
+"write code that passes the tests and properly implements the specifications -> commit".
+The current test commit is that deliberately failing checkpoint, not the implementation
+or a release. Running `tests/test_native_review_context.py tests/test_cli_stop_check.py`
+before implementation produced eight intended assertion failures and seventeen passes
+(including the subsequently added live-check opt-in guard):
+native invocation context, reviewer-session invalidation, and six ordering cases.
+
+The unchanged, previously untracked CLI helper is included solely so a clean checkout
+can reproduce those assertion failures instead of failing to import the helper. Its
+known ordering defect is intentionally retained until the next implementation commit,
+as required by the operator's red-before-green sequence. Fixing it in this checkpoint
+would erase the requested red state. The opt-in native reviewer script is a test driver,
+not a runtime change, and ordinary pytest never invokes real reviewer calls.
