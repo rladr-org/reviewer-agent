@@ -1,5 +1,10 @@
 # Supervise only attempted stops
 
+**Historical plan.** The operator has now confirmed review at every Stop,
+including completed question answers, and removal of the legacy agent-directed
+fallback. The [approved sprint scope](codex_stop_hook_parity.md) supersedes the
+unresolved question-classification discussion and compatibility allowance below.
+
 ## Requirement
 
 Run completion supervision only when Codex emits its automatic `Stop` event.

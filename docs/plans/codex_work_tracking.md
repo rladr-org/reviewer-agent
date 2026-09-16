@@ -1,5 +1,10 @@
 # Track active work before invoking completion supervision
 
+**Superseded; not implemented and out of scope.** The operator explicitly chose
+review at every Stop, including question answers, matching Claude Code. See the
+[approved sprint scope](codex_stop_hook_parity.md). Do not implement the proposal
+below as part of this sprint.
+
 ## Requirement
 
 Invoke the supervisor only at Stop and only when an assignment may remain open.
