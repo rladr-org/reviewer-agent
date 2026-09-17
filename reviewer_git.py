@@ -185,6 +185,331 @@ def _commit_arg_tokens(tokens):
     return None
 
 
+# The flags the gate can carry onto a commit it performs itself. Pinned to the set the Codex
+# implementation accepts, deliberately: deciding case by case what looks "safe enough" is how a
+# pinned set becomes open-ended option support.
+_CARRIED_FLAGS = ("--signoff", "--quiet")
+# Characters that make a BARE word mean something other than itself to a shell. Stated as a set
+# of characters rather than a list of expansions so the rule is complete: globbing, tilde and
+# brace expansion, history and substitution are all refused without enumerating what each does.
+_BARE_WORD_SPECIAL = set("$`*?[]{}~!\\\"'")
+# Before the subcommand the same rule applies MINUS `~`, which is handled separately because
+# only SOME tilde forms are safe: a repository target may be written `git -C ~/repo`, and
+# `git_c_effective_dir` resolves that with expanduser exactly as the shell would, but a shell
+# also expands `~+`, `~-` and `~1` from the directory stack and expanduser does not. Every other
+# shell-active character still has to go: a glob in a `-C` target expands to a real path for git
+# while the gate resolves the literal text, so the gate would audit one repository while the
+# commit lands in another.
+_TARGET_SPECIAL = _BARE_WORD_SPECIAL - set("~")
+# The tilde-prefixes a shell takes from its directory stack: `+`, `-`, and an optionally signed
+# number. These are the ONLY forms where a shell and expanduser disagree -- `~`, `~/...` and
+# `~name` all resolve identically in both -- so they are the only ones worth refusing.
+# An EMPTY prefix (`~` alone, or `~/...`) must not match: that is the plain home-directory form
+# both resolve the same way.
+_DIRECTORY_STACK_TILDE = re.compile(r"\A(?:[+-][0-9]*|[0-9]+)\Z")
+# Inside double quotes a shell resolves `\"` and `\\`, and so does the lexer, so those reach git
+# as the same text either way. It also resolves `\$` and a backslash-escaped backtick, and the
+# lexer does NOT -- it keeps the backslash. The gate cannot reproduce that value faithfully, so
+# it refuses rather than committing text that differs from what was written by one character.
+_DOUBLE_QUOTE_ESCAPES = set('"\\')
+_UNREPRODUCIBLE_ESCAPES = set("$`")
+
+
+def _join_continuations(text):
+    """Remove `\\<newline>` line continuations, which a shell erases before the command runs.
+
+    The lexer keeps them as a literal newline inside a token, so without this a continued
+    command arrives with a stray newline argument.
+
+    Quote state has to be tracked properly rather than scanned for: an apostrophe inside a
+    DOUBLE-quoted argument is ordinary text, and treating it as the start of a quoted span left
+    a later continuation in place, which would have committed a different message from the one
+    asked for. Single quotes are the one context where a backslash-newline survives, because a
+    shell expands nothing at all inside them."""
+    out = []
+    i = 0
+    n = len(text or "")
+    quote = None
+    while i < n:
+        char = text[i]
+        if quote == "'":  # everything is literal until the closing quote
+            out.append(char)
+            if char == "'":
+                quote = None
+            i += 1
+            continue
+        if char == "\\" and i + 1 < n and text[i + 1] == "\n":
+            i += 2  # removed by a shell, unquoted and inside double quotes alike
+            continue
+        if char == "\\" and i + 1 < n:
+            out.append(char)  # any other escape is left for the lexer to resolve
+            out.append(text[i + 1])
+            i += 2
+            continue
+        out.append(char)
+        if quote == '"':
+            if char == '"':
+                quote = None
+        elif char in "'\"":
+            quote = char
+        i += 1
+    return "".join(out)
+
+
+def _posix_tokens(command):
+    """The argument values git would receive, with shell punctuation split out.
+
+    Posix mode does all the quoting work correctly, which is the point: a quoted `&&`, `;` or
+    newline stays inside its token and only a REAL operator becomes one, so no hand-rolled
+    boundary logic is needed and a multiline or escape-carrying message survives intact."""
+    lexer = shlex.shlex(command or "", posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def _expansion_outside_quotes(command):
+    """Why this command's text would not reach git as written, or None.
+
+    Answered from the RAW text, because quote removal has already happened by the time there are
+    tokens: afterwards `'cost $5'` and `"$MSG"` are indistinguishable. One left-to-right pass,
+    one verdict per lexical context, so the rule is complete rather than a list that grows with
+    each expansion someone remembers.
+
+    Two scopes, because they protect different things:
+
+      * Everywhere: a `$` or backtick outside single quotes, whose value the gate cannot know,
+        and a NEWLINE outside quotes, which separates commands exactly as `;` does. Folding that
+        newline into whitespace would let a following line's words arrive as more arguments to
+        the commit.
+      * Everywhere: every other shell-active character too, EXCEPT that `~` is allowed before
+        the subcommand. A `~` target is resolved by `git_c_effective_dir` exactly as the shell
+        resolves it, so refusing it would drop support the gate already has; a glob or brace in
+        that target is not, and would let the gate audit one repository while the commit lands
+        in another.
+    """
+    text = command or ""
+    i = 0
+    n = len(text)
+    word = []
+    seen_commit = False
+    while i < n:
+        char = text[i]
+        if char == "'":  # single quotes expand nothing at all
+            close = text.find("'", i + 1)
+            if close < 0:
+                return "the command has an unterminated single quote, so its text is ambiguous"
+            word.append(text[i + 1:close])
+            i = close + 1
+            continue
+        if char == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                if text[i] == "\\" and i + 1 < n and text[i + 1] in _UNREPRODUCIBLE_ESCAPES:
+                    return (
+                        "a backslash-escaped `{}` inside double quotes means a literal character "
+                        "to a shell, but the gate's lexer keeps the backslash, so the committed "
+                        "text would differ by one character; single-quote the message "
+                        "instead".format(text[i + 1])
+                    )
+                if text[i] == "\\" and i + 1 < n and text[i + 1] in _DOUBLE_QUOTE_ESCAPES:
+                    word.append(text[i + 1])
+                    i += 2  # `\"` and `\\` resolve identically in a shell and in the lexer
+                    continue
+                if text[i] in "$`":
+                    return (
+                        "the shell would expand `{}` before git ever saw it, so the gate cannot "
+                        "know the resulting text; use a literal message, or single-quote it so "
+                        "the characters stay as written".format(text[i])
+                    )
+                word.append(text[i])
+                i += 1
+            if i >= n:
+                return "the command has an unterminated double quote, so its text is ambiguous"
+            i += 1
+            continue
+        if char == "\\" and i + 1 < n and text[i + 1] == "\n":
+            i += 2  # a line continuation joins two lines into a single command
+            continue
+        if char == "\n":
+            if text[i + 1:].strip():
+                return (
+                    "a newline outside quotes separates commands, so this call holds more than "
+                    "one of them. The gate carries only a single `git commit`, and the rest "
+                    "would be dropped without running; send it as its own tool call."
+                )
+            i += 1
+            continue
+        if char in " \t":
+            if "".join(word) == "commit":
+                seen_commit = True
+            del word[:]
+            i += 1
+            continue
+        if char in "$`":
+            return (
+                "the shell would expand `{}` before git ever saw it, so the gate cannot know "
+                "the resulting text; quote it so the characters stay as written".format(char)
+            )
+        if char == "~":
+            # A shell expands a tilde-prefix ONLY at the start of a word, and the prefix runs to
+            # the first `/`. Mid-word it is ordinary text, so `a~b` and `/tmp/repo~` are literal
+            # to both a shell and the gate and need no refusal at all.
+            if word:
+                word.append(char)
+                i += 1
+                continue
+            prefix = ""
+            j = i + 1
+            while j < n and text[j] not in "/ \t\n":
+                prefix += text[j]
+                j += 1
+            if seen_commit:
+                # In a MESSAGE any leading tilde expands, so the committed text would not be
+                # the text written here.
+                return (
+                    "a leading `~` is expanded by a shell, so the committed message would not "
+                    "be the text written here; quote the message"
+                )
+            if _DIRECTORY_STACK_TILDE.match(prefix):
+                # `~+`, `~-` and `~1` come from the directory stack, which expanduser knows
+                # nothing about: it hands them back untouched, so the gate would resolve the
+                # literal text and audit a different repository from the one git targets.
+                return (
+                    "`~{}` is expanded from the shell's directory stack, which the gate cannot "
+                    "reproduce, so the commit could land in a different repository from the one "
+                    "reviewed; use an absolute path".format(prefix)
+                )
+            # `~`, `~/...` and `~name` are all resolved identically by a shell and by the
+            # expanduser that git_c_effective_dir already applies.
+            word.append(char)
+            i += 1
+            continue
+        if char in (_BARE_WORD_SPECIAL if seen_commit else _TARGET_SPECIAL):
+            return (
+                "the unquoted `{}` is something a shell acts on rather than passes through, so "
+                "the text git receives would not be the text written here; quote it".format(char)
+            )
+        word.append(char)
+        i += 1
+    return None
+
+
+def _unsupported_reason(token):
+    """Why this commit argument cannot be carried, in words the agent can act on."""
+    name = token.split("=", 1)[0]
+    if name in ("--amend",):
+        return ("`--amend` replaces the commit's parent, and the reviewed snapshot is bound to "
+                "the parent it was reviewed against; amending is not carried")
+    if name in ("-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message",
+                "--squash", "--fixup", "--template", "-t"):
+        return ("`{}` takes the message from somewhere the gate did not review; pass the "
+                "message with -m".format(name))
+    if name in ("--author", "--date"):
+        return "`{}` overrides commit identity, which the gate does not carry".format(name)
+    if name in ("--no-verify", "-n"):
+        return "`{}` skips the repository's own hooks, which the gate runs deliberately".format(name)
+    if name in ("-S", "--gpg-sign", "--no-gpg-sign"):
+        return ("`{}` changes signing, which follows the repository's configuration "
+                "instead".format(name))
+    if name == "--":
+        return "a pathspec commits content outside the reviewed staged set"
+    if not token.startswith("-"):
+        # Either a pathspec, or a word belonging to another command that shared this call --
+        # a newline-separated second command arrives here, its words looking like arguments.
+        return (
+            "the gate carries only a single `git commit`, and `{}` is not part of one: as a "
+            "pathspec it would commit content outside the reviewed staged set, and as part of "
+            "another command it would be dropped without running. Send it as its own tool "
+            "call.".format(token)
+        )
+    return "`{}` is not one of the options the gate carries".format(token)
+
+
+def parse_commit_request(command):
+    """`(request, None)` for a call the gate can perform itself, else `(None, reason)`.
+
+    Once the gate commits and DENIES the tool call, whatever else was in that call is dropped
+    without running -- `git commit -m x && git push` would publish and silently skip the push.
+    So the call has to be exactly one `git commit`, and the message and flags have to be
+    recovered from it exactly. Anything unrecognised is refused rather than half-performed,
+    which is the safe direction. See docs/plans/claude_commit_transaction_design.md."""
+    # Continuations are removed FIRST, once, so everything downstream reasons about the command
+    # a shell would actually run. Classifying a tilde-prefix on the raw text let
+    # `git -C ~+\<newline>/sub` through: the prefix read as `+\` rather than the `+` a shell sees
+    # once it has joined the lines.
+    command = _join_continuations(command or "")
+    expansion = _expansion_outside_quotes(command)
+    if expansion:
+        return None, expansion
+    try:
+        tokens = _posix_tokens(command)
+    except ValueError:
+        return None, "the command could not be parsed, so the gate cannot know what it would do"
+    if not tokens:
+        return None, "there is no command to run"
+
+    for index, token in enumerate(tokens):
+        if token in _SHELL_OPS or _REDIR_RE.match(token):
+            rest = " ".join(tokens[index + 1:]).strip()
+            return None, (
+                "the gate performs the commit itself and then declines this tool call, so "
+                "anything else in the call would be dropped without running{}. Send only the "
+                "`git commit`, and run the rest as its own tool call.".format(
+                    " (here: {})".format(rest) if rest else ""
+                )
+            )
+    if tokens[0] != "git":
+        return None, (
+            "the gate carries only a single plain `git commit`, and this call starts with "
+            "something else, which would be dropped without running"
+        )
+
+    index = 1
+    while index < len(tokens) and tokens[index].startswith("-"):
+        name = tokens[index].split("=", 1)[0]
+        if name != "-C":  # honored already by the gate; every other global changes the target
+            return None, (
+                "`{}` before the subcommand changes which repository or configuration the "
+                "commit uses, which the gate does not carry".format(name)
+            )
+        index += 2 if "=" not in tokens[index] else 1
+    if index >= len(tokens) or tokens[index] != "commit":
+        return None, "this is not a `git commit`"
+
+    messages = []
+    options = []
+    args = tokens[index + 1:]
+    position = 0
+    while position < len(args):
+        token = args[position]
+        if token in _CARRIED_FLAGS:
+            if token not in options:
+                options.append(token)
+            position += 1
+            continue
+        if token in ("-m", "--message"):
+            if position + 1 >= len(args):
+                return None, "`{}` was given without a message".format(token)
+            # Expansion was ruled out over the whole command above, so the lexed token IS the
+            # text git would receive, quoting and escapes already resolved.
+            messages.append(args[position + 1])
+            position += 2
+            continue
+        if token.startswith("--message="):
+            messages.append(token.split("=", 1)[1])
+            position += 1
+            continue
+        return None, _unsupported_reason(token)
+
+    if not messages:
+        return None, (
+            "no commit message was given, so git would open an editor, which cannot work from "
+            "inside the gate; pass the message with -m"
+        )
+    # Git joins repeated -m as separate paragraphs.
+    return {"message": "\n\n".join(messages), "options": options}, None
+
+
 def commits_beyond_index(command):
     """True if this `git commit` would include content BEYOND the staged index --
     i.e. `-a`/`--all` (also stage modified tracked files) or an explicit pathspec

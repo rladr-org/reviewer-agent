@@ -62,6 +62,7 @@ from reviewer_git import (  # noqa: F401
     git_head,
     is_git_commit,
     is_git_repo,
+    parse_commit_request,
     staged_files,
     staged_patch,
     staged_patch_max,

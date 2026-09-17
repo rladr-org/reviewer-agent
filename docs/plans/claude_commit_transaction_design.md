@@ -156,7 +156,7 @@ tree. Revisit it only with evidence that a real hook caused loss.
     | how the message appears in the command | verdict |
     | --- | --- |
     | single-quoted | accepted; the shell expands nothing inside single quotes |
-    | double-quoted | accepted unless it contains an unescaped `$` or backtick, the only expansions a shell performs inside double quotes |
+    | double-quoted | accepted unless it contains a `$` or backtick, escaped or not (see below) |
     | a bare word | accepted only if it contains no shell-special character at all: `$`, backtick, `*`, `?`, `[`, `]`, `{`, `}`, `~`, `!`, `\`, or a quote |
     | anything else, including unterminated or mixed adjacent quoting | refused, not guessed at |
 
@@ -164,6 +164,13 @@ tree. Revisit it only with evidence that a real hook caused loss.
     anything else a shell might do, because the bare-word case refuses every special character
     rather than enumerating what each one means. A message that needs an unusual character can
     always be quoted, which is how messages are written anyway.
+
+    **A backslash-escaped `$` or backtick inside double quotes is refused too**, which an earlier
+    draft of this document said would be accepted. A shell resolves `"\$"` to a literal dollar
+    sign; Python's lexer keeps the backslash. The gate cannot reproduce that value faithfully, so
+    committing either reading would commit text that differs from what was written. Single quotes
+    are refused by neither and are the remedy the refusal names. `\"` and `\\` are unaffected:
+    a shell and the lexer agree on both.
   - **Optional flags are pinned to the Codex set**, `--signoff` and `--quiet`.
   - **Everything else is refused with a precise explanation**, and is not silently turned into
     an ordinary commit: other message sources (`-F`/`--file`, `-C`/`--reuse-message`,
@@ -205,7 +212,14 @@ mechanism:
 | `git commit -m x && git push`, and a stage chained before a commit | refused before review; nothing published and nothing silently dropped |
 | a pipe, a redirection, or a second command after the commit | refused, naming what was found |
 | `git commit -m "$MSG"` and `-m "$(...)"` | refused; the literal token is never committed as the message |
-| `git commit -m 'cost $5'` and a backslash-escaped `\$` in double quotes | accepted, and the message keeps its literal characters |
+| `git commit -m 'cost $5'` | accepted, and the message keeps its literal characters |
+| a backslash-escaped `\$` inside double quotes | refused, because a shell and the lexer resolve it differently |
+| a multiline message, and one containing a quoted `&&` or `;` | accepted as message text, not read as a command boundary |
+| a newline outside quotes, and a backslash line continuation | the first refused as a second command, the second joined into one |
+| `git -C ~/repo commit` versus `git -C /tmp/repo* commit` | the first accepted, since expanduser matches the shell; the second refused, since a glob would target a different repository from the one audited |
+| `git -C ~+ commit`, and the other directory-stack tilde forms | refused, because a shell expands them and expanduser does not |
+| `git -C ~root/repo commit`, and a tilde inside a path such as `/tmp/a~b` | accepted, because a shell and expanduser resolve both identically |
+| a message whose text is the word `git` | accepted; extra commands are found structurally, not by counting words |
 | a single-quoted message containing `*`, `~`, `{a,b}` or `!` | accepted; single quotes expand nothing |
 | a bare-word message containing any of those | refused by the bare-word rule, without enumerating what each one expands to |
 | an unterminated quote in the message | refused, not guessed at |

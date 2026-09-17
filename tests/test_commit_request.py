@@ -77,8 +77,16 @@ def test_a_quoted_message_keeps_its_literal_characters():
     assert _request("git commit -m 'cost $5'")["message"] == "cost $5"
     assert _request("git commit -m 'fix *.txt and ~/home and {a,b}'")["message"] == \
         "fix *.txt and ~/home and {a,b}"
-    assert _request('git commit -m "cost \\$5"')["message"] == "cost $5"
     assert _request('git commit -m "two words"')["message"] == "two words"
+
+
+def test_an_escape_the_lexer_and_a_shell_resolve_differently_is_refused():
+    # A shell turns `\$` inside double quotes into a literal `$`; Python's lexer keeps the
+    # backslash. Committing either one would be committing text that differs from what was
+    # written, so the gate refuses and points at single quotes, which both agree on.
+    error = _refusal('git commit -m "cost \\$5"')
+    assert "backslash" in error.lower()
+    assert _request("git commit -m 'cost \\$5'")["message"] == "cost \\$5"
 
 
 def test_a_message_the_shell_would_have_expanded_is_refused():
@@ -152,3 +160,181 @@ def test_the_amend_refusal_says_why_rather_than_just_no():
     error = _refusal("git commit --amend -m x")
     assert "amend" in error.lower()
     assert "parent" in error.lower()
+
+
+# --------------------------------------------------------------------------
+# Quoting belongs to the lexer, not to hand-rolled boundary logic
+# --------------------------------------------------------------------------
+def test_a_multiline_message_survives():
+    # A newline INSIDE a quoted message is message text, not a command boundary. Deciding that
+    # from line numbers rather than from quote state split the message in half.
+    assert _request('git commit -m "first\nsecond"')["message"] == "first\nsecond"
+
+
+def test_escaped_double_quotes_inside_a_message_survive():
+    assert _request('git commit -m "say \\"hi\\""')["message"] == 'say "hi"'
+
+
+def test_a_message_may_be_the_word_git():
+    # Counting `git` tokens to find extra commands refused a perfectly ordinary message.
+    assert _request("git commit -m git")["message"] == "git"
+    assert _request("git commit -m 'git push is not run here'")["message"] == \
+        "git push is not run here"
+
+
+def test_operators_quoted_inside_a_message_are_message_text():
+    assert _request("git commit -m 'a && b'")["message"] == "a && b"
+    assert _request("git commit -m 'a; b'")["message"] == "a; b"
+    assert _request("git commit -m 'pipe | redirect > file'")["message"] == \
+        "pipe | redirect > file"
+
+
+def test_a_second_command_after_a_newline_is_still_refused():
+    # The structural guarantee must survive dropping the newline sentinel: the trailing command's
+    # words become arguments the parser does not recognise, and unrecognised means refused.
+    error = _refusal("git commit -m x\ngit push")
+    assert "only" in error.lower() or "one" in error.lower()
+
+
+# --------------------------------------------------------------------------
+# A newline outside quotes separates commands; inside quotes it is message text
+# --------------------------------------------------------------------------
+def test_a_newline_outside_quotes_separates_commands():
+    # `git commit -m x` on one line and `-m y` on the next are two commands. Folding the
+    # newline into whitespace made the second line's words look like more arguments, so the
+    # gate would have committed a message, or a flag, belonging to a command it never ran.
+    for command in (
+        "git commit -m x\n-m y",
+        "git commit -m x\n--quiet",
+        "git commit -m x\ngit push",
+    ):
+        error = _refusal(command)
+        assert "one" in error.lower() or "only" in error.lower() or "line" in error.lower(), \
+            command
+
+
+def test_a_trailing_newline_is_not_a_second_command():
+    assert _request("git commit -m hello\n")["message"] == "hello"
+    assert _request("git commit -m hello\n  \n")["message"] == "hello"
+
+
+def test_a_backslash_line_continuation_is_one_command():
+    assert _request("git commit \\\n  -m hello")["message"] == "hello"
+
+
+# --------------------------------------------------------------------------
+# The message rule is for the message, not for the repository target
+# --------------------------------------------------------------------------
+def test_a_tilde_in_the_repository_target_is_still_accepted():
+    # `git_c_effective_dir` resolves `~` with expanduser, so refusing it here would drop
+    # support the gate already has. The strict unquoted-character rule exists to protect the
+    # MESSAGE, and applies from the subcommand onwards.
+    assert _request("git -C ~/repo commit -m hello")["message"] == "hello"
+    assert _request("git -C /abs/path commit -m hello")["message"] == "hello"
+
+
+def test_a_dynamic_repository_target_is_still_refused():
+    # Fail-closed handling of a target the gate cannot resolve must not be weakened by the
+    # narrower message rule.
+    _refusal('git -C "$REPO" commit -m hello')
+    _refusal("git -C `pwd`/repo commit -m hello")
+
+
+def test_a_shell_expanded_repository_target_is_refused():
+    # The shell would expand the glob to a real path while `git_c_effective_dir` resolves the
+    # literal text, so the gate would audit one repository while git commits in another. Only
+    # `~` is exempt, because expanduser resolves it the same way the shell does.
+    for command in (
+        "git -C /tmp/repo* commit -m x",
+        "git -C /tmp/repo{a,b} commit -m x",
+        "git -C /tmp/repo? commit -m x",
+        "git -C /tmp/[abc]repo commit -m x",
+    ):
+        error = _refusal(command)
+        assert "quote" in error.lower() or "shell" in error.lower(), command
+
+
+def test_a_literal_repository_target_is_still_accepted():
+    assert _request("git -C /tmp/repo commit -m hello")["message"] == "hello"
+    assert _request("git -C ~/repo commit -m hello")["message"] == "hello"
+    # A quoted target reaches git as literal text; resolving it is git_c_effective_dir's job,
+    # not the parser's, so the parser accepts it rather than second-guessing that resolution.
+    assert _request("git -C '/tmp/my repo' commit -m hello")["message"] == "hello"
+
+
+def test_only_the_tilde_forms_expanduser_actually_matches_are_exempt():
+    # `expanduser` leaves `~+`, `~-` and `~1` untouched, while a shell expands them from the
+    # directory stack. The gate would resolve the literal text and audit a different repository
+    # from the one git targets, which is the same fail-open as an unresolvable `-C`.
+    for command in (
+        "git -C ~+ commit -m x",
+        "git -C ~- commit -m x",
+        "git -C ~1 commit -m x",
+        "git -C ~+/sub commit -m x",
+    ):
+        _refusal(command)
+
+
+def test_the_plain_tilde_forms_remain_accepted():
+    assert _request("git -C ~ commit -m hello")["message"] == "hello"
+    assert _request("git -C ~/repo commit -m hello")["message"] == "hello"
+    assert _request("git -C ~/repo/deeper commit -m hello")["message"] == "hello"
+
+
+def test_named_user_and_embedded_tildes_in_a_target_are_accepted():
+    # A shell expands a tilde-prefix only at the START of a word, and resolves `~name` through
+    # the user database exactly as expanduser does. Only the directory-stack prefixes diverge,
+    # so those are the only ones worth refusing.
+    assert _request("git -C ~root/repo commit -m hello")["message"] == "hello"
+    assert _request("git -C ~nobody commit -m hello")["message"] == "hello"
+    assert _request("git -C /tmp/a~b commit -m hello")["message"] == "hello"
+    assert _request("git -C /tmp/repo~ commit -m hello")["message"] == "hello"
+
+
+def test_only_directory_stack_prefixes_are_refused_in_a_target():
+    for command in (
+        "git -C ~+ commit -m x",
+        "git -C ~- commit -m x",
+        "git -C ~1 commit -m x",
+        "git -C ~+2/sub commit -m x",
+        "git -C ~-3 commit -m x",
+    ):
+        _refusal(command)
+
+
+def test_a_tilde_inside_a_message_is_literal_unless_it_leads():
+    # Not expanded mid-word, so it is ordinary message text.
+    assert _request("git commit -m a~b")["message"] == "a~b"
+    # Leading, it IS expanded, and the committed message would not be the text written.
+    _refusal("git commit -m ~home")
+
+
+def test_a_continuation_cannot_hide_a_directory_stack_prefix():
+    # A shell removes the continuation BEFORE expanding, so `~+\<newline>/sub` is the word
+    # `~+/sub` and expands from the directory stack. Classifying the prefix on the raw text saw
+    # `+\` instead and let it through.
+    _refusal("git -C ~+\\\n/sub commit -m x")
+    _refusal("git -C ~\\\n+ commit -m x")
+
+
+def test_a_continuation_inside_an_ordinary_target_is_still_fine():
+    assert _request("git -C /tmp/re\\\npo commit -m hello")["message"] == "hello"
+
+
+def test_an_apostrophe_inside_double_quotes_does_not_open_a_quote_span():
+    # Inside double quotes an apostrophe is ordinary text, so the continuation after it is
+    # still removed by the shell. Treating it as an opening single quote left the continuation
+    # in place and would have committed a different message from the one asked for.
+    command = 'git commit -m "a\'' + "\\\n" + 'b"'
+    assert _request(command)["message"] == "a'b"
+
+
+def test_an_apostrophe_inside_double_quotes_is_kept_in_the_message():
+    assert _request('git commit -m "it\'s fine"')["message"] == "it's fine"
+
+
+def test_a_continuation_inside_single_quotes_is_literal_text():
+    # Single quotes protect everything, including a backslash-newline: the shell does NOT
+    # remove it there, so it stays part of the message.
+    command = "git commit -m 'a" + "\\\n" + "b'"
+    assert _request(command)["message"] == "a\\\nb"
