@@ -317,6 +317,34 @@ class CommitTransaction:
         environment = dict(_clean_environment(), GIT_INDEX_FILE=str(copy))
         return self.git("write-tree", environment=environment) == self.tree
 
+    def patch(self, limit):
+        """`(text, truncated)` for `git diff --cached` of the CAPTURED index.
+
+        For a reviewer handed a patch string rather than Git access (the claude backend). Read
+        from the private snapshot, not the live index, so it is exactly the content publication
+        will verify -- a stage that lands after capture is not in it. Mirrors
+        reviewer_git.staged_patch's contract: `truncated` means the caller must refuse a verdict
+        formed on a partial patch, exactly as a reviewer that never saw the diff is refused."""
+        try:
+            result = subprocess.run(
+                # --no-ext-diff/--no-textconv: a repository's diff.external or a textconv filter
+                # could otherwise hand the reviewer a FORGED patch while the real captured tree is
+                # committed, so the reviewer would approve content it never saw.
+                ["git", "-C", self.root, "diff", "--cached", "--no-color",
+                 "--no-ext-diff", "--no-textconv"],
+                env=self.environment, capture_output=True, text=True, errors="replace", timeout=60,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            # A launch failure or a timeout is the caller's handled empty-patch path (fail-closed),
+            # not an exception that escapes the hook -- the same contract staged_patch keeps.
+            return "", False
+        if result.returncode:
+            return "", False
+        text = result.stdout
+        if len(text.encode("utf-8", "replace")) <= limit:
+            return text, False
+        return text[:limit], True
+
     # -- candidate --------------------------------------------------------------------------
     def candidate(self, message, options, cancel_event=None):
         """Commit into the private state and return `(sha, git output)`. Nothing public moves.

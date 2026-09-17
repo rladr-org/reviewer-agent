@@ -303,14 +303,23 @@ def run_commit_hook(repo, state, extra=None):
     return process, (json.loads(process.stdout) if process.stdout.strip() else {})
 
 
-def test_an_approving_claude_review_lets_the_commit_through(home, tmp_path):
+def test_an_approving_claude_review_commits_it_and_denies_the_call(home, tmp_path):
+    # The gate performs the reviewed commit itself and DENIES the tool call, so the agent's own
+    # `git commit` never runs a second time. The denial names the published commit id.
     state = tmp_path / "rh"
     repo = make_repo(tmp_path)
     rl.set_active(repo)
+    before = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                            capture_output=True, text=True).stdout.strip()
 
     _process, output = run_commit_hook(repo, state, {"FAKE_CLAUDE_RESULT": "APPROVED"})
 
-    assert (output.get("hookSpecificOutput") or {}).get("permissionDecision") == "allow"
+    hso = output.get("hookSpecificOutput") or {}
+    assert hso.get("permissionDecision") == "deny"
+    head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head != before  # a real commit landed
+    assert head[:12] in hso.get("permissionDecisionReason", "")  # the denial names it
 
 
 def test_a_rejecting_claude_review_blocks_it(home, tmp_path):
@@ -350,7 +359,12 @@ def test_the_session_is_reused_on_the_second_attempt(home, tmp_path):
     rl.set_active(repo)
     argv_dump = tmp_path / "argv.jsonl"
 
-    for _ in range(2):
+    for attempt in range(2):
+        if attempt == 1:
+            # The first approval COMMITS and consumes the staging, so a second commit reviews a
+            # fresh change -- which is exactly when the reviewer session must be resumed.
+            (Path(repo) / "f.txt").write_text("three\n", encoding="utf-8")
+            subprocess.run(["git", "-C", repo, "add", "f.txt"], check=True)
         run_commit_hook(repo, state, {
             "FAKE_CLAUDE_RESULT": "APPROVED",
             "FAKE_CLAUDE_ARGV_FILE": str(argv_dump),
@@ -413,7 +427,12 @@ def test_the_project_brief_is_appended_on_the_first_turn_only(home, tmp_path):
     rl.set_active(repo)
     argv_dump = tmp_path / "argv.jsonl"
 
-    for _ in range(2):
+    for attempt in range(2):
+        if attempt == 1:
+            # The first approval COMMITS and consumes the staging, so the second turn reviews a
+            # fresh change on a RESUMED session, where the brief must not be re-sent.
+            (Path(repo) / "f.txt").write_text("three\n", encoding="utf-8")
+            subprocess.run(["git", "-C", repo, "add", "f.txt"], check=True)
         run_commit_hook(repo, state, {
             "FAKE_CLAUDE_RESULT": "APPROVED",
             "FAKE_CLAUDE_ARGV_FILE": str(argv_dump),

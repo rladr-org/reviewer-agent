@@ -546,3 +546,71 @@ def test_blocked_signals_defers_delivery_rather_than_dropping_it():
         assert delivered == [signal.SIGTERM], "the signal was dropped instead of deferred"
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+# --------------------------------------------------------------------------
+# The captured patch handed to a patch-only reviewer (the claude backend)
+# --------------------------------------------------------------------------
+def test_patch_returns_the_captured_staged_diff(tmp_path):
+    root = _repo(tmp_path)
+    _stage(root, "f.py", "x = 1\n")
+    with txn.CommitTransaction(root) as transaction:
+        text, truncated = transaction.patch(1_000_000)
+    assert not truncated
+    assert "f.py" in text
+    assert "x = 1" in text
+
+
+def test_patch_is_the_captured_snapshot_not_the_live_index(tmp_path):
+    # The point of handing over the CAPTURED diff: a stage that lands after capture is not in it,
+    # so the reviewer cannot approve content that publication will then refuse.
+    root = _repo(tmp_path)
+    _stage(root, "f.py", "x = 1\n")
+    with txn.CommitTransaction(root) as transaction:
+        _stage(root, "late.py", "late = 1\n")  # the live index moves after capture
+        text, _ = transaction.patch(1_000_000)
+    assert "f.py" in text
+    assert "late.py" not in text
+
+
+def test_patch_reports_truncation_past_the_limit(tmp_path):
+    # `truncated` is load-bearing: the caller must refuse a verdict formed on a partial patch.
+    root = _repo(tmp_path)
+    _stage(root, "big.py", "v = 1\n" * 1000)
+    with txn.CommitTransaction(root) as transaction:
+        text, truncated = transaction.patch(200)
+    assert truncated
+    assert len(text.encode("utf-8", "replace")) <= 200
+
+
+def test_patch_fails_closed_when_the_diff_cannot_run(tmp_path, monkeypatch):
+    # A diff that times out or a git that will not launch must become the handled empty-patch
+    # (fail-closed) result, not an exception escaping the hook -- exactly as staged_patch does.
+    root = _repo(tmp_path)
+    _stage(root, "f.py", "x = 1\n")
+    with txn.CommitTransaction(root) as transaction:
+        def timeout(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="git diff", timeout=60)
+        monkeypatch.setattr(txn.subprocess, "run", timeout)
+        assert transaction.patch(1_000_000) == ("", False)
+
+        def missing(*a, **k):
+            raise OSError("git not found")
+        monkeypatch.setattr(txn.subprocess, "run", missing)
+        assert transaction.patch(1_000_000) == ("", False)
+
+
+def test_patch_ignores_a_repository_external_diff_and_textconv(tmp_path):
+    # A repo's diff.external / textconv must not be able to show the reviewer a FORGED patch while
+    # the real captured tree is what gets committed -- that would approve code the reviewer never
+    # saw. --no-ext-diff --no-textconv defeats it.
+    root = _repo(tmp_path)
+    forger = root / "forge.sh"
+    forger.write_text("#!/bin/sh\necho 'FORGED-the-reviewer-must-not-see-this'\n")
+    forger.chmod(0o755)
+    _git(root, "config", "diff.external", str(forger))
+    _stage(root, "f.py", "real_change = 1\n")
+    with txn.CommitTransaction(root) as transaction:
+        text, _ = transaction.patch(1_000_000)
+    assert "FORGED" not in text
+    assert "real_change = 1" in text

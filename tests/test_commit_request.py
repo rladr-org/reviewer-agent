@@ -254,6 +254,14 @@ def test_a_shell_expanded_repository_target_is_refused():
         assert "quote" in error.lower() or "shell" in error.lower(), command
 
 
+def test_the_dash_c_equals_form_is_refused():
+    # git itself rejects `-C=path` (it wants `-C <path>`), and git_c_effective_dir ignores the
+    # `=` form and resolves to the session cwd -- so accepting it would let the gate commit in a
+    # different directory from the one the command names.
+    error = _refusal("git -C=/tmp/other commit -m hello")
+    assert "-C" in error
+
+
 def test_a_literal_repository_target_is_still_accepted():
     assert _request("git -C /tmp/repo commit -m hello")["message"] == "hello"
     assert _request("git -C ~/repo commit -m hello")["message"] == "hello"

@@ -472,7 +472,15 @@ def parse_commit_request(command):
                 "`{}` before the subcommand changes which repository or configuration the "
                 "commit uses, which the gate does not carry".format(name)
             )
-        index += 2 if "=" not in tokens[index] else 1
+        if "=" in tokens[index]:
+            # git wants `-C <path>` and rejects `-C=path`; git_c_effective_dir also ignores the
+            # `=` form and falls back to the session cwd, so accepting it would let the gate
+            # commit in a different directory from the one the command names.
+            return None, (
+                "`-C` takes its path as a separate argument (`-C <path>`); the `-C=path` form is "
+                "not valid git, and the gate will not guess which repository it means"
+            )
+        index += 2
     if index >= len(tokens) or tokens[index] != "commit":
         return None, "this is not a `git commit`"
 
