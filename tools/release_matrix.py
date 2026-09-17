@@ -297,15 +297,29 @@ def claude_scenario(workspace, backend, stub):
         reason[:300] or process.stderr[-300:],
     )
 
-    # 2. its correction is approved
+    # 2. its correction is approved. Under the gate-owns-the-commit contract the gate performs the
+    #    commit ITSELF and DENIES the tool call, so the agent's own command never runs a second time.
+    #    Assert the deny, that the reason says it committed, and -- the point of the design -- that
+    #    the reviewed set actually landed: HEAD advanced and the committed file is the FIXED content.
+    parent = _git(repo_a, "rev-parse", "HEAD").stdout.strip()
     stage(repo_a, "helper.py", FIXED)
     process, output = run_hook(
         "commit_hook.py", commit_payload(repo_a, "matrix-session"), verdict_env("APPROVED"),
     )
+    reason = (output.get("hookSpecificOutput") or {}).get("permissionDecisionReason", "")
+    head = _git(repo_a, "rev-parse", "HEAD").stdout.strip()
+    committed = _git(repo_a, "show", "HEAD:helper.py", check=False).stdout
+    subject = _git(repo_a, "log", "-1", "--format=%s").stdout.strip()
     result.check(
-        "corrected change is approved",
-        decision(output) == "allow",
-        json.dumps(output)[:300] or process.stderr[-300:],
+        "corrected change is approved, committed by the gate, and the call is denied",
+        decision(output) == "deny"
+        and "committed" in reason.lower()
+        and head != parent
+        and committed == FIXED
+        and subject == "matrix",
+        "decision={} head_moved={} subject={!r} reason={}".format(
+            decision(output), head != parent, subject, reason[:160],
+        ),
     )
 
     # 3. the same host session in a second repository gets its own reviewer
