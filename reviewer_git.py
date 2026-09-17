@@ -24,6 +24,8 @@ import re
 import shlex
 import subprocess
 
+from reviewer_base import terminate_process_tree
+
 # Recognize a real `git ... commit` invocation. Biased toward precision: a false
 # positive would hijack a non-commit, while a false negative merely lets a commit
 # through unreviewed. Matches `git commit`, `git -C <path> commit`, and the same
@@ -619,7 +621,11 @@ def staged_patch(path, limit=None):
     limit = staged_patch_max() if limit is None else limit
     try:
         result = subprocess.run(
-            ["git", "-C", str(path), "diff", "--cached", "--no-color"],
+            # --no-ext-diff/--no-textconv: a repo's diff.external or textconv filter could
+            # otherwise show the reviewer a forged patch while the real staged tree is what
+            # gets committed, so the reviewer would approve content it never saw.
+            ["git", "-C", str(path), "diff", "--cached", "--no-color",
+             "--no-ext-diff", "--no-textconv"],
             capture_output=True, text=True, errors="replace", timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -630,3 +636,84 @@ def staged_patch(path, limit=None):
     if len(text.encode("utf-8", "replace")) <= limit:
         return text, False
     return text[:limit], True
+
+
+def staged_tree(path):
+    """`git write-tree` of the current index -- the digest of the staged set (content, file
+    modes, names and structure), or "" if it cannot be computed.
+
+    This is the whole integrity check for the gate: the hash recorded when the reviewer saw the
+    staged set is compared to this at commit time; equal means what is about to be committed is
+    byte-for-byte what was reviewed. Git already maintains it (the index cache-tree), so this is
+    cheap. write-tree persists tree objects as a side effect, which is harmless and idempotent."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "write-tree"],
+            capture_output=True, text=True, errors="replace", timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def run_commit(path, message, options, timeout=300):
+    """Run a normal `git commit` -- the repository's own hooks run, exactly as configured.
+
+    Returns `(status, commit, detail)`:
+
+      * `("committed", sha, note)` -- a commit was published. `sha` is its id, or "" when git
+        exited cleanly but the id could not be read back. `note` is "" for a clean commit, or a
+        warning when git did not exit cleanly afterwards (a failing or hung hook).
+      * `("failed", None, error)` -- NOTHING was published; retrying is safe.
+      * `("unknown", None, detail)` -- publication could NOT be determined (HEAD was unreadable
+        after an unclean exit). The caller must NOT report "nothing committed" nor retry blindly.
+
+    A timeout or a nonzero exit is ambiguous -- git may already have moved the ref before a later
+    step failed -- so publication is decided by whether HEAD advanced, and by whether git exited
+    cleanly when HEAD cannot be read, never assumed to be "nothing committed" (which would prompt a
+    duplicate). The message is passed as an argument vector, never through a shell; the gate does
+    not second-guess what the repo's hooks do to the content."""
+    parent = git_head(path)
+    argv = ["git", "-C", str(path), "commit"] + list(options) + ["-m", message]
+    try:
+        # A new session so a timeout can tear down git AND any hook it spawned. A plain subprocess
+        # timeout kills only git, leaving a slow pre-commit hook running to mutate or re-stage
+        # files after the gate has already reported failure and the caller may be retrying.
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, errors="replace", start_new_session=True,
+        )
+    except OSError as error:
+        return "failed", None, str(error)  # git never launched -> nothing was published
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        returncode, detail = proc.returncode, ((out or "") + (err or "")).strip()
+        clean_exit = returncode == 0
+    except subprocess.TimeoutExpired:
+        terminate_process_tree(proc.pid)  # git and every hook process it spawned
+        try:
+            proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        detail, clean_exit = "git commit timed out and was terminated", False
+    head = git_head(path)
+    if head is None:
+        # HEAD could not be read. A clean exit means a commit WAS made but cannot be named; an
+        # unclean exit leaves publication genuinely undetermined -- never collapse either to
+        # "nothing committed".
+        if clean_exit:
+            return "committed", "", "the commit was created but its id could not be read"
+        return "unknown", None, (
+            "{}; the repository state could not be read afterwards, so whether a commit was "
+            "published is unknown".format(detail or "git commit did not complete"))
+    published = head != parent
+    if published and clean_exit:
+        return "committed", head, ""
+    if published:
+        # The ref moved even though git commit did not exit cleanly -- the commit IS public and
+        # must never be reported as "nothing committed" (that would prompt a duplicate).
+        return "committed", head, (
+            "git commit did not exit cleanly after publishing {}: {}".format(head, detail or "no detail"))
+    if clean_exit:
+        return "failed", None, detail or "git commit reported success but created no commit"
+    return "failed", None, detail or "git commit failed"

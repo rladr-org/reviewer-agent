@@ -153,10 +153,8 @@ useful way to judge a change is to see whether it still passes. The current invo
 `workspace-write` sandbox with the working tree and a temporary directory writable and `.git`
 read-only; that configuration is intended to prevent the reviewer from creating the commit. It returns
 one of two answers: `APPROVED` (optionally with non-blocking `SUGGESTIONS:`), or `REJECTED:`
-followed by a numbered list of required fixes with `file:line` evidence. For the codex and pi
-backends the commit runs only after an approval response, and the developer agent's own approved
-command performs it. Briefing and stop supervision (which answers any rerouted
-`AskUserQuestion`) request read-only operation.
+followed by a numbered list of required fixes with `file:line` evidence. Briefing and stop
+supervision (which answers any rerouted `AskUserQuestion`) request read-only operation.
 
 **Pi** — intended as a static review. The current invocation omits shell, write, and edit tools;
 it supplies the staged patch through a constrained Git wrapper and allows repository reads for
@@ -169,9 +167,6 @@ through the installed `claude` CLI, so usage, quota, billing and account consequ
 by the provider and the user's plan. The current child-process configuration requests `Read`,
 `Grep` and `Glob`, denies other tools by name, and uses `--safe-mode`; treat those as configuration
 details to verify, not as a guarantee that a provider or later CLI version will behave identically.
-On this backend the gate performs the approved commit **itself**, from the reviewed snapshot,
-under a locked reference transaction, and then declines the `git commit` tool call (naming the
-published commit id) so the agent's own command never runs a second time.
 
 Either way the reviewer is a **different session from the developer agent**. One reviewer
 conversation is kept per project, developer session and role, briefed with that project's
@@ -179,6 +174,14 @@ conversation is kept per project, developer session and role, briefed with that 
 developer agent fixes its findings and tries again, it remembers what it asked for. By default it
 rotates after three completed non-retry audits; every attempt after a rejection is a retry until approval and
 does not advance that counter. `/reviewer-agent:reviewerSession rotate` retires it immediately.
+
+On an approval, whichever backend reviewed, the gate **performs the commit itself and then
+declines the `git commit` tool call** (naming the commit id), so the agent's own command never
+runs a second time. Before committing it confirms the staged set still matches what was reviewed —
+git's own `write-tree` digest, covering content, modes and structure — and if it changed since the
+review, refuses and asks for a fresh one rather than committing something unreviewed. The commit
+itself is an ordinary `git commit`: the repository's own hooks run exactly as configured, and the
+gate does not second-guess what they do.
 
 **Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
 no supported configuration, no supported platform, and no supported host version — "supported"
@@ -269,11 +272,12 @@ The packages are installed independently:
 
 The Claude Code plugin provides three per-repository capabilities:
 
-1. **Commit gate.** A `git commit` is intercepted and the staged set is audited first. On the
-   claude backend the gate performs the approved commit itself under a locked reference
-   transaction and declines the tool call (naming the commit id), so the agent's own command
-   does not run again; on the codex and pi backends approval permits the agent's own command.
-   Rejection or an operational review failure blocks it. The gate is fail-closed.
+1. **Commit gate.** A `git commit` is intercepted and the staged set is audited first. On
+   approval the gate confirms the staged set still matches what was reviewed (git's `write-tree`
+   digest), performs the commit itself with the repository's own hooks, and declines the tool call
+   (naming the commit id), so the agent's own command does not run again. A staged set that
+   changed since the review, a rejection, or an operational review failure blocks it. The gate is
+   fail-closed.
 2. **`AskUserQuestion` reroute (with `stopContinue`).** When `stopContinue` is active, an
    `AskUserQuestion` is denied at `PreToolUse` and the agent re-asks it as a prose message; the
    stop supervisor then answers it from established operator context or defers it to the operator.

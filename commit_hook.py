@@ -8,11 +8,11 @@ hand the staged changes to the Codex reviewer session for an AUDIT under the
 the test suite, but `.git` is read-only so Codex cannot commit. Codex emits a
 verdict only -- APPROVED or a REJECTED fix list.
 
-  APPROVED        -> on the CLAUDE backend the gate performs the reviewed commit ITSELF
-                     (see reviewer_commit_txn) and DENIES the tool call, naming the published
-                     commit id, so the agent's own command never runs a second time; on the
-                     codex/pi backends it ALLOWS Claude's own `git commit` to proceed
-                     (unsandboxed).
+  APPROVED        -> the gate confirms the staged set still matches what was reviewed (git's
+                     write-tree digest), performs the commit ITSELF with the repository's own
+                     hooks, and DENIES the tool call naming the commit id -- so the agent's own
+                     command never runs a second time. A staged set that changed since the review
+                     is refused for a fresh review instead.
   REJECTED        -> DENY and relay the full required-fixes list.
   Codex failure   -> DENY (fail CLOSED) and surface a visible ERROR.
 
@@ -27,7 +27,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_audit as ra  # noqa: E402
-import reviewer_commit_txn as rct  # noqa: E402
 import reviewer_lib as rl  # noqa: E402
 
 # Resolved per invocation from rl.commit_review_timeout() (default 900s, raised from 600s
@@ -57,21 +56,6 @@ def _effort_label(backend):
 
 
 def main():
-    """Own the commit transaction's lifetime: whatever `_run` opens, clean up on every exit
-    path. The private snapshot lives inside .git and must not outlive the attempt."""
-    state = {}
-    try:
-        return _run(state)
-    finally:
-        transaction = state.get("txn")
-        if transaction is not None:
-            try:
-                transaction.__exit__(None, None, None)
-            except Exception:
-                pass
-
-
-def _run(state):
     raw = sys.stdin.read()
     data = json.loads(raw) if raw.strip() else {}
 
@@ -179,9 +163,6 @@ def _run(state):
     transcript_path = rl.resolve_transcript_path(data)
 
     backend = rl.reviewer_backend(cwd)
-    # Set only on the claude path, where the gate performs the commit itself; read back at the
-    # approval branch. Other backends still let the agent's own command run, so it stays None.
-    commit_request = None
 
     def _record_cancellation():
         # Called from the signal handler in reviewer_backends._run, after the reviewer tree has
@@ -195,43 +176,40 @@ def _run(state):
             backend=backend,
         )
 
+    # The gate performs the reviewed commit ITSELF and then DENIES the tool call, so the call must
+    # be exactly one plain `git commit`: anything else in it would be dropped unrun. Refuse an
+    # unsupported shape BEFORE spending a review; the message and carried flags are recovered here.
+    # See docs/plans/claude_commit_transaction_design.md.
+    commit_request, parse_reason = rl.parse_commit_request(command)
+    if commit_request is None:
+        rl.log("[commit] key={} unsupported commit shape ({}) cmd={!r} -> denied".format(
+            key, rl.short(parse_reason, 200), rl.short(command, 120)))
+        print(json.dumps(rl.deny_output(
+            "reviewerAgent performs the reviewed commit itself, so it accepts exactly one plain "
+            "`git commit` and nothing else: {}.".format(parse_reason),
+            "[reviewerAgent] git commit blocked before review: {}".format(
+                rl.short(parse_reason, 200)),
+        )))
+        return 0
+    # The digest of the staged set the reviewer is about to judge: git's own write-tree hash,
+    # covering content, modes, names and structure. Recorded now and compared just before the
+    # commit -- equal means what gets committed is exactly what was reviewed. An empty result
+    # means git could not be run, which fails closed.
+    reviewed_tree = rl.staged_tree(cwd)
+    if not reviewed_tree:
+        rl.log("[commit] key={} could not digest the staged set -> denied".format(key))
+        print(json.dumps(rl.deny_output(
+            "reviewerAgent could not read the staged set to review and commit it, so the commit "
+            "is blocked (fail-closed). Retry, or check the repository.",
+            "[reviewerAgent] git commit blocked: could not read the staged set.",
+        )))
+        return 0
+
     if backend == "claude":
-        # The gate performs the reviewed commit itself and then DENIES the tool call, so the call
-        # must be exactly one plain `git commit`: anything else in it would be dropped unrun.
-        # Refuse an unsupported shape BEFORE spending a review. The message and the carried flags
-        # are recovered here. See docs/plans/claude_commit_transaction_design.md.
-        commit_request, parse_reason = rl.parse_commit_request(command)
-        if commit_request is None:
-            rl.log("[commit] key={} unsupported commit shape ({}) cmd={!r} -> denied".format(
-                key, rl.short(parse_reason, 200), rl.short(command, 120)))
-            print(json.dumps(rl.deny_output(
-                "reviewerAgent performs the reviewed commit itself, so it accepts exactly one "
-                "plain `git commit` and nothing else: {}.".format(parse_reason),
-                "[reviewerAgent] git commit blocked before review: {}".format(
-                    rl.short(parse_reason, 200)),
-            )))
-            return 0
-        # Capture the private snapshot BEFORE the review, so the reviewer judges exactly what
-        # publication will verify, and so a too-old Git, a non-files ref format or an in-progress
-        # merge/rebase fails closed here without spending a review.
-        try:
-            transaction = rct.CommitTransaction(cwd)
-            transaction.__enter__()
-        except rct.CommitError as exc:
-            rl.log("[commit] key={} capture refused ({}) -> denied".format(
-                key, rl.short(str(exc), 200)))
-            print(json.dumps(rl.deny_output(
-                "reviewerAgent could not capture the staged snapshot to review and commit it: "
-                "{}. Nothing was committed and your changes are intact.".format(exc),
-                "[reviewerAgent] git commit blocked: {}".format(rl.short(str(exc), 200)),
-            )))
-            return 0
-        state["txn"] = transaction
         # Claude backend: a Claude Code child with read and search tools and nothing else. It
         # has no shell and no git tool -- and its Read sees the WORKING TREE, not the index --
-        # so the staged patch cannot be fetched by the reviewer and is handed to it instead,
-        # generated from the CAPTURED index so it is exactly the tree publication will verify.
-        patch, truncated = transaction.patch(rl.staged_patch_max())
+        # so the staged patch cannot be fetched by the reviewer and is handed to it instead.
+        patch, truncated = rl.staged_patch(cwd)
         if truncated or not patch.strip():
             # Fail CLOSED on a patch that could not be handed over IN FULL. A reviewer that saw
             # half a diff must never be able to approve the whole of it, which is the same rule
@@ -560,92 +538,81 @@ def _run(state):
             "output). Commit blocked. Retry, or /reviewerSession rotate."
         )
         print(json.dumps(rl.deny_output(reason, msg)))
-    elif approved and commit_request is not None and state.get("txn") is not None:
-        # The gate performs the reviewed commit ITSELF and DENIES the tool call (claude path).
-        # The candidate is built against the captured snapshot -- the repository's real hooks run
-        # -- and is rejected if a hook moved the tree or parents; publication then moves the ref
-        # under the index and reference locks, re-verifying the live state, so nothing but the
-        # reviewed tree can land. The denial NAMES the published commit id first, so an agent that
-        # reads "denied" does not commit a second time.
-        transaction = state["txn"]
+    elif approved:
+        # The gate performs the reviewed commit ITSELF and DENIES the tool call, so the agent's
+        # own command never runs a second time. First confirm what is about to be committed is
+        # still exactly what was reviewed -- git's own write-tree hash, covering content, modes and
+        # structure -- compared immediately before the commit, so the only residual window is the
+        # one a plain `git commit` already has. Then commit as the repository is configured: its
+        # own hooks run, and the gate does not second-guess what they do to the content. The denial
+        # NAMES the commit id first, so an agent that reads "denied" does not commit again.
+        current_tree = rl.staged_tree(cwd)
         suffix = "\n--- the reviewer said ---\n{}".format(rl.short(out, 1500))
         if not automatically_rotated:
             suffix += "\n(full review: {})".format(review_path)
-        try:
-            candidate_sha, _ = transaction.candidate(
-                commit_request["message"], commit_request["options"]
-            )
-            published = transaction.publish(candidate_sha, commit_request["message"])
-        except rct.CommitPublished as exc:
-            # The commit IS public; only a step after it failed. Never report "nothing committed",
-            # which is exactly what would prompt an agent to commit a duplicate.
-            rl.log("[commit] key={} published_with_trailing_error commit={} err={!r}".format(
-                key, exc.commit, rl.short(str(exc), 200)))
+        if not current_tree or current_tree != reviewed_tree:
+            rl.log("[commit] key={} staged set changed since review ({} -> {}) -> re-review".format(
+                key, reviewed_tree[:12], (current_tree or "unreadable")[:12]))
             print(json.dumps(rl.deny_output(
-                "reviewerAgent APPROVED and the commit was PUBLISHED as {}. Do NOT commit again "
-                "-- a retry would duplicate it. A step after publication failed: {}".format(
-                    exc.commit, exc),
-                "[reviewerAgent] APPROVED and committed as {} (do not re-commit).".format(
-                    exc.commit),
-            )))
-        except rct.CommitCancelled as exc:
-            rl.log("[commit] key={} commit cancelled before publication: {!r}".format(
-                key, rl.short(str(exc), 200)))
-            print(json.dumps(rl.deny_output(
-                "reviewerAgent APPROVED, but the commit was CANCELLED before publication, so "
-                "nothing was committed and your staged changes are intact. Retry the commit.",
-                "[reviewerAgent] commit cancelled before publication; nothing committed.",
-            )))
-        except rct.CommitError as exc:
-            rl.log("[commit] key={} commit blocked after approval: {!r}".format(
-                key, rl.short(str(exc), 300)))
-            print(json.dumps(rl.deny_output(
-                "reviewerAgent APPROVED the review, but the commit was not published: {}. "
-                "Nothing was committed and your staged and unstaged changes are intact. Retry "
-                "the commit.".format(exc),
-                "[reviewerAgent] commit blocked after approval: {}".format(
-                    rl.short(str(exc), 200)),
+                "reviewerAgent APPROVED, but the staged set changed after the review, so the "
+                "approval no longer describes what would be committed. Nothing was committed and "
+                "your staged and unstaged changes are intact. Re-run the commit to review the "
+                "current staged set.",
+                "[reviewerAgent] commit blocked: the staged set changed after approval; re-run "
+                "to re-review.",
             )))
         else:
-            rl.log("[commit] key={} published reviewed commit={}".format(key, published))
-            note = ""
-            if automatically_rotated:
-                note = (" reviewer session auto-rotated after the configured number of completed "
-                        "non-retry audits; the next audit starts fresh.")
-            print(json.dumps(rl.deny_output(
-                "reviewerAgent APPROVED and PUBLISHED the reviewed commit as {}. Do NOT run the "
-                "commit again -- the gate performed it, so a retry would duplicate it or find "
-                "nothing staged. This tool call is declined only because the commit is already "
-                "done.{}".format(published, suffix),
-                "[reviewerAgent] APPROVED -> committed as {} (do not re-commit).{}".format(
-                    published, note),
-            )))
-    elif approved:
-        # Non-claude backends: the reviewer approved and the agent's own `git commit` proceeds.
-        # An APPROVED verdict may now carry a SUGGESTIONS block, so the old short(out) at 600
-        # characters would cut the list mid-item -- and with no ellipsis the operator could
-        # not tell. Bounded at 1500 with the on-disk path named, which is exactly what
-        # required_fixes_message() does for the operator-facing half of a rejection.
-        #
-        # NOT unbounded, even though suggestions are the point of the change: `systemMessage`
-        # is the ONLY channel on the allow path (there is no permissionDecisionReason here),
-        # so an off-contract reviewer emitting an essay would dump all of it on every approved
-        # commit. save_review() has already written the complete text for any completed audit,
-        # so naming the file loses nothing.
-        msg = (
-            "[reviewerAgent] git commit -> the reviewer APPROVED the staged changes. Letting "
-            "the commit proceed. Commit ONLY the already-staged set -- do not stage "
-            "more files or amend the diff after this approval.\n"
-            "--- the reviewer said ---\n{}".format(rl.short(out, 1500))
-        )
-        if not automatically_rotated:
-            msg += "\n(full review: {})".format(review_path)
-        if automatically_rotated:
-            msg += (
-                "\n[reviewerAgent] reviewer session automatically rotated after the "
-                "configured number of completed non-retry audits; the next audit starts fresh."
+            status, published, commit_detail = rl.run_commit(
+                cwd, commit_request["message"], commit_request["options"]
             )
-        print(json.dumps(rl.allow_output(msg)))
+            if status == "failed":
+                rl.log("[commit] key={} git commit failed after approval: {!r}".format(
+                    key, rl.short(commit_detail, 300)))
+                print(json.dumps(rl.deny_output(
+                    "reviewerAgent APPROVED the review, but `git commit` did not create a commit: "
+                    "{}. No commit was published. The repository's own hooks may have modified or "
+                    "re-staged files before failing, so check `git status` before retrying rather "
+                    "than assuming your staged set is unchanged.".format(commit_detail),
+                    "[reviewerAgent] commit failed after approval: {}".format(
+                        rl.short(commit_detail, 200)),
+                )))
+            elif status == "unknown":
+                # Publication could not be determined. Reporting "nothing committed" here would
+                # invite a duplicate, so the agent is told to check rather than blindly retry.
+                rl.log("[commit] key={} commit publication UNKNOWN after approval: {!r}".format(
+                    key, rl.short(commit_detail, 300)))
+                print(json.dumps(rl.deny_output(
+                    "reviewerAgent APPROVED, but whether the commit was published could NOT be "
+                    "determined: {}. Do NOT retry blindly -- a commit may already exist. Check "
+                    "`git log` and `git status` first, and only re-commit if nothing landed."
+                    .format(commit_detail),
+                    "[reviewerAgent] commit status UNKNOWN after approval: {}. Check git log/status "
+                    "before retrying.".format(rl.short(commit_detail, 200)),
+                )))
+            else:  # "committed"
+                # A non-empty detail here is a warning (a hook failed or hung, or the id could not
+                # be read AFTER the commit was published) -- surfaced to the operator, not just
+                # logged, so a failing hook is not hidden behind a plain success line.
+                named = published or "a new commit (its id could not be read)"
+                warning = " WARNING: {}.".format(commit_detail) if commit_detail else ""
+                rl.log("[commit] key={} committed reviewed set as {} detail={!r}".format(
+                    key, published or "?", rl.short(commit_detail, 200)))
+                # The operator line names the saved review so any non-blocking SUGGESTIONS stay
+                # reachable: the full reviewer text rides in permissionDecisionReason (the agent
+                # can act on it), and this leaves the operator a pointer to it.
+                if automatically_rotated:
+                    note = (" reviewer session auto-rotated after the configured number of "
+                            "completed non-retry audits; the next audit starts fresh.")
+                else:
+                    note = " Any reviewer SUGGESTIONS are in the full review: {}".format(review_path)
+                print(json.dumps(rl.deny_output(
+                    "reviewerAgent APPROVED and committed the reviewed staged set as {}.{} Do NOT "
+                    "run the commit again -- the gate performed it, so a retry would either "
+                    "duplicate it or find nothing staged. This tool call is declined only because "
+                    "the commit is already done.{}".format(named, warning, suffix),
+                    "[reviewerAgent] APPROVED -> committed as {} (do not re-commit).{}{}".format(
+                        published or "(id unavailable)", warning, note),
+                )))
     else:
         reason, msg = rl.required_fixes_message(out, review_path)
         print(json.dumps(rl.deny_output(reason, msg)))

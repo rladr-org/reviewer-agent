@@ -9,6 +9,40 @@ bound to the content that actually gets committed. The required outcomes for thi
 This document settles the one thing that handoff leaves open: which Claude host mechanism is used,
 and why the agent's own command cannot run afterwards.
 
+## Implemented approach (supersedes the transaction design below)
+
+The shipped gate does **not** use the private-index reference transaction described in the rest of
+this document. On the operator's decision it uses the simpler mechanism that follows, for **all
+three backends** (codex, pi, claude):
+
+1. The tool call must be exactly one plain `git commit` — the parse gate below still applies, so
+   the message and carried flags are recovered and a compound call is refused before any review.
+2. When the reviewer sees the staged set, the gate records git's own `write-tree` hash of the
+   index — the complete digest of the staged set (content, modes, names, structure).
+3. On approval the gate re-reads `write-tree`. If it differs from the recorded hash the staged set
+   changed since the review, so the approval no longer describes what would be committed: the gate
+   refuses and asks for a fresh review, leaving the index and working tree untouched.
+4. If it matches, the gate runs an **ordinary `git commit`** — the repository's own hooks run
+   exactly as configured — and then **denies** the tool call, naming the commit id.
+
+Two deliberate consequences, both chosen by the operator:
+
+- **The repository's hooks are honored, not second-guessed.** If a `pre-commit` hook rewrites or
+  re-stages content, that rewritten content is what gets committed. The gate reviews the agent's
+  staged set and decides approve/deny; it does not sit in judgment of the repo's own hooks. (The
+  transaction below did the opposite — it *rejected* a commit whose hook changed the tree — which
+  is why it was not adopted.)
+- **Atomicity is "no worse than a normal `git commit`."** The compare and the commit are not one
+  locked operation, so a *concurrent* writer staging into the same index during the commit's own
+  `pre-commit` window could still slip in — exactly the race any `git commit` already has, and one
+  that does not arise for a single agent or for agents in separate worktrees. The transaction
+  below closed that window with a private index copy and a locked reference transaction; that
+  ~1200 lines of machinery was removed as not worth its cost given this threat model.
+
+The rest of this document records the earlier transaction design for history. Its **parse gate**
+(the message/flag rules, the one-`git commit` requirement, the `-C` handling) is still implemented
+and still authoritative; its **capture / candidate / locked-publish** mechanism is not.
+
 ## The rule
 
 > The reviewer hook performs the commit when it approves. Nothing else commits. Before publishing,

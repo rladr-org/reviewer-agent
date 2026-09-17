@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: MPL-2.0
-"""The Claude gate performs the reviewed commit itself and DENIES the tool call.
+"""The gate performs the reviewed commit itself and DENIES the tool call.
 
-Integration described in docs/plans/claude_commit_transaction_design.md: on approval the hook
-commits the CAPTURED snapshot through the reference transaction and denies the original Bash
-call, naming the published commit id; and a call that is not exactly one plain `git commit` is
-refused BEFORE any review is spent.
+Integration for the "digest-compare + normal commit" design (see the "Implemented approach" note
+in docs/plans/claude_commit_transaction_design.md): on approval the hook confirms the staged
+set's `git write-tree` digest still matches what was reviewed, runs an ordinary `git commit` (the
+repo's own hooks run), and denies the original Bash call naming the commit id; a staged set that
+changed since the review is refused for a fresh review; and a call that is not exactly one plain
+`git commit` is refused BEFORE any review is spent.
 
-These run the real transaction against real temporary repositories -- only the model verdict is
-stubbed, never the Git operation whose integrity is the point. The claude backend is used
-because the hook itself hands the reviewer a patch, so binding it to the captured snapshot is
-entirely in-process and deterministic.
+These run real `git` against real temporary repositories -- only the model verdict is stubbed,
+never the Git operation whose integrity is the point. The claude backend is used because the hook
+hands the reviewer a patch, so the whole flow is in-process and deterministic.
 """
 import io
 import json
@@ -77,11 +78,6 @@ def _approve(monkeypatch, verdict="APPROVED -- looks good\n", record=None):
     monkeypatch.setattr(commit_hook.rl, "run_claude_review", fake_claude)
 
 
-def _no_temp_dirs_left(repo):
-    gitdir = Path(_git(repo, "rev-parse", "--absolute-git-dir"))
-    return not list(gitdir.glob("reviewer-commit-*"))
-
-
 def test_claude_approval_commits_the_reviewed_tree_and_denies_the_call(
         tmp_path, monkeypatch, capsys):
     repo = _claude_repo(tmp_path)
@@ -105,7 +101,6 @@ def test_claude_approval_commits_the_reviewed_tree_and_denies_the_call(
     assert "f.py" in _git(repo, "show", "--stat", "HEAD")
     # Nothing is left staged, so an identical retry is inert (meets the nothing-staged refusal).
     assert _git(repo, "diff", "--cached", "--name-only") == ""
-    assert _no_temp_dirs_left(repo)
 
 
 def test_claude_approval_carries_repeated_messages_and_signoff(tmp_path, monkeypatch, capsys):
@@ -160,6 +155,91 @@ def test_claude_refuses_a_shell_expanded_message_before_any_review(tmp_path, mon
     assert called == []  # the literal token is never committed as the message
 
 
+def test_a_content_changing_pre_commit_hook_is_honored_not_rejected(
+        tmp_path, monkeypatch, capsys):
+    # Design decision: the gate does not second-guess the repo's own hooks. If a pre-commit hook
+    # rewrites content, that rewritten content is what gets committed -- the gate commits as the
+    # repository is configured, hooks and all, rather than rejecting the hook's change.
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    hooks = Path(_git(repo, "rev-parse", "--absolute-git-dir")) / "hooks"
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nprintf 'x = 1  # formatted by hook\\n' > f.py\ngit add f.py\n")
+    hook.chmod(0o755)
+    _approve(monkeypatch)
+    before = _git(repo, "rev-parse", "HEAD")
+
+    out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed, denied call
+    head = _git(repo, "rev-parse", "HEAD")
+    assert head != before  # a commit landed -- the hook's change was NOT rejected
+    assert "formatted by hook" in _git(repo, "show", "HEAD:f.py")  # the hook's version committed
+
+
+def test_a_failing_pre_commit_hook_is_not_reported_as_changes_intact(
+        tmp_path, monkeypatch, capsys):
+    # A pre-commit hook may edit/re-stage files and THEN fail; the failure message must not falsely
+    # promise the staged set is unchanged -- it should point the user at the real state instead.
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    hooks = Path(_git(repo, "rev-parse", "--absolute-git-dir")) / "hooks"
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nprintf 'edited = 1\\n' >> f.py\ngit add f.py\nexit 1\n")
+    hook.chmod(0o755)
+    _approve(monkeypatch)
+    before = _git(repo, "rev-parse", "HEAD")
+
+    out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert _git(repo, "rev-parse", "HEAD") == before  # nothing published
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"].lower()
+    assert "intact" not in reason  # must not falsely claim the staged set is untouched
+    assert "git status" in reason  # points the user at the real state
+
+
+def test_a_hook_failure_after_publication_is_surfaced_not_hidden(
+        tmp_path, monkeypatch, capsys):
+    # When the commit IS published but git did not exit cleanly (a hook failed or hung afterwards),
+    # run_commit returns ("committed", sha, warning). The gate must SURFACE that warning to the
+    # operator and agent, not merely log it behind a plain success line.
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    _approve(monkeypatch)
+    warning = "git commit did not exit cleanly after publishing deadbeef123"
+    monkeypatch.setattr(
+        commit_hook.rl, "run_commit",
+        lambda *a, **k: ("committed", "deadbeef123", warning))
+
+    out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    combined = (out["hookSpecificOutput"]["permissionDecisionReason"]
+                + out.get("systemMessage", ""))
+    assert "deadbeef123" in combined  # names the published commit
+    assert warning in combined  # AND surfaces the hook-failure warning, not just logs it
+
+
+def test_an_undetermined_publication_does_not_invite_a_blind_retry(
+        tmp_path, monkeypatch, capsys):
+    # When publication cannot be determined, the gate must not say "nothing committed" -- it tells
+    # the agent to check rather than blindly retry (which could duplicate a commit).
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    _approve(monkeypatch)
+    monkeypatch.setattr(
+        commit_hook.rl, "run_commit",
+        lambda *a, **k: ("unknown", None, "the repository state could not be read"))
+
+    out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
+
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"].lower()
+    assert "unknown" in reason or "could not be determined" in reason
+    assert "git log" in reason  # points the agent at checking rather than retrying blindly
+
+
 def test_a_stage_during_review_blocks_publication_and_preserves_the_work(
         tmp_path, monkeypatch, capsys):
     repo = _claude_repo(tmp_path)
@@ -167,8 +247,8 @@ def test_a_stage_during_review_blocks_publication_and_preserves_the_work(
 
     def fake_claude(cwd, claude_session_id, prompt, timeout=None, effort=None,
                     on_cancel=None, **kwargs):
-        # Someone stages new content AFTER the snapshot was captured and the patch was handed
-        # over. The reviewer therefore approves the captured tree, not this.
+        # Someone stages new content AFTER the reviewer's digest was recorded. At commit time the
+        # write-tree no longer matches, so the approval no longer describes what would be committed.
         (Path(cwd) / "late.py").write_text("late = 1\n")
         subprocess.run(["git", "-C", cwd, "add", "late.py"], check=True)
         rl.write_claude_session_if_absent(cwd, claude_session_id, "REAL-CLAUDE")
@@ -178,9 +258,8 @@ def test_a_stage_during_review_blocks_publication_and_preserves_the_work(
 
     out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
 
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert _git(repo, "rev-parse", "HEAD") == before  # nothing published
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # digest mismatch -> re-review
+    assert _git(repo, "rev-parse", "HEAD") == before  # nothing committed
     staged = _git(repo, "diff", "--cached", "--name-only").split()
     assert "late.py" in staged  # the newer work was neither reset nor stashed
     assert "f.py" in staged
-    assert _no_temp_dirs_left(repo)

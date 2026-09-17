@@ -85,17 +85,18 @@ FACADE_NAMES = (
     "reviewer_session_audit_limit_detail", "reviewer_session_completed_audits", "reviewer_state_home",
     "risk_accepted", "rotate_session", "run_claude_review",
     "run_codex_brief", "run_codex_resume_by_id", "run_codex_streaming_audit",
-    "run_pi_review", "save_review", "scratch_key",
-    "serialize_questions", "session_attribution", "session_brief",
-    "session_brief_file", "session_id_file", "session_manifest_block",
-    "session_touched_files", "session_touched_roots", "sessionstart_context_output",
-    "set_active", "set_backend_effort", "set_backend_model",
-    "set_codex_effort", "set_codex_model", "set_commit_carryover",
-    "set_commit_retry_pending", "set_commit_timeout", "set_first_output_timeout",
-    "set_idle_timeout", "set_project_backend", "set_reviewer_session_audit_limit",
-    "set_stopcontinue_active", "set_stopcontinue_watchdog_active", "set_watchdog_disarm",
-    "set_watchdog_teardown_ready", "short", "staged_blob_shas",
-    "staged_change_block", "staged_files", "staged_patch_max",
+    "run_commit", "run_pi_review", "save_review",
+    "scratch_key", "serialize_questions", "session_attribution",
+    "session_brief", "session_brief_file", "session_id_file",
+    "session_manifest_block", "session_touched_files", "session_touched_roots",
+    "sessionstart_context_output", "set_active", "set_backend_effort",
+    "set_backend_model", "set_codex_effort", "set_codex_model",
+    "set_commit_carryover", "set_commit_retry_pending", "set_commit_timeout",
+    "set_first_output_timeout", "set_idle_timeout", "set_project_backend",
+    "set_reviewer_session_audit_limit", "set_stopcontinue_active", "set_stopcontinue_watchdog_active",
+    "set_watchdog_disarm", "set_watchdog_teardown_ready", "short",
+    "staged_blob_shas", "staged_change_block", "staged_files",
+    "staged_patch", "staged_patch_max", "staged_tree",
     "stop_block_output", "stop_ok_position", "stopcontinue_delay_secs",
     "stopcontinue_effort", "stopcontinue_effort_config", "stopcontinue_flag_file",
     "stopcontinue_watchdog_flag_file", "subprocess", "sweep_orphan_scratch_dirs",
@@ -118,4 +119,4 @@ def test_the_facade_exports_every_name_its_callers_reach_for():
 def test_the_contract_list_is_not_silently_emptied():
     # A regeneration bug that produced a short or empty tuple would make the test above
     # vacuous while still passing. tests/test_facade_generator.py pins the generator itself.
-    assert len(FACADE_NAMES) >= 263
+    assert len(FACADE_NAMES) >= 266
