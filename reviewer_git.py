@@ -656,6 +656,20 @@ def staged_tree(path):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def commit_confirmation_command(published):
+    """The harmless shell command the gate substitutes (via the PreToolUse `updatedInput` field)
+    for the agent's `git commit` AFTER the gate has performed the commit ITSELF. A single `echo`
+    that names the published id: the intercepted tool call then succeeds visibly -- a normal, green
+    result -- instead of being denied and rendered as an error, and because it never runs git it
+    cannot re-commit and does not re-enter the gate. `shlex.quote` keeps the argument safe even
+    though the id is always a plain hash (or a fixed fallback)."""
+    sha = published or "(id unavailable)"
+    return "echo " + shlex.quote(
+        "[reviewerAgent] committed the reviewed staged set as {} -- the gate performed the "
+        "commit; nothing further to do.".format(sha)
+    )
+
+
 def run_commit(path, message, options, timeout=300):
     """Run a normal `git commit` -- the repository's own hooks run, exactly as configured.
 

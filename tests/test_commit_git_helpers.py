@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MPL-2.0
-"""Unit tests for the (C) commit helpers in reviewer_git: staged_tree and run_commit.
+"""Unit tests for the (C) commit helpers in reviewer_git: staged_tree, run_commit, and
+commit_confirmation_command.
 
 These are the primitives the gate relies on for the "digest-compare + normal commit" design:
 `staged_tree` is git's own write-tree digest of the staged set, and `run_commit` runs an ordinary
@@ -177,3 +178,18 @@ def test_run_commit_terminates_a_timed_out_hook_process_tree(tmp_path):
     assert _git(repo, "rev-parse", "HEAD") == parent  # HEAD did not move
     time.sleep(4)  # past the hook's 3s sleep
     assert not done.exists()  # the hook tree was killed before its late side effect could land
+
+
+def test_commit_confirmation_command_is_a_harmless_echo_naming_the_id():
+    # The gate substitutes this (via updatedInput) for the agent's `git commit` after committing
+    # itself: it must NEVER run git (or it could re-commit / re-enter the gate) and must name the id.
+    cmd = rg.commit_confirmation_command("abc123def456abc123def456abc123def456abcd")
+    assert cmd.startswith("echo ")
+    assert "git" not in cmd
+    assert "abc123def456abc123def456abc123def456abcd" in cmd
+
+
+def test_commit_confirmation_command_handles_a_missing_id():
+    cmd = rg.commit_confirmation_command("")
+    assert cmd.startswith("echo ")
+    assert "id unavailable" in cmd

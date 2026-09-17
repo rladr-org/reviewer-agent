@@ -23,7 +23,12 @@ three backends** (codex, pi, claude):
    changed since the review, so the approval no longer describes what would be committed: the gate
    refuses and asks for a fresh review, leaving the index and working tree untouched.
 4. If it matches, the gate runs an **ordinary `git commit`** — the repository's own hooks run
-   exactly as configured — and then **denies** the tool call, naming the commit id.
+   exactly as configured — then rewrites the agent's `git commit` to a harmless confirmation
+   `echo` and **allows** the call (PreToolUse `updatedInput`), naming the commit id. The tool call
+   therefore succeeds visibly (a normal, green result) rather than being denied and rendered as an
+   error; and because the substituted command is an echo it never runs git, so nothing commits a
+   second time and it does not re-enter the gate. A failed or undetermined commit, and a staged set
+   that changed since the review, are still **denied** (they are real errors).
 
 Two deliberate consequences, both chosen by the operator:
 
@@ -39,9 +44,15 @@ Two deliberate consequences, both chosen by the operator:
   below closed that window with a private index copy and a locked reference transaction; that
   ~1200 lines of machinery was removed as not worth its cost given this threat model.
 
-The rest of this document records the earlier transaction design for history. Its **parse gate**
-(the message/flag rules, the one-`git commit` requirement, the `-C` handling) is still implemented
-and still authoritative; its **capture / candidate / locked-publish** mechanism is not.
+The rest of this document records the earlier designs for history. Its **parse gate** (the
+message/flag rules, the one-`git commit` requirement, the `-C` handling) is still implemented and
+still authoritative; its **capture / candidate / locked-publish** transaction is not. Note also
+that "The mechanism: deny, and commit inside the hook" below argued for a *deny* over a rewritten
+input; that reasoning was superseded once PreToolUse `updatedInput` was confirmed on the host. The
+objection there — "rewriting still ends with the host running a shell command against the live
+index later" — does not apply to a harmless `echo` that touches no repository state: the gate has
+already committed, so the substituted command only reports the result, and an approved commit no
+longer shows up to the operator as an error.
 
 ## The rule
 
@@ -216,9 +227,11 @@ tree. Revisit it only with evidence that a real hook caused loss.
 
   Pinning the flag set to Codex's, rather than deciding case by case what seems safe enough, is
   what keeps this from growing into open-ended option support.
-- **The approved path changes shape.** Today approval ends in `allow_output`, letting the agent's
-  own commit proceed, with a message asking it not to stage more. Both exist only because the
-  commit was out of the gate's hands, and both go.
+- **The approved path changes shape.** The pre-gate flow ended in `allow_output`, letting the
+  agent's own commit proceed. The shipped gate instead performs the commit itself and then ALLOWS
+  the call with the `git commit` rewritten to a harmless confirmation echo (see the "Implemented
+  approach" note above) — it uses neither `allow_output` with the agent's own commit, nor the deny
+  that an interim version used.
 - **Adapt rather than copy.** The Codex module imports that package's own backend and cancellation
   helpers; the two packages deliberately share no code, and the Claude side has its own
   primitives.
@@ -228,8 +241,13 @@ tree. Revisit it only with evidence that a real hook caused loss.
 
 ## Test plan
 
-The handoff's table applies in full and is not repeated. These are additional and specific to this
-mechanism:
+**Historical.** The rows below describe the earlier deny/transaction mechanism and are kept for
+history. The shipped "digest-compare, commit, then ALLOW a rewritten confirmation echo" behavior is
+asserted in `tests/test_gate_owns_commit.py`, `tests/test_commit_hook.py`,
+`tests/test_commit_git_helpers.py` and the live `tools/release_matrix.py` scenarios.
+
+The handoff's table applies in full and is not repeated. These were additional and specific to the
+earlier mechanism:
 
 | Case | Required assertion |
 | --- | --- |

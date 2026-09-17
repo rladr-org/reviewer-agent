@@ -303,9 +303,10 @@ def run_commit_hook(repo, state, extra=None):
     return process, (json.loads(process.stdout) if process.stdout.strip() else {})
 
 
-def test_an_approving_claude_review_commits_it_and_denies_the_call(home, tmp_path):
-    # The gate performs the reviewed commit itself and DENIES the tool call, so the agent's own
-    # `git commit` never runs a second time. The denial names the published commit id.
+def test_an_approving_claude_review_commits_it_and_allows_the_call(home, tmp_path):
+    # The gate performs the reviewed commit itself, then ALLOWS the tool call with the agent's
+    # `git commit` rewritten to a harmless echo, so it succeeds and no real commit runs a second
+    # time. The confirmation names the published commit id.
     state = tmp_path / "rh"
     repo = make_repo(tmp_path)
     rl.set_active(repo)
@@ -315,11 +316,13 @@ def test_an_approving_claude_review_commits_it_and_denies_the_call(home, tmp_pat
     _process, output = run_commit_hook(repo, state, {"FAKE_CLAUDE_RESULT": "APPROVED"})
 
     hso = output.get("hookSpecificOutput") or {}
-    assert hso.get("permissionDecision") == "deny"
+    assert hso.get("permissionDecision") == "allow"
+    rewritten = hso.get("updatedInput", {}).get("command", "")
+    assert rewritten.startswith("echo ") and "git commit" not in rewritten
     head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
     assert head != before  # a real commit landed
-    assert head[:12] in hso.get("permissionDecisionReason", "")  # the denial names it
+    assert head[:12] in (rewritten + output.get("systemMessage", ""))  # confirmation names it
 
 
 def test_a_rejecting_claude_review_blocks_it(home, tmp_path):

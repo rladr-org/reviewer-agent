@@ -175,9 +175,10 @@ developer agent fixes its findings and tries again, it remembers what it asked f
 rotates after three completed non-retry audits; every attempt after a rejection is a retry until approval and
 does not advance that counter. `/reviewer-agent:reviewerSession rotate` retires it immediately.
 
-On an approval, whichever backend reviewed, the gate **performs the commit itself and then
-declines the `git commit` tool call** (naming the commit id), so the agent's own command never
-runs a second time. Before committing it confirms the staged set still matches what was reviewed —
+On an approval, whichever backend reviewed, the gate **performs the commit itself, then rewrites
+the agent's `git commit` to a harmless confirmation and lets the call succeed** (naming the commit
+id), so no real commit runs a second time — and, unlike a denial, an approved commit no longer
+shows up as an error. Before committing it confirms the staged set still matches what was reviewed —
 git's own `write-tree` digest, covering content, modes and structure — and if it changed since the
 review, refuses and asks for a fresh one rather than committing something unreviewed. The commit
 itself is an ordinary `git commit`: the repository's own hooks run exactly as configured, and the
@@ -274,10 +275,10 @@ The Claude Code plugin provides three per-repository capabilities:
 
 1. **Commit gate.** A `git commit` is intercepted and the staged set is audited first. On
    approval the gate confirms the staged set still matches what was reviewed (git's `write-tree`
-   digest), performs the commit itself with the repository's own hooks, and declines the tool call
-   (naming the commit id), so the agent's own command does not run again. A staged set that
-   changed since the review, a rejection, or an operational review failure blocks it. The gate is
-   fail-closed.
+   digest), performs the commit itself with the repository's own hooks, then rewrites the agent's
+   `git commit` to a harmless confirmation and lets the call succeed (naming the commit id), so no
+   real commit runs again. A staged set that changed since the review, a rejection, or an
+   operational review failure blocks it (denied). The gate is fail-closed.
 2. **`AskUserQuestion` reroute (with `stopContinue`).** When `stopContinue` is active, an
    `AskUserQuestion` is denied at `PreToolUse` and the agent re-asks it as a prose message; the
    stop supervisor then answers it from established operator context or defers it to the operator.

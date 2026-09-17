@@ -153,7 +153,7 @@ def test_active_commit_rejected_denies_and_relays_issue_list(tmp_path, monkeypat
     assert "fix f.py:1" in out["hookSpecificOutput"]["permissionDecisionReason"]
 
 
-def test_active_commit_approved_commits_it_and_denies_the_call(tmp_path, monkeypatch):
+def test_active_commit_approved_commits_it_and_allows_the_call(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_staged_repo(tmp_path)
@@ -169,13 +169,15 @@ def test_active_commit_approved_commits_it_and_denies_the_call(tmp_path, monkeyp
     )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    # Codex approved -> the gate performs the commit ITSELF and denies the tool call, so the
-    # agent's own git commit never runs a second time.
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # Codex approved -> the gate performs the commit ITSELF, then ALLOWS the call with the agent's
+    # git commit rewritten to a harmless echo, so it succeeds and no real commit runs a second time.
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    rewritten = out["hookSpecificOutput"]["updatedInput"]["command"]
+    assert rewritten.startswith("echo ") and "git commit" not in rewritten
     head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
     assert head, "a real commit landed"  # unborn -> real commit
-    assert head[:12] in out["hookSpecificOutput"]["permissionDecisionReason"]  # denial names it
+    assert head[:12] in (rewritten + out.get("systemMessage", ""))  # confirmation names it
 
 
 def test_a_delivered_review_consumes_the_carryover_and_does_not_re_deliver(tmp_path, monkeypatch):
@@ -276,7 +278,7 @@ def test_audit_runs_with_tmpdir_scoped_to_the_session_scratch_dir(tmp_path, monk
         },
     )
     assert p.returncode == 0, p.stderr
-    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed
+    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed
     expected = scratch_root / rl.scratch_key("sid-tmp")
     assert seen.read_text().strip() == str(expected)   # audit ran under the scoped TMPDIR
     assert expected.is_dir()                            # the hook created the scratch dir
@@ -303,7 +305,7 @@ def test_low_disk_warning_surfaces_on_stderr_without_blocking_the_commit(tmp_pat
         },
     )
     assert p.returncode == 0, p.stderr
-    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed
+    assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed
     assert "low disk" in p.stderr.lower()               # warned, but the commit still proceeded
 
 
@@ -340,9 +342,9 @@ def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
     (Path(repo) / "f.py").write_text("fixed = 1\n", encoding="utf-8")
     subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
     retry = run_hook(payload, dict(env, FAKE_CODEX_VERDICT="APPROVED"))
-    # The gate performs the commit itself now, so an approval denies the tool call (it committed
-    # "fixed = 1"); there is no separate manual commit any more.
-    assert json.loads(retry.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # The gate performs the commit itself now, so an approval ALLOWS the tool call with the command
+    # rewritten (it committed "fixed = 1"); there is no separate manual commit any more.
+    assert json.loads(retry.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
     assert rl.reviewer_session_completed_audits(repo, "claude-rotate", "sid-A") == 1
 
     rl.write_session_id(repo, "claude-rotate", "stop-sid", role=rl.ROLE_STOP)
@@ -352,8 +354,8 @@ def test_auto_rotation_counts_three_completed_non_retries_and_excludes_retries(
         )
         subprocess.run(["git", "-C", repo, "add", "f.py"], check=True)
         approved = run_hook(payload, dict(env, FAKE_CODEX_VERDICT="APPROVED"))
-        # Each qualifying audit is approved and the gate commits it, so the tool call is denied.
-        assert json.loads(approved.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        # Each qualifying audit is approved and the gate commits it, so the tool call is allowed.
+        assert json.loads(approved.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
         if number < 2:
             assert rl.read_session_id(repo, "claude-rotate") == "sid-A"
 
@@ -452,8 +454,8 @@ def test_approved_verdict_is_echoed_in_systemmessage(tmp_path, monkeypatch):
     )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed on approval
-    assert "clean diff, tests green" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed on approval
+    assert "clean diff, tests green" in out["systemMessage"]
 
 
 def test_an_approved_verdict_relays_a_long_suggestions_list_whole(tmp_path, monkeypatch):
@@ -485,8 +487,8 @@ def test_an_approved_verdict_relays_a_long_suggestions_list_whole(tmp_path, monk
     )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed on approval
-    msg = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed on approval
+    msg = out["systemMessage"]
     assert "LAST_SUGGESTION_MARKER" in msg, "the suggestions list was truncated"
     assert "...[truncated]" not in msg
     assert "suggestion number 1 about" in msg
@@ -517,8 +519,8 @@ def test_an_oversized_approved_verdict_is_bounded_but_recoverable(tmp_path, monk
     )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed on approval
-    msg = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed on approval
+    msg = out["systemMessage"]
     assert len(msg) < 2500, "an oversized verdict was relayed unbounded"
     assert "...[truncated]" in msg, "truncation must be visible, not silent"
     assert "full review:" in msg
@@ -607,7 +609,7 @@ def test_active_commit_resumes_preseeded_session_without_rebriefing(tmp_path, mo
     )
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed on approval
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed on approval
     assert rl.read_session_id(repo, "claude-S") == "preexisting-sid"  # no re-brief overwrote it
 
 
@@ -839,8 +841,8 @@ def test_an_audit_record_failure_never_blocks_the_gate(tmp_path, monkeypatch):
             _audit_env(str(home), FAKE_CODEX_VERDICT="APPROVED"),
         )
         assert p.returncode == 0, p.stderr
-        # A record-write failure must not block the gate: it still reviews, commits, and denies.
-        assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        # A record-write failure must not block the gate: it still reviews, commits, and allows.
+        assert json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "allow"
         head = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
         assert head, "the commit still landed despite the record failure"

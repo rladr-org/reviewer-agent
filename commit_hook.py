@@ -10,9 +10,10 @@ verdict only -- APPROVED or a REJECTED fix list.
 
   APPROVED        -> the gate confirms the staged set still matches what was reviewed (git's
                      write-tree digest), performs the commit ITSELF with the repository's own
-                     hooks, and DENIES the tool call naming the commit id -- so the agent's own
-                     command never runs a second time. A staged set that changed since the review
-                     is refused for a fresh review instead.
+                     hooks, then rewrites the agent's `git commit` to a harmless confirmation echo
+                     and ALLOWS the call (PreToolUse `updatedInput`) -- so the tool call succeeds
+                     visibly (green) and never runs a real commit a second time. A staged set that
+                     changed since the review, or a failed/unknown commit, is DENIED instead.
   REJECTED        -> DENY and relay the full required-fixes list.
   Codex failure   -> DENY (fail CLOSED) and surface a visible ERROR.
 
@@ -539,17 +540,15 @@ def main():
         )
         print(json.dumps(rl.deny_output(reason, msg)))
     elif approved:
-        # The gate performs the reviewed commit ITSELF and DENIES the tool call, so the agent's
-        # own command never runs a second time. First confirm what is about to be committed is
-        # still exactly what was reviewed -- git's own write-tree hash, covering content, modes and
-        # structure -- compared immediately before the commit, so the only residual window is the
-        # one a plain `git commit` already has. Then commit as the repository is configured: its
-        # own hooks run, and the gate does not second-guess what they do to the content. The denial
-        # NAMES the commit id first, so an agent that reads "denied" does not commit again.
+        # The gate performs the reviewed commit ITSELF, then rewrites the agent's `git commit` to a
+        # harmless confirmation echo and ALLOWS the call (PreToolUse updatedInput), so it succeeds
+        # visibly (green) and never runs a real commit a second time. First confirm what is about to
+        # be committed is still exactly what was reviewed -- git's own write-tree hash, covering
+        # content, modes and structure -- compared immediately before the commit, so the only
+        # residual window is the one a plain `git commit` already has. Then commit as the repository
+        # is configured: its own hooks run, and the gate does not second-guess what they do. A
+        # failed/unknown commit, or a staged set that drifted since the review, still DENIES.
         current_tree = rl.staged_tree(cwd)
-        suffix = "\n--- the reviewer said ---\n{}".format(rl.short(out, 1500))
-        if not automatically_rotated:
-            suffix += "\n(full review: {})".format(review_path)
         if not current_tree or current_tree != reviewed_tree:
             rl.log("[commit] key={} staged set changed since review ({} -> {}) -> re-review".format(
                 key, reviewed_tree[:12], (current_tree or "unreadable")[:12]))
@@ -593,25 +592,29 @@ def main():
                 # A non-empty detail here is a warning (a hook failed or hung, or the id could not
                 # be read AFTER the commit was published) -- surfaced to the operator, not just
                 # logged, so a failing hook is not hidden behind a plain success line.
-                named = published or "a new commit (its id could not be read)"
                 warning = " WARNING: {}.".format(commit_detail) if commit_detail else ""
                 rl.log("[commit] key={} committed reviewed set as {} detail={!r}".format(
                     key, published or "?", rl.short(commit_detail, 200)))
-                # The operator line names the saved review so any non-blocking SUGGESTIONS stay
-                # reachable: the full reviewer text rides in permissionDecisionReason (the agent
-                # can act on it), and this leaves the operator a pointer to it.
-                if automatically_rotated:
-                    note = (" reviewer session auto-rotated after the configured number of "
-                            "completed non-retry audits; the next audit starts fresh.")
-                else:
-                    note = " Any reviewer SUGGESTIONS are in the full review: {}".format(review_path)
-                print(json.dumps(rl.deny_output(
-                    "reviewerAgent APPROVED and committed the reviewed staged set as {}.{} Do NOT "
-                    "run the commit again -- the gate performed it, so a retry would either "
-                    "duplicate it or find nothing staged. This tool call is declined only because "
-                    "the commit is already done.{}".format(named, warning, suffix),
-                    "[reviewerAgent] APPROVED -> committed as {} (do not re-commit).{}{}".format(
-                        published or "(id unavailable)", warning, note),
+                rotate_note = (
+                    " reviewer session auto-rotated after the configured number of completed "
+                    "non-retry audits; the next audit starts fresh." if automatically_rotated else ""
+                )
+                # On the ALLOW path systemMessage is the ONLY channel (there is no
+                # permissionDecisionReason), so it also carries the reviewer's own words -- bounded
+                # at 1500 with a visible truncation marker and a pointer to the saved full review --
+                # so a SUGGESTIONS block rides here intact rather than being lost.
+                verdict = "\n--- the reviewer said ---\n{}".format(rl.short(out, 1500))
+                if not automatically_rotated:
+                    verdict += "\n(full review: {})".format(review_path)
+                # The gate ALREADY performed the commit. Rather than DENY (which the host renders as
+                # an ERROR even though the commit succeeded), ALLOW the call but rewrite the agent's
+                # `git commit` to a harmless confirmation echo via updatedInput: the tool call
+                # succeeds visibly (green), and nothing commits a second time.
+                print(json.dumps(rl.allow_updated_command_output(
+                    rl.commit_confirmation_command(published),
+                    "[reviewerAgent] APPROVED -> committed as {} (the gate performed the "
+                    "commit).{}{}{}".format(
+                        published or "(id unavailable)", warning, rotate_note, verdict),
                 )))
     else:
         reason, msg = rl.required_fixes_message(out, review_path)

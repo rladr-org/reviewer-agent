@@ -1587,6 +1587,21 @@ def allow_output(system_message):
     }
 
 
+def allow_updated_command_output(command, system_message):
+    """ALLOW the intercepted tool call but REPLACE the command the host runs, via the PreToolUse
+    `updatedInput` field. Used on an APPROVED commit the gate has ALREADY performed itself: the
+    agent's `git commit` is rewritten to a harmless confirmation command, so the call SUCCEEDS
+    (a normal, green result, not a denial the host renders as an error) and nothing commits twice."""
+    return {
+        "systemMessage": system_message,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {"command": command},
+        },
+    }
+
+
 def info_output(system_message):
     return {"systemMessage": system_message}
 

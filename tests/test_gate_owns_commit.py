@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MPL-2.0
-"""The gate performs the reviewed commit itself and DENIES the tool call.
+"""The gate performs the reviewed commit itself, then ALLOWS the call with the command rewritten.
 
 Integration for the "digest-compare + normal commit" design (see the "Implemented approach" note
 in docs/plans/claude_commit_transaction_design.md): on approval the hook confirms the staged
 set's `git write-tree` digest still matches what was reviewed, runs an ordinary `git commit` (the
-repo's own hooks run), and denies the original Bash call naming the commit id; a staged set that
-changed since the review is refused for a fresh review; and a call that is not exactly one plain
-`git commit` is refused BEFORE any review is spent.
+repo's own hooks run), then rewrites the agent's Bash `git commit` to a harmless confirmation echo
+and ALLOWS it (PreToolUse `updatedInput`) so the call succeeds without re-committing; a staged set
+that changed since the review, or a failed/unknown commit, is DENIED; and a call that is not
+exactly one plain `git commit` is refused BEFORE any review is spent.
 
 These run real `git` against real temporary repositories -- only the model verdict is stubbed,
 never the Git operation whose integrity is the point. The claude backend is used because the hook
@@ -78,7 +79,7 @@ def _approve(monkeypatch, verdict="APPROVED -- looks good\n", record=None):
     monkeypatch.setattr(commit_hook.rl, "run_claude_review", fake_claude)
 
 
-def test_claude_approval_commits_the_reviewed_tree_and_denies_the_call(
+def test_claude_approval_commits_the_reviewed_tree_and_allows_the_call(
         tmp_path, monkeypatch, capsys):
     repo = _claude_repo(tmp_path)
     _activate(repo, monkeypatch, tmp_path)
@@ -87,15 +88,18 @@ def test_claude_approval_commits_the_reviewed_tree_and_denies_the_call(
 
     out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
 
-    # The tool call is DENIED, so the agent's own commit never runs -- there is no second dispatch.
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # The gate committed itself, then ALLOWS the call with the agent's `git commit` rewritten to a
+    # harmless echo (updatedInput) -- so it succeeds (green) and no real commit runs a second time.
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    rewritten = out["hookSpecificOutput"]["updatedInput"]["command"]
+    assert rewritten.startswith("echo ")  # a harmless confirmation, not a git commit
+    assert "git commit" not in rewritten
     # A real commit landed, on top of the previous HEAD.
     head = _git(repo, "rev-parse", "HEAD")
     assert head != before
     assert _git(repo, "rev-parse", "HEAD^") == before
-    # The denial NAMES the published commit id (so the agent does not commit again).
-    reason = out["hookSpecificOutput"]["permissionDecisionReason"] + out.get("systemMessage", "")
-    assert head[:12] in reason
+    # The confirmation NAMES the published commit id (in the rewritten echo and the systemMessage).
+    assert head[:12] in (rewritten + out.get("systemMessage", ""))
     # The committed message and tree are the reviewed ones.
     assert _git(repo, "log", "-1", "--format=%s") == "feature"
     assert "f.py" in _git(repo, "show", "--stat", "HEAD")
@@ -171,7 +175,7 @@ def test_a_content_changing_pre_commit_hook_is_honored_not_rejected(
 
     out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
 
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"  # gate committed, denied call
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"  # gate committed, allowed call
     head = _git(repo, "rev-parse", "HEAD")
     assert head != before  # a commit landed -- the hook's change was NOT rejected
     assert "formatted by hook" in _git(repo, "show", "HEAD:f.py")  # the hook's version committed
@@ -214,8 +218,9 @@ def test_a_hook_failure_after_publication_is_surfaced_not_hidden(
 
     out = _run(repo, "git commit -m 'feature'", capsys, monkeypatch)
 
-    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
-    combined = (out["hookSpecificOutput"]["permissionDecisionReason"]
+    # A published commit (even with a warning) is a success -> ALLOW with the call rewritten.
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    combined = (out["hookSpecificOutput"]["updatedInput"]["command"]
                 + out.get("systemMessage", ""))
     assert "deadbeef123" in combined  # names the published commit
     assert warning in combined  # AND surfaces the hook-failure warning, not just logs it
