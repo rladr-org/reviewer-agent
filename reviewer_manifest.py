@@ -409,16 +409,30 @@ _TASK_NOTIFICATION_TASK_ID = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
 # launch scan sees only tool_use ids, and only within the current turn). Tracking the task
 # id across the WHOLE transcript is what keeps a multi-hour shell suppressing stopContinue
 # through the later turns that probe and report on it.
-_BG_SHELL_STARTED = re.compile(r"Command running in background with ID:\s*([^\s.,]+)")
+#
+# The capture is the strict harness id grammar `[A-Za-z0-9_-]+` (mirroring _ASYNC_AGENT_STARTED),
+# NOT a loose `[^\s.,]+`. A loose group matches the pattern's OWN source text whenever that text
+# appears in the transcript -- reading this file while debugging the watchdog, a pasted bug report
+# -- minting the phantom id `\s*([^\s`, which never receives a completion notification and so
+# suppresses stopContinue forever: the stop path takes the background-wait early return every tick,
+# the idle countdown never starts, and the recovery cron never tears down. See
+# docs/plans/watchdog_bgwait_phantom_task.md.
+_BG_SHELL_STARTED = re.compile(r"Command running in background with ID:\s*([A-Za-z0-9_-]+)")
 
 
 def _background_shell_task_ids(events):
-    """Harness task ids of every background shell launched anywhere in the transcript."""
+    """Harness task ids of every background shell launched anywhere in the transcript.
+
+    Defense in depth behind the strict `_BG_SHELL_STARTED` charset: any capture that is not a
+    harness id (`[A-Za-z0-9_-]+`) is dropped, so quoted pattern text can never mint a phantom id
+    even if the pattern is later loosened."""
     ids = set()
     for ev in events:
         for text in _tool_result_texts(ev):
             for m in _BG_SHELL_STARTED.finditer(text):
-                ids.add(m.group(1))
+                cap = m.group(1)
+                if re.fullmatch(r"[A-Za-z0-9_-]+", cap):
+                    ids.add(cap)
     return ids
 
 

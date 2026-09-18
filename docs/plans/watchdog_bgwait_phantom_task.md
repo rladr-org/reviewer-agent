@@ -79,11 +79,20 @@ HAS_OUTSTANDING: True
 
 ## Status
 
-Diagnosed, and the fix **verified via monkeypatch** against the live transcript. NOT yet done: the
-change committed in `reviewer_manifest.py`, a TDD regression test added, the manifest suite run, or
-the full live end-to-end teardown observed (fix in place → a couple of ticks → `.teardown_ready`
-written → cron auto-deleted). The detector flip is the confirmed root cause; the downstream
-`_watchdog_on_stop_ok` arming is existing, already-tested code.
+**Implemented and tested.** The regex is tightened and the id-shape validator added in
+`reviewer_manifest.py`; two regression tests in `tests/test_background_wait_crossturn.py` cover
+(a) a transcript quoting the launch-ack pattern no longer phantom-suppressing when the real shell
+has completed, and (b) `_background_shell_task_ids` dropping a non-id capture even if the pattern
+is later loosened. The targeted manifest/background/facade suites pass (196 passed, 1 skipped).
+Committed together with those tests — red-then-green in one commit, because the gate rejects a
+red-only commit whose implementation is absent (it reads the missing code as the test's finding
+going unfixed).
+
+Still NOT observed: the full live end-to-end teardown (fix in place → a couple of idle ticks →
+`.teardown_ready` written → cron auto-deleted), which needs a live session over several intervals.
+The detector flip is the confirmed root cause; the downstream `_watchdog_on_stop_ok` arming is
+existing, already-tested code. (The recovery cron was hand-deleted for the diagnosing session; the
+flags stay on, so a genuine prompt could re-arm it.)
 
 ## TDD
 

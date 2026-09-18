@@ -17,8 +17,10 @@ stopContinue permanently -- exactly when the nudge is most needed. So the wait i
 the staleness window, measured from the last time anything referenced the task.
 """
 import datetime
+import re
 
 import reviewer_lib as rl
+import reviewer_manifest as m
 from test_reviewer_lib import _asst, _bg_bash, _human, _task_notification, _transcript
 
 
@@ -54,6 +56,13 @@ def _bg_shell_ack(tool_use_id, task_id, minutes_ago):
         },
         minutes_ago,
     )
+
+
+def _tool_result_event(text, tool_use_id="toolu_READ"):
+    """A user event carrying a tool_result body -- e.g. a Read of a source file, which is how
+    the launch-ack pattern text (this module's own source) ends up quoted in a transcript."""
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_use_id, "content": text}]}}
 
 
 def test_background_shell_from_an_earlier_turn_is_still_outstanding(tmp_path):
@@ -159,3 +168,43 @@ def test_all_shells_finished_allows_the_stop(tmp_path):
         _at(_asst("No -- everything finished and is committed."), 3),
     )
     assert rl.has_outstanding_background_task(path) is False
+
+
+def test_a_transcript_quoting_the_launch_ack_pattern_does_not_phantom_suppress(tmp_path):
+    # Regression (the watchdog recovery cron never tears down): reading this module's own
+    # source, or pasting a bug report, drops the literal `_BG_SHELL_STARTED` pattern text into
+    # the transcript. A capture group loose enough to match its own pattern source mints a
+    # phantom task id that never receives a completion notification, so
+    # `has_outstanding_background_task` reports work forever, the stop path takes the
+    # background-wait early return every tick, the idle countdown never starts, and the cron
+    # never reaches its self-delete condition. The only real shell here has COMPLETED, so
+    # nothing is actually outstanding.
+    poison = r"Command running in background with ID:\s*([^\s.,]+)"
+    path = _transcript(
+        tmp_path,
+        _at(_human("run the batch"), 40),
+        _at(_bg_bash("toolu_R"), 39),
+        _bg_shell_ack("toolu_R", "brealone", 38),
+        _at(_task_notification("toolu_R", task_id="brealone", status="completed"), 30),
+        _at(_asst("Batch done."), 29),
+        _at(_human("why does the watchdog never tear down?"), 6),
+        _at(_tool_result_event(poison), 5),          # e.g. a Read of this source file
+        _at(_asst("Found it: the capture group matches its own pattern text."), 4),
+    )
+    assert rl.has_outstanding_background_task(path) is False
+
+
+def test_background_shell_ids_drop_non_id_captures_even_if_the_regex_loosens(monkeypatch):
+    # Defense in depth: even if `_BG_SHELL_STARTED` were later loosened to a group that can
+    # match arbitrary text, `_background_shell_task_ids` must drop any capture that is not a
+    # harness id -- so quoted pattern text can never mint a phantom id. Here the regex is
+    # monkeypatched back to the old, self-matching form; the validator must still reject the
+    # phantom while keeping a genuine id.
+    monkeypatch.setattr(
+        m, "_BG_SHELL_STARTED",
+        re.compile(r"Command running in background with ID:\s*([^\s.,]+)"))
+    poison = r"Command running in background with ID:\s*([^\s.,]+)"
+    events = [_tool_result_event(poison), _bg_shell_ack("toolu_R", "brealone", 1)]
+    ids = m._background_shell_task_ids(events)
+    assert "brealone" in ids
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]+", i) for i in ids)
