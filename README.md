@@ -992,8 +992,9 @@ warning is the backstop for the rest.
 
 | Component | Minimum | Why this number |
 |---|---|---|
-| Claude Code | 2.1.238 | The oldest version the 1.2.0-beta.1 release matrix was run against. |
-| Codex CLI | 0.147.0 | The oldest version the 1.2.0-beta.1 release matrix was run against. |
+| Claude Code | 2.1.238 | Exercised Claude host baseline. |
+| Codex CLI as a Claude reviewer backend | 0.147.0 | Exercised reviewer-backend baseline. |
+| Native Codex developer host | 0.154.0 | Exercised Stop, Interrupt, and MCP commit-review behavior. |
 | Node | 22.19 | Required by Pi itself; only needed for the optional Pi backend. |
 | Python | 3.9 | The macOS system interpreter at `/usr/bin/python3`. |
 
@@ -1002,8 +1003,10 @@ undertakes to support, and not the oldest that can work. Older hosts are a cavea
 refusal: a successful `/reviewer-agent:reviewerAgent on` and the Codex installer both detect the host version and print a
 warning below these floors, then continue. Newer versions are equally untested — a host that
 changes underneath this project can break it at any time, and nothing here promises otherwise.
-For the Codex package, that CLI version covers installation, hook trust, and nested reviewer calls;
-the active developer host exercised by the release matrix was the Codex GUI, not the CLI.
+The native Codex installer uses the 0.154.0 baseline; the independent Claude package's Codex
+reviewer backend keeps its 0.147.0 baseline. Native Codex reviewed commits use ordinary Git with
+the repository's configured hooks and signing. See the
+[Codex requirements](plugins/reviewer-agent-codex/README.md#requirements).
 
 Python 3.9 is past upstream end of life and is kept deliberately. macOS ships `/usr/bin/python3`
 at 3.9, and this package is standard-library-only at runtime precisely so it installs against the

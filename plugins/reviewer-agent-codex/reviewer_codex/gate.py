@@ -18,6 +18,50 @@ def _deny(reason, message):
     }
 
 
+def _supported_options(command):
+    """Parse the entire intercepted command; never silently discard shell/Git options."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    words = list(lexer)
+    if not words or words.pop(0) != "git":
+        raise ValueError("use a single git command without environment assignments")
+    while words[:1] == ["-C"] and len(words) >= 2:
+        del words[:2]
+    if not words or words.pop(0) != "commit":
+        raise ValueError("only the global -C option is supported")
+    options = []
+    while words:
+        word = words.pop(0)
+        if word in ("--signoff", "--quiet"):
+            options.append(word)
+        elif word == "--message":
+            if not words:
+                raise ValueError("--message requires a value")
+            words.pop(0)
+        elif word.startswith("--message="):
+            continue
+        elif word.startswith("-") and not word.startswith("--"):
+            cluster = word[1:]
+            if not cluster:
+                raise ValueError("bare '-' is not supported")
+            while cluster:
+                flag, cluster = cluster[0], cluster[1:]
+                if flag in "sq":
+                    options.append({"s": "--signoff", "q": "--quiet"}[flag])
+                elif flag == "m":
+                    if not cluster:
+                        if not words:
+                            raise ValueError("-m requires a value")
+                        words.pop(0)
+                    break
+                else:
+                    raise ValueError("unsupported commit option -" + flag)
+        else:
+            raise ValueError("unsupported commit argument or shell operator: " + word)
+    return options
+
+
 def review_commit(data):
     command = ((data.get("tool_input") or {}).get("command") or "")
     if not is_git_commit(command):
@@ -44,7 +88,16 @@ def review_commit(data):
     if not state.feature_enabled(cwd, "reviewer"):
         return None
     root = state.project_root(cwd)
-    token = state.create_commit_ticket(cwd, state.session_key(data))
+    try:
+        options = _supported_options(command)
+    except ValueError as error:
+        return _deny(
+            "Unsupported commit form: {}. Supported: -m/--message, -s/--signoff, "
+            "-q/--quiet, and an explicit git -C target. Stage changes separately; "
+            "run other shell commands separately. No review token was created.".format(error),
+            "[reviewer-agent-codex] Unsupported commit form.",
+        )
+    token = state.create_commit_ticket(cwd, state.session_key(data), commit_options=options)
     return _deny(
         "This repository requires the reviewer-agent `review_commit` MCP tool. "
         "Call it once with cwd={}, the commit message, and review_token={}. "

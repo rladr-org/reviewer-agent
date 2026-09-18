@@ -254,7 +254,7 @@ def handle_message(
             {
                 "content": [{"type": "text", "text": _render(result)}],
                 "structuredContent": result,
-                "isError": result.get("status") in ("error", "disabled", "cancelled"),
+                "isError": result.get("status") in ("error", "disabled", "cancelled", "publication_unknown"),
             },
         )
     return _error(request_id, -32601, "method not found")

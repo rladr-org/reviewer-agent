@@ -5,6 +5,12 @@ import os
 import re
 import shlex
 import subprocess
+import tempfile
+import time
+
+from .process_tree import terminate_process_tree
+
+COMMIT_TIMEOUT = 300
 
 # Recognize a real `git ... commit` invocation. Biased toward precision: a false
 # positive would hijack a non-commit, while a false negative merely lets a commit
@@ -226,3 +232,83 @@ def staged_files(path):
     if p.returncode != 0:
         return []
     return [line for line in p.stdout.splitlines() if line.strip()]
+
+
+def staged_tree(path):
+    """Digest all staged content, modes, names, and directory structure."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "write-tree"], capture_output=True,
+            text=True, errors="replace", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def run_commit(path, message, options, cancel_event=None):
+    """Run ordinary Git and report (status, id, output, warning/error).
+
+    Hooks act on the real repository and may restage content. There is no private
+    candidate or publication step. After interruption, inspect HEAD before reporting
+    failure: Git may have published before a post-commit hook stalled.
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        return "cancelled", None, "", "commit cancelled before Git started"
+    parent = git_head(path)
+    reason = ""
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        try:
+            process = subprocess.Popen(
+                ["git", "-C", str(path), "commit", *options, "-m", message],
+                cwd=str(path), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+            )
+        except OSError as error:
+            return "error", None, "", "Git could not start: {}".format(error)
+        try:
+            deadline = time.monotonic() + COMMIT_TIMEOUT
+            while process.poll() is None:
+                if cancel_event is not None and cancel_event.is_set():
+                    reason = "Git commit was interrupted by cancellation"
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    reason = "Git commit hooks/signing exceeded the {}s budget".format(COMMIT_TIMEOUT)
+                    break
+                try:
+                    process.wait(timeout=min(0.05, remaining))
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            if process.poll() is None:
+                if os.name == "posix":
+                    terminate_process_tree(process.pid, include_root=True)
+                else:
+                    process.terminate()
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=1)
+        # Files, rather than pipes, keep external hook helpers from holding EOF open.
+        output = []
+        for stream in (stdout, stderr):
+            size = os.fstat(stream.fileno()).st_size
+            stream.seek(0)
+            output.append(stream.read(size).decode(errors="replace"))
+        output = "".join(output).strip()
+    head = git_head(path)
+    if process.returncode == 0 and not reason:
+        # A clean Git exit means it committed, even if a later hook moved HEAD again.
+        if head and head != parent:
+            return "committed", head, output, ""
+        return "committed", None, output, "Git completed, but the new commit ID could not be confirmed"
+    detail = reason or output or "Git commit failed"
+    # HEAD movement alone cannot attribute publication to this invocation: hooks or
+    # another writer may have moved it even though our commit failed.
+    if head is None or head != parent:
+        return "publication_unknown", None, output, (
+            "Commit publication could not be determined. Do not retry automatically; "
+            "check git log and git status first. " + detail)
+    status = "cancelled" if cancel_event is not None and cancel_event.is_set() else "error"
+    return status, None, output, detail + "; no commit was detected. Hooks may have modified or staged files; check git status."

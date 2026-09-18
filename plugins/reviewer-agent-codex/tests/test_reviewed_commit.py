@@ -2,7 +2,7 @@
 import subprocess
 import threading
 
-from reviewer_codex import commit_tool, state
+from reviewer_codex import cancellation, commit_tool, state
 
 
 def _stage(repo, text="change\n"):
@@ -605,15 +605,16 @@ def test_cancellation_wins_immediately_before_commit_side_effect(
     _enable(git_repo)
     _review_result(monkeypatch, (0, "APPROVED\n", ""))
 
-    class CancelAtCommit:
-        def is_set(self):
-            return False
+    token = cancellation.Cancellation()
+    clear_retry = state.clear_commit_retry_pending
 
-        def complete(self, action=None):
-            return False, None
+    def cancel_before_git(*args, **kwargs):
+        clear_retry(*args, **kwargs)
+        assert token.cancel()
 
+    monkeypatch.setattr(state, "clear_commit_retry_pending", cancel_before_git)
     result = commit_tool.reviewed_commit(
-        git_repo, "must not land", _ticket(git_repo), cancel_event=CancelAtCommit()
+        git_repo, "must not land", _ticket(git_repo), cancel_event=token
     )
 
     assert result["status"] == "cancelled"

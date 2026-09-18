@@ -6,8 +6,12 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 
 - Disabled by default and enabled per canonical Git repository.
 - Intercepts only `git commit` commands.
-- Audits and commits exactly the staged index; intercepted `-a`, `--all`, and pathspec forms are
-  never executed or carried into the MCP commit.
+- Records the live staged set's `write-tree` digest (content, modes, names, and structure) before
+  review, then compares it immediately before ordinary `git commit`. A changed digest requires
+  a fresh review. Git reads use the real repository; no private snapshot is injected.
+- Preserves `-s`/`--signoff` and `-q`/`--quiet` through the one-use ticket; the MCP call supplies
+  the `-m`/`--message` text. Rejects all other commit options, pathspecs, alternate Git configuration,
+  and compound shell commands before creating a ticket, with an explicit unsupported-form error.
 - Fails closed when the reviewer fails, times out, returns empty output, or rejects.
 - On timeout, compare-safely retires only the reviewer thread that was actually invoked and clears
   only its matching staged-index cursor. A concurrent replacement survives, and the next commit
@@ -26,7 +30,20 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   rejected results render them separately from required fixes, and approved suggestions never
   invalidate approval merely because they discuss something that was rejected. A missing or
   repeated section marker is never used to demote rejection text from blocking status.
-- Rejects approval if the staged bytes change during the review.
+- Runs Git hooks and configured signing in the real repository. Hook-restaged content is honored,
+  including formatting changes. Failing hooks may leave the working tree or index changed.
+- Does not make the digest comparison and commit atomic or pin the reviewed parent/branch.
+  This matches the Claude gate's ordinary-Git policy. Concurrent writers should use separate
+  worktrees. There is no private candidate, special reference-format requirement, or Git 2.48 floor.
+- Inspects commit completion and HEAD after timeout/cancellation before reporting the outcome.
+  An unclean exit with changed or unreadable HEAD returns `publication_unknown` and forbids
+  automatic retry: HEAD movement does not prove this invocation published. A successful Git
+  exit with an unreadable commit ID still reports success, with a warning.
+- Git runs directly and synchronously with a 300-second budget, without a lifecycle guard,
+  detached session, or background monitoring thread. Output uses temporary files so external
+  hook helpers cannot hold completion open. Cancellation/timeout terminates active Git and its
+  known children; it cannot undo an already-published commit. Independently detached helpers left
+  behind by an exited hook remain the hook's responsibility. The reviewer guard is unchanged.
 - Reuses one isolated commit reviewer per developer session, never across developer sessions.
 - Exposes exact namespaced `reviewer-session status|rotate` controls through `UserPromptSubmit`.
   Manual rotation affects only that developer session's commit reviewer and cursor, never its
@@ -42,8 +59,9 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   required fixes in one verdict. More-specific project rules win.
 - A fresh reviewer never receives an older saved verdict labelled as its own; prior-verdict
   pointers appear only when the current prompt-revision-scoped reviewer already exists.
-- Records staged blob SHAs after completed verdicts and annotates retries on the same HEAD as
+- Records staged modes and blob SHAs after completed verdicts and annotates retries on the same HEAD as
   changed, unchanged, added, or removed, with bounded exact index deltas for changed paths.
+  A cursor without mode evidence requires a full audit.
 - Handles MCP cancellation while the audit runs, terminates the nested reviewer process tree
   including descendants that created their own process groups or sessions, and emits no late
   result or commit.

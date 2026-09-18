@@ -485,7 +485,7 @@ def _stop_ticket_file(token):
     return state_home() / "stop-tickets" / (str(token) + ".json")
 
 
-def create_commit_ticket(path, session_id):
+def create_commit_ticket(path, session_id, commit_options=None):
     """Mint a one-use bridge from a shell hook event to the blocking MCP call."""
     root = project_root(path)
     if not root:
@@ -494,7 +494,8 @@ def create_commit_ticket(path, session_id):
     owner = str(session_id or "").strip() or ("unidentified-" + token)
     _atomic_write(
         _commit_ticket_file(token),
-        json.dumps({"root": root, "session_id": owner, "created": time.time()}) + "\n",
+        json.dumps({"root": root, "session_id": owner, "created": time.time(),
+                    "commit_options": list(commit_options or [])}) + "\n",
     )
     return token
 

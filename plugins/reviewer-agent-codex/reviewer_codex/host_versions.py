@@ -3,7 +3,8 @@
 
 Duplicated in shape from the Claude package's `host_versions.py` for the same reason the
 process-tree helper is: the two packages install independently, and neither may import the
-other. Both state the same floors, and a change to one belongs in the other.
+other. The native Codex host needs Stop/Interrupt hooks; the Claude package's Codex
+reviewer backend has an independent baseline.
 
 The floors are the OLDEST versions this release was exercised on, not the oldest that could
 work -- which is why this warns rather than refuses. An older Codex may be fine; nobody has
@@ -15,7 +16,7 @@ import shutil
 import subprocess
 import sys
 
-CODEX_MIN = (0, 147, 0)
+CODEX_MIN = (0, 154, 0)
 PYTHON_MIN = (3, 9, 0)
 
 _VERSION = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")

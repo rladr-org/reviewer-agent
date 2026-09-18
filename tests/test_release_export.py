@@ -13,6 +13,8 @@ are pinned here rather than trusted:
   scanner that passes because its patterns never match anything, including real leaks. Every
   category it advertises is exercised against synthetic content below.
 """
+import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -83,6 +85,36 @@ def test_the_export_carries_no_git_directory_or_runtime_state(export):
     assert not (export / ".git").exists()
     for forbidden in ("__pycache__", ".pytest_cache", "state", "logs", "reviews"):
         assert not list(export.rglob(forbidden)), forbidden
+
+
+@requires_repository
+def test_exported_codex_server_starts_and_exposes_both_review_paths(export, tmp_path):
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    ]
+    result = subprocess.run(
+        [sys.executable, str(export / "plugins/reviewer-agent-codex/scripts/mcp_server.py")],
+        input="".join(json.dumps(item) + "\n" for item in requests),
+        capture_output=True, text=True, cwd=tmp_path, timeout=15,
+        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+    )
+    assert result.returncode == 0, result.stderr
+    responses = {item["id"]: item for item in map(json.loads, result.stdout.splitlines())}
+    assert "serverInfo" in responses[1]["result"]
+    names = {item["name"] for item in responses[2]["result"]["tools"]}
+    assert {"review_commit", "stop_hook", "interrupt_stop"} <= names
+
+
+@requires_repository
+def test_export_verifier_rejects_missing_codex_git_module(export, tmp_path):
+    import shutil
+
+    broken = tmp_path / "broken-export"
+    shutil.copytree(export, broken)
+    module = "plugins/reviewer-agent-codex/reviewer_codex/git.py"
+    (broken / module).unlink(missing_ok=True)
+    assert "required file missing: " + module in rex.verify(broken)
 
 
 def test_the_export_refuses_to_overwrite_a_non_empty_directory(tmp_path):

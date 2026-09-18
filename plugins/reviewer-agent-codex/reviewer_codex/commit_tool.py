@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: MPL-2.0
 """One blocking review-and-commit operation for the bundled MCP tool."""
 
-import hashlib
 import re
 import shlex
 import subprocess
 from pathlib import Path
 
 from . import backend, cancellation, prompts, state
-from .git import git_head, staged_files
+from .git import git_head, run_commit, staged_files, staged_tree
 
 
 _APPROVED = re.compile(r"^APPROVED\b")
@@ -58,14 +57,6 @@ def approved(output):
     return False
 
 
-def _stage_fingerprint(cwd):
-    result = subprocess.run(
-        ["git", "-C", str(cwd), "diff", "--cached", "--binary"],
-        capture_output=True,
-    )
-    return hashlib.sha256(result.stdout).hexdigest() if result.returncode == 0 else None
-
-
 DELTA_INLINE_MAX = 48000
 DELTA_INLINE_TOTAL_MAX = 96000
 _DISPOSITION_INSTRUCTION = (
@@ -102,12 +93,12 @@ def _stage_snapshot(cwd):
         metadata, raw_name = record.split(b"\t", 1)
         parts = metadata.split()
         if len(parts) >= 2:
-            snapshot[raw_name.decode("utf-8", "surrogateescape")] = parts[1].decode("ascii")
+            snapshot[raw_name.decode("utf-8", "surrogateescape")] = b" ".join(parts[:2]).decode("ascii")
     return snapshot
 
 
 def _delta(cwd, before_sha, path):
-    if not re.fullmatch(r"[0-9a-f]{40}", str(before_sha or "")):
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(before_sha or "")):
         return None
     try:
         result = subprocess.run(
@@ -129,6 +120,9 @@ def _change_block(cwd, session_id, reviewer_id, current):
     if previous.get("reviewer_id") != reviewer_id or previous.get("head") != git_head(cwd):
         return ""
     before = previous["files"]
+    if any(value != "-" and not re.fullmatch(r"[0-7]{6} (?:[0-9a-f]{40}|[0-9a-f]{64})", str(value))
+           for value in before.values()):
+        return ""  # Content-only cursors cannot establish that modes were reviewed.
     changed = sorted(
         name for name, sha in current.items() if name in before and before[name] != sha
     )
@@ -139,7 +133,7 @@ def _change_block(cwd, session_id, reviewer_id, current):
     if not (changed or added or removed):
         return (
             header
-            + " NOTHING MOVED. Every staged path is byte-identical and HEAD is unchanged. "
+            + " NOTHING MOVED. Every staged path has identical content and mode and HEAD is unchanged. "
             "Do not redo the audit. Carry forward your existing findings, retire only findings "
             "that no longer apply, and return the current verdict. "
             + _DISPOSITION_INSTRUCTION
@@ -149,7 +143,10 @@ def _change_block(cwd, session_id, reviewer_id, current):
     spent = 0
     for name in changed:
         lines.append("CHANGED: " + name)
-        delta = _delta(cwd, before.get(name), name)
+        previous_identity = before[name].split()
+        lines.append("Index identity: {} -> {}".format(before[name], current[name]))
+        old_sha = previous_identity[-1]
+        delta = _delta(cwd, old_sha, name)
         size = len((delta or "").encode("utf-8", "replace"))
         if delta and size <= DELTA_INLINE_MAX and spent + size <= DELTA_INLINE_TOTAL_MAX:
             lines += ["```diff", delta.rstrip(), "```"]
@@ -157,7 +154,7 @@ def _change_block(cwd, session_id, reviewer_id, current):
         else:
             lines.append(
                 "Read the exact index delta with: git diff {} {}".format(
-                    before.get(name), shlex.quote(":" + name)
+                    old_sha, shlex.quote(":" + name)
                 )
             )
     lines += ["ADDED: " + name for name in added]
@@ -201,9 +198,20 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
             "attempt shell git commit once to obtain a new token",
         )
     session_id = ticket["session_id"]
-    before = _stage_fingerprint(root)
+    options = ticket.get("commit_options", [])
+    if not isinstance(options, list) or any(item not in ("--signoff", "--quiet") for item in options):
+        return _result("error", "unsupported commit options in review ticket")
+    try:
+        return _review_staged(root, session_id, message, options, cancel_event)
+    except (OSError, subprocess.SubprocessError) as error:
+        return _result("error", str(error))
+
+
+def _review_staged(root, session_id, message, options, cancel_event):
+    reviewed_tree = staged_tree(root)
+    reviewed_head = git_head(root)
     snapshot = _stage_snapshot(root)
-    if before is None or snapshot is None:
+    if not reviewed_tree or snapshot is None:
         return _result("error", "could not fingerprint the staged index")
     review_timeout = state.commit_review_timeout()
     retry_audit = state.commit_retry_pending(root, session_id)
@@ -310,8 +318,7 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
         if diagnosis:
             return _result("error", "review could not run. {}".format(diagnosis))
         return _result("error", "review failed (exit {}): {}".format(code, detail))
-    after = _stage_fingerprint(root)
-    if before != after:
+    if staged_tree(root) != reviewed_tree:
         state.record_review_outcome(
             root, session_id, state.OUTCOME_DISCARDED,
             "the staged set changed while it was being reviewed, so this ruling judged a "
@@ -336,7 +343,7 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
     state.write_commit_cursor(
         root,
         session_id,
-        {"reviewer_id": reviewer_id, "head": git_head(root), "files": snapshot},
+        {"reviewer_id": reviewer_id, "head": reviewed_head, "files": snapshot},
     )
     is_approved = approved(output)
     automatically_rotated = False
@@ -362,34 +369,29 @@ def reviewed_commit(cwd, message, review_token, cancel_event=None):
 
     state.clear_commit_retry_pending(root, session_id)
 
-    completed, commit = cancellation.complete(
-        cancel_event,
-        lambda: subprocess.run(
-            ["git", "-C", str(root), "commit", "-m", message],
-            capture_output=True,
-            text=True,
-        ),
-    )
-    if not completed:
-        return _result("cancelled", "commit review was cancelled before committing")
-    git_output = (commit.stdout or "") + (commit.stderr or "")
-    if commit.returncode != 0:
+    # Compare immediately before ordinary Git. Repository hooks may intentionally
+    # restage content afterwards; concurrent writers should use separate worktrees.
+    if staged_tree(root) != reviewed_tree:
         return _result(
-            "error",
-            "review approved, but git commit failed (exit {}): {}".format(
-                commit.returncode, git_output.strip() or "no output"
-            ),
-            review=output.strip(),
-            review_path=str(review_path),
+            "error", "the staged set changed after review; retry to review the current staged set",
+            review=output.strip(), review_path=str(review_path),
         )
+    status, published, git_output, detail = run_commit(root, message, options, cancel_event)
+    if status != "cancelled":
+        cancellation.complete(cancel_event, lambda: None)
+    if status != "committed":
+        return _result(status, detail, review=output.strip(), review_path=str(review_path),
+                       git_output=git_output)
     return _result(
         "committed",
-        "the staged changes were approved and committed{}".format(
+        "the staged changes were approved and committed{}{}".format(
             "; the reviewer session was automatically rotated after the configured audit limit"
-            if automatically_rotated else ""
+            if automatically_rotated else "",
+            "; " + detail if detail else "",
         ),
         review=output.strip(),
         review_path=str(review_path),
-        commit=git_head(root),
+        commit=published,
         git_output=git_output.strip(),
+        publication_warning=detail or None,
     )

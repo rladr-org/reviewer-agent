@@ -2,7 +2,10 @@
 """Real Git regressions for approval/content binding; only the model verdict is stubbed."""
 import os
 import re
+import shlex
+import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -62,48 +65,34 @@ def test_staging_after_final_review_check_cannot_enter_commit(ready, monkeypatch
     assert git(ready, "show", ":change.txt") == "UNREVIEWED"
 
 
-def test_reviewer_reads_captured_index_even_when_live_staging_moves(ready, monkeypatch):
-    seen = []
-    original_environment = dict(os.environ)
-
+def test_staging_during_review_requires_another_review(ready, monkeypatch):
+    before = git(ready, "rev-parse", "HEAD")
+    environment_before = dict(os.environ)
     def review(cwd, session, role, *args, **kwargs):
-        stage(ready, "UNREVIEWED\n")
-        # Exercise exactly the request-local environment used to launch the reviewer.
-        assert dict(os.environ) == original_environment
-        environment = backend.child_environment()
-        assert environment.get("GIT_INDEX_FILE")
-        seen.append(git(cwd, "show", ":change.txt", env=environment))
-        outside = []
-        worker = threading.Thread(target=lambda: outside.append(backend.child_environment()))
-        worker.start()
-        worker.join()
-        assert outside[0].get("GIT_INDEX_FILE") == original_environment.get("GIT_INDEX_FILE")
+        stage(ready, "changed during review\n")
+        assert dict(os.environ) == environment_before
+        assert backend.child_environment().get("GIT_INDEX_FILE") == environment_before.get("GIT_INDEX_FILE")
         state.publish_reviewer_session(cwd, session, role, "review-thread")
         return 0, "APPROVED", ""
-
     monkeypatch.setattr(backend, "review_turn", review)
     result = commit(ready)
-
-    assert seen == ["reviewed"]
-    assert result["status"] == "error"
-    assert git(ready, "show", ":change.txt") == "UNREVIEWED"
-    assert "GIT_INDEX_FILE" not in backend.child_environment()
+    assert result["status"] == "error", result
+    assert git(ready, "rev-parse", "HEAD") == before
+    assert git(ready, "show", ":change.txt") == "changed during review"
 
 
-def test_same_parent_branch_switch_cannot_redirect_approved_commit(ready, monkeypatch):
+def test_ordinary_commit_uses_the_current_branch(ready, monkeypatch):
     branch = git(ready, "symbolic-ref", "HEAD")
     before = git(ready, "rev-parse", "HEAD")
     after_review(monkeypatch, lambda: git(ready, "checkout", "-qb", "other"))
-
     result = commit(ready)
-
-    assert result["status"] == "error"
+    assert result["status"] == "committed", result
     assert git(ready, "rev-parse", branch) == before
-    assert git(ready, "rev-parse", "HEAD") == before
+    assert git(ready, "rev-parse", "HEAD") == result["commit"]
     assert git(ready, "symbolic-ref", "HEAD") == "refs/heads/other"
 
 
-def test_commit_hook_cannot_add_unreviewed_content(ready):
+def test_commit_honors_content_restaged_by_repository_hook(ready):
     hooks = Path(git(ready, "rev-parse", "--absolute-git-dir")) / "hooks"
     hook = hooks / "pre-commit"
     hook.write_text("#!/bin/sh\nprintf 'unreviewed\\n' > added-by-hook.txt\n"
@@ -113,10 +102,67 @@ def test_commit_hook_cannot_add_unreviewed_content(ready):
 
     result = commit(ready)
 
-    assert result["status"] == "error"
-    assert git(ready, "rev-parse", "HEAD") == before
-    assert git(ready, "diff", "--cached", "--name-only") == "change.txt"
+    assert result["status"] == "committed", result
+    assert git(ready, "rev-parse", "HEAD") != before
+    assert git(ready, "show", "HEAD:added-by-hook.txt") == "unreviewed"
+
+
+def test_hooks_use_real_git_metadata_and_see_the_published_commit(ready):
+    hooks = ready / ".git" / "hooks"
+    pre = hooks / "pre-commit"
+    pre.write_text("#!/bin/sh\ngit rev-parse --absolute-git-dir > hook-gitdir\n")
+    pre.chmod(0o755)
+    post = hooks / "post-commit"
+    post.write_text("#!/bin/sh\ngit --git-dir=.git rev-parse HEAD > hook-public-head\n")
+    post.chmod(0o755)
+
+    result = commit(ready)
+
+    assert result["status"] == "committed", result
+    assert Path((ready / "hook-gitdir").read_text().strip()).resolve() == (ready / ".git").resolve()
+    assert (ready / "hook-public-head").read_text().strip() == result["commit"]
+    assert git(ready, "diff", "--cached", "--name-only") == ""
     assert not (ready / ".git" / "index.lock").exists()
+
+
+def test_failing_hook_preserves_its_real_staging_changes(ready):
+    before = git(ready, "rev-parse", "HEAD")
+    hook = ready / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nprintf 'formatted\\n' > change.txt\ngit add change.txt\nexit 1\n")
+    hook.chmod(0o755)
+    result = commit(ready)
+    assert result["status"] == "error", result
+    assert "Hooks may have modified or staged files" in result["message"]
+    assert git(ready, "rev-parse", "HEAD") == before
+    assert git(ready, "show", ":change.txt") == "formatted"
+
+
+def test_cancellation_after_publication_does_not_claim_nothing_committed(ready):
+    token = cancellation.Cancellation()
+    before = git(ready, "rev-parse", "HEAD")
+    marker, release = ready / "post-started", ready / "post-release"
+    hook = ready / ".git" / "hooks" / "post-commit"
+    hook.write_text('#!/bin/sh\ntouch post-started\n'
+                    'while [ ! -f post-release ]; do sleep 0.05; done\n')
+    hook.chmod(0o755)
+    results = []
+    worker = threading.Thread(target=lambda: results.append(commit_tool.reviewed_commit(
+        ready, "reviewed change", state.create_commit_ticket(ready, "session"), cancel_event=token)))
+    worker.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not marker.exists() and worker.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists(), results
+        token.cancel()
+        worker.join(3)
+        assert not worker.is_alive()
+        assert results[0]["status"] == "publication_unknown", results
+        assert git(ready, "rev-parse", "HEAD") != before
+        assert "Do not retry automatically" in results[0]["message"]
+    finally:
+        release.touch()
+        worker.join(5)
 
 
 def test_mode_only_fix_is_presented_as_changed_on_retry(ready, monkeypatch):
@@ -200,14 +246,15 @@ def test_success_keeps_unstaged_edits_and_exact_parent(ready, detached):
     assert git(ready, "diff", "--cached") == ""
 
 
-def test_head_advancement_after_review_is_preserved_and_rejected(ready, monkeypatch):
+def test_ordinary_commit_uses_the_current_parent(ready, monkeypatch):
     parent = git(ready, "rev-parse", "HEAD")
     tree = git(ready, "rev-parse", "HEAD^{tree}")
     competing = git(ready, "commit-tree", tree, "-p", parent, "-m", "competing")
     after_review(monkeypatch, lambda: git(ready, "update-ref", "HEAD", competing, parent))
-    assert commit(ready)["status"] == "error"
-    assert git(ready, "rev-parse", "HEAD") == competing
-    assert git(ready, "show", ":change.txt") == "reviewed"
+    result = commit(ready)
+    assert result["status"] == "committed", result
+    assert git(ready, "rev-parse", "HEAD^") == competing
+    assert git(ready, "show", "HEAD:change.txt") == "reviewed"
 
 
 def test_unborn_branch_publishes_exact_tree_without_parent(ready):
@@ -268,3 +315,176 @@ def test_cancellation_during_commit_hook_cannot_publish_later(ready):
     assert git(ready, "rev-parse", "HEAD") == before
     assert git(ready, "show", ":change.txt") == "reviewed"
     assert not (ready / ".git" / "index.lock").exists()
+
+
+def test_reviewer_launch_environment_remains_stable(ready, monkeypatch):
+    monkeypatch.setenv("TMPDIR", str(ready / "temporary-parent-turn"))
+    seen = []
+
+    def review(*args, **kwargs):
+        seen.append(backend.child_environment())
+        state.publish_reviewer_session(ready, "session", "reviewer", "review-thread")
+        return 0, "APPROVED", ""
+
+    monkeypatch.setattr(backend, "review_turn", review)
+    result = commit(ready)
+    assert result["status"] == "committed", result
+    assert seen[0]["TMPDIR"] == backend.stable_temp_root()
+    assert seen[0]["REVIEWER_CODEX_CHILD"] == "1"
+
+
+def test_split_index_retains_exact_tree(ready):
+    git(ready, "update-index", "--split-index")
+    tree = git(ready, "write-tree")
+    result = commit(ready)
+    assert result["status"] == "committed", result
+    assert git(ready, "rev-parse", "HEAD^{tree}") == tree
+
+
+
+
+def test_existing_index_lock_is_preserved(ready):
+    lock = ready / ".git" / "index.lock"
+    lock.write_text("owned by another process")
+    before = git(ready, "rev-parse", "HEAD")
+    result = commit(ready)
+    assert result["status"] == "error", result
+    assert lock.read_text() == "owned by another process"
+    assert git(ready, "rev-parse", "HEAD") == before
+
+
+def test_commit_launches_only_synchronous_git_processes(ready, monkeypatch):
+    launches = []
+    original = subprocess.Popen
+
+    def launch(argv, *args, **kwargs):
+        process = original(argv, *args, **kwargs)
+        launches.append((argv, kwargs, process))
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    result = commit(ready)
+
+    assert result["status"] == "committed", result
+    assert launches
+    assert all(Path(argv[0]).name == "git" for argv, _, _ in launches)
+    assert all(not kwargs.get("start_new_session") for _, kwargs, _ in launches)
+    assert all(process.poll() is not None for _, _, process in launches)
+
+
+def test_commit_hook_timeout_is_bounded_and_cannot_publish(ready, monkeypatch):
+    from reviewer_codex import git as git_ops
+    monkeypatch.setattr(git_ops, "COMMIT_TIMEOUT", 0.2)
+    durations = []
+    original = commit_tool.run_commit
+    def timed_commit(*args, **kwargs):
+        started = time.monotonic()
+        try:
+            return original(*args, **kwargs)
+        finally:
+            durations.append(time.monotonic() - started)
+    monkeypatch.setattr(commit_tool, "run_commit", timed_commit)
+    before = git(ready, "rev-parse", "HEAD")
+    hook = ready / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexec sleep 3\n")
+    hook.chmod(0o755)
+    result = commit(ready)
+    assert result["status"] == "error", result
+    assert "budget" in result["message"]
+    assert len(durations) == 1 and durations[0] < 2
+    assert git(ready, "rev-parse", "HEAD") == before
+    assert not (ready / ".git" / "index.lock").exists()
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_external_hook_background_output_does_not_hold_commit_open(ready, detached):
+    pid_file = ready / "hook-child.pid"
+    hook = ready / ".git" / "hooks" / "post-commit"
+    script = ("import os, time; from pathlib import Path; "
+              + ("os.setsid(); " if detached else "") +
+              "Path('hook-child.pid').write_text(str(os.getpid())); time.sleep(60)")
+    hook.write_text("#!/bin/sh\n{} -c {} &\n".format(
+        shlex.quote(sys.executable), shlex.quote(script)))
+    hook.chmod(0o755)
+    results = []
+    worker = threading.Thread(target=lambda: results.append(commit(ready)))
+    worker.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pid_file.exists(), results
+        worker.join(5)
+        assert not worker.is_alive(), "external hook output must not hold the commit open"
+        assert results[0]["status"] == "committed", results[0]["message"]
+    finally:
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        worker.join(5)
+
+
+def test_repository_conditional_configuration_applies_to_commit(ready, tmp_path):
+    included = tmp_path / "identity.config"
+    included.write_text("[user]\nemail = conditional@example.com\n")
+    git(ready, "config", "includeIf.gitdir:{}/.git.path".format(ready), str(included))
+    assert git(ready, "config", "user.email") == "conditional@example.com"
+    result = commit(ready)
+    assert result["status"] == "committed", result
+    assert git(ready, "log", "-1", "--format=%ae") == "conditional@example.com"
+
+
+@pytest.mark.parametrize("phase", ["pre-commit", "post-commit"])
+def test_hook_timeout_reports_actual_publication(ready, monkeypatch, phase):
+    from reviewer_codex import git as git_ops
+    monkeypatch.setattr(git_ops, "COMMIT_TIMEOUT", 0.2)
+    before = git(ready, "rev-parse", "HEAD")
+    hook = ready / ".git" / "hooks" / phase
+    hook.write_text("#!/bin/sh\nexec sleep 3\n")
+    hook.chmod(0o755)
+    token = cancellation.Cancellation()
+    result = commit_tool.reviewed_commit(
+        ready, "reviewed change", state.create_commit_ticket(ready, "session"), cancel_event=token)
+    if phase == "post-commit":
+        assert result["status"] == "publication_unknown", result
+        assert git(ready, "rev-parse", "HEAD") != before
+        assert "Do not retry automatically" in result["message"]
+        assert not token.cancel()
+    else:
+        assert result["status"] == "error", result
+        assert git(ready, "rev-parse", "HEAD") == before
+    assert not (ready / ".git" / "index.lock").exists()
+
+
+def test_unconfirmed_publication_does_not_report_an_ordinary_failure(ready, monkeypatch):
+    from reviewer_codex import git as git_ops
+    before = git(ready, "rev-parse", "HEAD")
+    hook = ready / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    monkeypatch.setattr(git_ops, "git_head", lambda *args: None)
+    token = cancellation.Cancellation()
+    result = commit_tool.reviewed_commit(
+        ready, "reviewed change", state.create_commit_ticket(ready, "session"), cancel_event=token)
+    assert result["status"] == "publication_unknown", result
+    assert "Do not retry automatically" in result["message"]
+    assert git(ready, "rev-parse", "HEAD") == before
+    assert not token.cancel()
+
+
+def test_failing_hook_moving_head_cannot_claim_reviewed_commit_published(ready):
+    before = git(ready, "rev-parse", "HEAD")
+    unrelated = git(ready, "commit-tree", "HEAD^{tree}", "-p", before,
+                    "-m", "unrelated commit")
+    hook = ready / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\ngit update-ref HEAD " + unrelated + "\nexit 1\n")
+    hook.chmod(0o755)
+
+    result = commit(ready)
+
+    assert git(ready, "rev-parse", "HEAD") == unrelated
+    assert result["status"] == "publication_unknown", result
+    assert "Do not retry automatically" in result["message"]
+    assert not result.get("commit")

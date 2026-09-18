@@ -15,6 +15,23 @@ def _request(method, params=None, request_id=1):
     return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}}
 
 
+def test_uncertain_publication_is_an_explicit_tool_error():
+    response = mcp_server.handle_message(
+        _request("tools/call", {
+            "name": "review_commit",
+            "arguments": {"cwd": "/repo", "message": "test", "review_token": "token"},
+        }),
+        commit_fn=lambda *args, **kwargs: {
+            "status": "publication_unknown",
+            "message": "Do not retry automatically; inspect the candidate and target ref.",
+            "candidate": "abc123",
+        },
+    )
+    assert response["result"]["isError"] is True
+    assert response["result"]["structuredContent"]["candidate"] == "abc123"
+    assert "Do not retry automatically" in response["result"]["content"][0]["text"]
+
+
 def test_tool_call_is_one_blocking_response():
     started = threading.Event()
     release = threading.Event()

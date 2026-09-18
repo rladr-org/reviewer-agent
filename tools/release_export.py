@@ -59,6 +59,7 @@ REQUIRED_PATHS = (
     "plugins/reviewer-agent-codex/DISCLAIMER.md",
     "plugins/reviewer-agent-codex/.codex-plugin/plugin.json",
     "plugins/reviewer-agent-codex/prompts/stop_supervisor.txt",
+    "plugins/reviewer-agent-codex/reviewer_codex/git.py",
 )
 
 

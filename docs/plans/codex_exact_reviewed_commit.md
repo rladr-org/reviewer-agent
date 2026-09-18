@@ -1,45 +1,45 @@
-# Codex commit integrity
+# Codex: ordinary Git commits after review
 
-Status: proposed implementation contract for the documentation-first TDD checkpoint.
-The runtime and installation guidance have not yet been changed; update them with the implementation.
+The operator chose the ordinary-Git approach on 2026-09-18 to preserve existing repository
+workflows and align the Codex package with the Claude gate. This supersedes the earlier private
+index, candidate commit, and locked reference-transaction design.
 
-## Required result
+## Commit flow
 
-An agent's commit must contain exactly the approved staged snapshot. Keep human terminal commits
-unrestricted, preserve Stop/Interrupt behavior, and leave the Claude implementation to its own task.
+1. Accept one plain commit command, preserving sign-off and quiet options. Refuse unsupported
+   arguments and compound commands before review. The existing MCP tool receives the message.
+2. Record the staged set's `git write-tree` hash before review. It covers content, modes, names,
+   and structure. Reviewer Git commands read the real repository.
+3. After approval, compare the staged hash again immediately before committing. A mismatch or
+   unreadable staged tree blocks the commit and requires a fresh review.
+4. Run ordinary `git commit` synchronously with the repository's own hooks and signing. Hooks may
+   reformat or restage files; their changes are honored. There is no private Git environment,
+   candidate commit, custom reference transaction, or additional Git-version floor.
+5. Report the actual outcome. Timeout or cancellation can occur after Git publishes, so inspect
+   HEAD before reporting failure. After an unclean exit, changed or unreadable HEAD means
+   publication is uncertain: a hook or another writer could have moved it. Instruct the caller
+   not to retry blindly, including when interruption may have followed successful publication.
 
-## Implementation
+Codex continues to block the original shell commit and perform review/commit through its MCP tool.
+Claude instead performs the commit in its hook and rewrites the original command to a harmless
+confirmation. Both arrangements prevent a second execution of the original commit command.
 
-1. Resolve the target and reject unsupported command forms before creating a ticket. Bind supported
-   sign-off/quiet options into the existing one-use ticket; keep the MCP interface stable.
-2. Capture private Git state under the repository metadata, with the captured HEAD, index, and
-   access to the repository's object database and configuration. Review Git commands must receive
-   this context without mutating process-global environment or another concurrent request.
-3. Record mode-aware retry identity from that snapshot. Old content-only cursors force fresh review.
-4. Run the approved commit in private Git state, retaining Git hooks and signing. Reject a
-   candidate whose tree or parents differ from the review. No public reference moves yet.
-5. Acquire the live index lock only for finalization. Start and prepare a Git reference transaction
-   that verifies the original target and expected parent. Recheck HEAD identity and live index
-   under the locks, then commit the transaction. Abort on any mismatch or failure.
-6. Cancellation before publication aborts the transaction and cannot produce a late commit.
-   Report the actual candidate ID after publication, even if another operation subsequently moves
-   HEAD. Clean up only attempt-owned files, locks, and processes on every exit path.
+## Deliberate limits
 
-Git 2.48 supplies the required symbolic-reference transaction operations. Check the installed
-capability and fail closed rather than approximating it with a check followed by an unlocked write.
-See [Git update-ref](https://git-scm.com/docs/git-update-ref/2.48.0).
+The hash comparison and Git commit are separate operations. There is no atomic binding to the
+reviewed parent or branch. Another writer can change staging during Git's hook window. Use separate
+worktrees for concurrent agents. Hooks remain responsible for their own content changes and
+independently detached helpers. A failed hook can leave working files or staging changed.
 
-The native Codex baseline is 0.154.0, which was exercised with Stop and Interrupt support. Keep the
-independent Claude reviewer-backend floor unchanged.
+Cancellation stops active Git and known children, but cannot undo a commit already published by
+Git. Output uses temporary files so an external helper cannot keep a pipe open indefinitely.
+The reviewer's existing lifecycle guard, native Stop/Interrupt hooks, and desktop cleanup remain
+unchanged. Human terminal commits remain unrestricted.
 
-## Acceptance
+## Verification
 
-Use real temporary Git repositories with deterministic competing actions: staging during review,
-staging after the last review check, HEAD advancement, same-object branch switches, and hook-added
-content. Verify rejection without lost staging, exact successful trees and parents, and no duplicate
-or late commits. Cover ordinary, unborn, detached, and linked-worktree targets; mode-only retry fixes;
-legacy cursor fallback; preserved sign-off; explicit unsupported-option errors; and cancellation.
-
-Follow documentation commit, meaningful red-test commit, implementation commit, then live checks.
-Run the Codex suite and relevant structural checks. Repeat the release audit after the fixes; a
-successful baseline audit is not evidence for these previously uncovered cases.
+Real temporary Git repositories exercise hook-restaged content, real hook metadata, post-commit
+visibility, staging drift, mode-aware retries, sign-off, ordinary/unborn/detached/linked-worktree
+commits, conditional configuration, cancellation, timeout, and ambiguous publication. Only reviewer
+verdicts are stubbed. Export tests start the exported MCP server and discover commit and Stop/
+Interrupt tools. Run the Codex suite and relevant release checks before the reviewed commit.

@@ -221,6 +221,30 @@ Codex hook events do not expose a shell tool's separate `workdir`, so a plain `g
 without minting a token and returns the exact absolute-target retry instruction. The unambiguous
 retry returns a token and the exact `cwd` argument for `review_commit`.
 
+Accepted commit options are `-m`/`--message`, `-s`/`--signoff`, and `-q`/`--quiet`.
+The ticket preserves sign-off and quiet flags; the MCP call supplies the message. Other options,
+pathspecs, alternate Git configuration, and compound shell commands are rejected explicitly before
+a ticket is created. Stage files first and run other shell commands separately.
+
+The gate records the staged set's `git write-tree` hash before review and compares it again
+immediately before committing. If staging changed, a fresh review is required. On approval it
+runs ordinary `git commit` in the real repository, with the configured hooks and signing. Hooks
+may format or stage content, and their changes are committed normally. No private index or locked
+publication transaction is used. The hash check and commit are separate operations, so concurrent
+writers should use separate worktrees. Git hooks and signing have a 300-second time limit.
+
+If Git fails or is interrupted and HEAD changed, the tool returns `publication_unknown`: the
+commit may have published, or a hook or another writer may have moved HEAD. An unreadable HEAD
+also leaves the outcome uncertain. Inspect `git log` and
+`git status` before retrying; the commit may already have happened. Cancellation stops a running
+Git process and its known children, but cannot undo a commit Git has already published. Failed
+hooks may leave working files or the real index changed; those changes are not rolled back.
+
+Git commands run directly and synchronously; only the nested reviewer uses a lifecycle guard.
+Commit output is captured in temporary files, so a repository hook's background helper
+cannot keep the commit waiting for output pipes to close. Hooks remain responsible for helpers
+they detach after exiting; the plugin does not launch those helpers.
+
 Every completed commit audit is written to two durable locations under the state directory. A
 stable per-project, per-developer-session file holds the latest verdict for retry prompts; the MCP
 result prints that path before the inline verdict so it remains visible when Codex collapses or
@@ -544,10 +568,12 @@ See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 
 ## Host versions it has been run against
 
-The installer warns when Codex CLI is below 0.147.0 or Python is below 3.9, then continues.
-These warning thresholds reflect versions exercised for installation and nested review; they do
-not establish a minimum host version for every feature. Active-host CLI stop-supervision coverage
-is described under [Platform support](#platform-support).
+The installer warns when Codex CLI is below 0.154.0 or Python is below 3.9, then continues.
+Codex 0.154.0 is the exercised native-host baseline, including Stop and Interrupt hooks.
+The independent Claude package's Codex reviewer-backend baseline is separate.
+Reviewed commits use the installed Git's ordinary commit behavior, without private reference
+transactions or a separate Git 2.48/files-reference-format requirement.
+Active-host CLI stop-supervision coverage is described under [Platform support](#platform-support).
 
 ## License
 
