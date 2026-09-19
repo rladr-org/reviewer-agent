@@ -5,7 +5,17 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
-## [1.2.1-beta.7] — unreleased
+## [1.3.0]
+
+First release without a prerelease label. It carries the Codex stopContinue work developed across
+the `1.2.1` betas, the last of which (`1.2.1-beta.7`) was never published. Every declared version
+across both packages moves to `1.3.0` in lockstep (checked by `tools/release_versions.py`); the
+Codex plugin's `+codex.<timestamp>` build metadata is refreshed so the Codex host notices the
+reinstall. As with every local (directory-source) release, the version bump is what lets an
+installed copy pick the changes up: the plugin is compared by version *string*, so
+`claude plugin update` is a no-op until the version changes.
+
+### Changed
 
 - Run Codex completion supervision from its automatic Stop event; remove the early
   review tool, request-time instructions, and pre-final binding.
@@ -13,9 +23,6 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   route-specific instruction variants.
 - Check automatic rejection and continuation with the live CLI harness. Visible
   rejection feedback and desktop history expansion remain controlled by Codex.
-- Advance both plugin versions so installations already on beta.6 receive the update.
-
-## [Unreleased]
 
 ### Added
 
@@ -26,7 +33,7 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 - Clarify the Codex stopContinue release behavior: automatic continuation after premature stops,
   with possible visible rejected responses. Record the limited macOS CLI smoke coverage and its
-  repeatable procedure. The early-review path is removed in beta.7; rejection can still produce visible feedback.
+  repeatable procedure. The early-review path is removed in 1.3.0; rejection can still produce visible feedback.
 
 ## [1.2.1-beta.6]
 
