@@ -186,6 +186,22 @@ def _disarm_ts(repo, sid):
     return json.loads(Path(rl.watchdog_disarm_file(repo, sid)).read_text())["ts"]
 
 
+def _write_tick_seen_age(repo, sid, seconds_old):
+    """Write the session-scoped tick-seen marker with a controlled JSON `ts` (age = seconds_old).
+    Same shape as the disarm marker, and pinned to the ts rather than the mtime for the same
+    reason: the mtime is always `now`."""
+    f = Path(rl.watchdog_tick_seen_file(repo, sid))
+    f.parent.mkdir(parents=True, exist_ok=True)
+    ts = (datetime.datetime.now(datetime.timezone.utc)
+          - datetime.timedelta(seconds=seconds_old)).isoformat()
+    f.write_text(json.dumps({"ts": ts, "session_id": sid}))
+    return ts
+
+
+def _tick_seen_ts(repo, sid):
+    return json.loads(Path(rl.watchdog_tick_seen_file(repo, sid)).read_text())["ts"]
+
+
 # --------------------------------------------------------------------------
 # State helpers
 # --------------------------------------------------------------------------
@@ -518,6 +534,23 @@ def test_flag_off_clears_both_markers(tmp_path, monkeypatch):
     assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
 
 
+def test_flag_off_also_clears_the_tick_seen_marker(tmp_path, monkeypatch):
+    """Otherwise a tick stamp from before the operator turned the watchdog off survives off/on and
+    makes a cron that no longer exists look alive, suppressing the re-arm that re-enabling needs."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)                          # stopContinue on; watchdog OFF
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    rl.set_watchdog_tick_seen(repo, "claude-stop")
+    tr = _real_turn_transcript(tmp_path, "finish X", "Done.")
+    p = run_stop(_stop_input(repo, tr), {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                 "FAKE_CODEX_STDOUT": "STOP_OK -- done.", "FAKE_CODEX_EXIT": "0"})
+    assert p.returncode == 0, p.stderr
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert Path(rl.watchdog_tick_seen_file(repo, "claude-stop")).exists() is False
+
+
 # --------------------------------------------------------------------------
 # Detection helper
 # --------------------------------------------------------------------------
@@ -605,6 +638,7 @@ def test_ups_is_silent_when_disarm_fresh_and_no_teardown_ready(tmp_path, monkeyp
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
+    _write_tick_seen_age(repo, "claude-ups", 5)              # ticks alive
     _write_disarm_age(repo, "claude-ups", 5)                 # fresh < interval
     p = run_ups(repo, "do the next thing", home, "claude-ups")
     assert p.returncode == 0, p.stderr
@@ -613,11 +647,141 @@ def test_ups_is_silent_when_disarm_fresh_and_no_teardown_ready(tmp_path, monkeyp
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False       # still cleared
 
 
-def test_ups_is_silent_when_no_markers(tmp_path, monkeypatch):
+# --------------------------------------------------------------------------
+# Tick liveness: the restart-safe re-arm path.
+#
+# A host restart destroys the in-memory cron. The SessionStart arm is the only thing that would
+# recreate it, and on a RESUME the host does not deliver that hook's additionalContext -- measured
+# 2026-09-19 -- so nothing re-arms while every flag still reports healthy. Rather than detect that
+# specific host behaviour, detect the observable consequence: ticks stopped arriving. That also
+# covers a hand-deleted cron, the 7-day auto-expiry and a crashed scheduler.
+# --------------------------------------------------------------------------
+def test_ticks_are_presumed_dead_when_no_tick_has_ever_been_seen(tmp_path, monkeypatch):
+    """Absent marker must read as DEAD. This is the OPPOSITE fail direction to the disarm marker:
+    there, absent must never read as 'old enough to tear down'; here, absent means no tick was ever
+    observed, and re-arming redundantly is harmless while failing to re-arm is the bug."""
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is True
+
+
+def test_ticks_are_presumed_dead_when_the_marker_is_corrupt(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    f = Path(rl.watchdog_tick_seen_file(repo, "claude-ups"))
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("{not json")
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is True
+
+
+def test_ticks_are_alive_within_two_intervals_and_dead_beyond(tmp_path, monkeypatch):
+    """Two intervals, not one: a tick only fires while the REPL is idle, so a busy session can
+    legitimately miss one. Two gives that slack without letting a dead cron sit unnoticed."""
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    _effective(repo)                                          # interval 1 min -> window 120s
+    _write_tick_seen_age(repo, "claude-ups", 90)
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is False
+    _write_tick_seen_age(repo, "claude-ups", 180)
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is True
+
+
+def test_ups_stamps_tick_seen_on_a_tick_prompt_body(tmp_path, monkeypatch):
+    """The tick reaches the agent THROUGH this hook, so liveness is free to observe. Still emits
+    nothing -- a tick must never arm."""
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
+    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is False
+
+
+def test_an_ordinary_prompt_does_not_refresh_the_tick_seen_marker(tmp_path, monkeypatch):
+    """The marker must age on its own. An implementation that stamped on EVERY UserPromptSubmit
+    would keep it permanently fresh, so a dead scheduler would never be noticed and the re-arm
+    would never fire -- passing every other test here while defeating the entire mechanism."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)                                          # interval 1 min -> window 120s
+    written = _write_tick_seen_age(repo, "claude-ups", 90)    # alive, but aging
+    p = run_ups(repo, "an ordinary prompt", home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""                             # alive -> no arm, so no stamp either
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert _tick_seen_ts(repo, "claude-ups") == written       # NOT reset to now
+    _write_tick_seen_age(repo, "claude-ups", 180)             # and it can still go stale
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is True
+
+
+def test_tick_seen_is_session_scoped(tmp_path, monkeypatch):
+    """Session-scoped like every other watchdog marker: one session's live cron must never make a
+    different session's dead cron look alive. A project-global marker would break this."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    assert (rl.watchdog_tick_seen_file(repo, "session-a")
+            != rl.watchdog_tick_seen_file(repo, "session-b"))
+    rl.set_watchdog_tick_seen(repo, "session-a")
+    assert rl.watchdog_ticks_presumed_dead(repo, "session-a") is False
+    assert rl.watchdog_ticks_presumed_dead(repo, "session-b") is True
+    # ... and the hook agrees: session B still gets its re-arm.
+    p = run_ups(repo, "do the next thing", home, "session-b")
+    assert rl.WATCHDOG_MARKER in p.stdout
+
+
+def test_ups_arms_when_ticks_are_presumed_dead(tmp_path, monkeypatch):
+    """The restart case: no markers at all, watchdog still enabled -> re-arm."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    p = run_ups(repo, "do the next thing", home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    ctx = json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert rl.WATCHDOG_MARKER in ctx
+
+
+def test_ups_arming_stamps_tick_seen_so_it_does_not_re_ask_every_prompt(tmp_path, monkeypatch):
+    """Asking for an arm counts as liveness for the next window. Without this a long busy stretch
+    -- which legitimately produces no ticks -- would append an arm block to every single prompt."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    first = run_ups(repo, "first", home, "claude-ups")
+    assert rl.WATCHDOG_MARKER in first.stdout
+    second = run_ups(repo, "second", home, "claude-ups")
+    assert second.returncode == 0, second.stderr
+    assert second.stdout.strip() == ""
+
+
+def test_ups_does_not_arm_for_dead_ticks_when_the_watchdog_is_disabled(tmp_path, monkeypatch):
+    """Operator intent outranks liveness: a watchdog that is OFF stays off, however dead the
+    ticks look. The effectiveness gate must be reached BEFORE the liveness check."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)                          # stopContinue on, watchdog OFF
+    p = run_ups(repo, "do the next thing", home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""
+
+
+def test_ups_does_not_arm_for_dead_ticks_when_stopcontinue_is_off(tmp_path, monkeypatch):
+    """The other half of `effective`: the watchdog supervises stopContinue, so with stopContinue
+    off there is nothing to recover and no cron should be created."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_watchdog_active(repo, 1)              # watchdog on, stopContinue OFF
     p = run_ups(repo, "do the next thing", home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""
