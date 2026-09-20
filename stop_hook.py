@@ -54,14 +54,20 @@ def _turn_start_is_tick(data):
 
 
 def _watchdog_pre_supervision(cwd, claude_sid):
-    """Flag off -> clear both markers (stale). Runs before the early returns so a control turn
-    that turns the watchdog off still clears its markers. Does NOT arm teardown_ready: that is
-    decided only on a genuine STOP_OK verdict (see `_watchdog_on_stop_ok`), never on marker age
-    alone -- an aged tick that resumes work, or takes an early return, must not arm teardown while
-    work may remain."""
-    if not rl.is_stopcontinue_watchdog_active(cwd):
+    """Not EFFECTIVE -> clear all three markers (stale). Runs before every early return, including
+    the stopContinue-off one, so a control turn that disables either half still clears its markers.
+    Does NOT arm teardown_ready: that is decided only on a genuine STOP_OK verdict (see
+    `_watchdog_on_stop_ok`), never on marker age alone -- an aged tick that resumes work, or takes
+    an early return, must not arm teardown while work may remain.
+
+    Effective, not merely the watchdog flag: with stopContinue off the tick DELETES the cron itself
+    (a missing flag file is its teardown trigger), so leaving a fresh tick stamp behind would make a
+    cron that no longer exists look alive and suppress the re-arm for up to two intervals after
+    re-enabling."""
+    if not rl.is_stopcontinue_watchdog_effective(cwd):
         rl.clear_watchdog_disarm(cwd, claude_sid)
         rl.clear_watchdog_teardown_ready(cwd, claude_sid)
+        rl.clear_watchdog_tick_seen(cwd, claude_sid)
 
 
 def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
@@ -115,14 +121,18 @@ def _main(data):
         )
     )
 
+    # Watchdog auto-shutoff DECISION (deterministic, Python). The stale-marker clear runs BEFORE
+    # the stopContinue early return: with stopContinue off the watchdog is not effective, its tick
+    # tears the cron down on its own, and any marker left behind would misreport that dead cron as
+    # alive after re-enabling. teardown_ready is armed later, gated on a genuine STOP_OK verdict, so
+    # a tick that resumes work (KEEP_WORKING) or takes an early return never arms teardown while
+    # work may remain.
+    _watchdog_pre_supervision(cwd, claude_sid)
+
     if not flag_active:
         return 0
 
-    # Watchdog auto-shutoff DECISION (deterministic, Python). Only the flag-off marker clear runs
-    # this early; teardown_ready is armed later, gated on a genuine STOP_OK verdict, so a tick that
-    # resumes work (KEEP_WORKING) or takes an early return never arms teardown while work may remain.
     is_tick = _turn_start_is_tick(data)
-    _watchdog_pre_supervision(cwd, claude_sid)
 
     if not text.strip():
         return 0  # tool-only / nothing to evaluate -> allow the stop

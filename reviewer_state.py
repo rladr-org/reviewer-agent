@@ -1237,6 +1237,74 @@ def clear_watchdog_teardown_ready(proj, claude_session_id):
         f.unlink(missing_ok=True)
 
 
+# --------------------------------------------------------------------------
+# Tick liveness: is the cron still there at all?
+#
+# The cron lives only in the host session's memory, so a host restart destroys it. Recreating it
+# needs an instruction delivered to the agent, and on a RESUME the host does not deliver the
+# SessionStart hook's additionalContext (measured 2026-09-19) -- so nothing re-arms while every
+# flag still reports healthy. Rather than detect that host behaviour, detect its consequence:
+# ticks stopped arriving. That also covers a hand-deleted cron, the 7-day auto-expiry and a
+# crashed scheduler, none of which any flag would reveal either.
+# --------------------------------------------------------------------------
+def watchdog_tick_seen_file(proj, claude_session_id):
+    stem = _watchdog_marker_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".tick_seen")
+
+
+def set_watchdog_tick_seen(proj, claude_session_id):
+    """Record that the cron is alive at `now`. Written when a tick actually arrives, and when an
+    arm is requested (asking counts as liveness for one window, so a long busy stretch -- which
+    legitimately produces no ticks, because a tick only fires while the REPL is idle -- does not
+    append an arm block to every prompt). Never written on an ordinary prompt: that would keep the
+    marker permanently fresh and mask a dead scheduler forever."""
+    f = watchdog_tick_seen_file(proj, claude_session_id)
+    if f is None:
+        return
+    ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    _atomic_write_text(f, json.dumps({"ts": ts, "session_id": str(claude_session_id)}) + "\n")
+
+
+def clear_watchdog_tick_seen(proj, claude_session_id):
+    f = watchdog_tick_seen_file(proj, claude_session_id)
+    if f is not None:
+        f.unlink(missing_ok=True)
+
+
+def watchdog_tick_seen_age_seconds(proj, claude_session_id):
+    """Seconds since the tick-seen marker's `ts`, or None if absent or unparseable."""
+    f = watchdog_tick_seen_file(proj, claude_session_id)
+    if not (f and f.exists()):
+        return None
+    try:
+        raw = json.loads(f.read_text())
+        ts = datetime.datetime.fromisoformat(str(raw["ts"]).replace("Z", "+00:00"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+
+
+def watchdog_ticks_presumed_dead(proj, claude_session_id):
+    """True when no tick has been seen for more than TWO intervals -- or none has ever been seen.
+
+    The fail direction is the OPPOSITE of `watchdog_disarm_deadline_passed`. There, an absent or
+    corrupt marker must never read as 'old enough to tear down', because tearing down wrongly
+    loses the watchdog. Here, absent or corrupt means no tick was ever observed, and the only
+    consequence of being wrong is one redundant arm instruction -- while being wrong the other way
+    leaves the watchdog silently dead, which is the whole bug. So unreadable reads as DEAD.
+
+    Two intervals rather than one because a tick only fires while the REPL is idle: a genuinely
+    busy session can miss one without anything being wrong."""
+    age = watchdog_tick_seen_age_seconds(proj, claude_session_id)
+    if age is None:
+        return True
+    return age > watchdog_interval(proj) * 60 * 2
+
+
 def claude_session_id_from_env():
     """This Claude session's id from the environment, or None. `CLAUDE_CODE_SESSION_ID` is what
     Claude Code exports (its value equals the transcript stem, the same key the hooks derive via

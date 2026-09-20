@@ -54,22 +54,36 @@ def _directive_block(data, cwd):
 
 def _rearm_context(data, cwd):
     """The additionalContext that re-arms the cron, or None. Side effect: clears both watchdog
-    markers when the watchdog is effective."""
+    markers when the watchdog is effective, and stamps tick liveness."""
     prompt = str(data.get("prompt") or "")
-    # Defense in depth: never arm in response to a watchdog tick.
-    if "stopContinueWatchdog tick" in prompt:
-        return None
-    if not rl.is_stopcontinue_watchdog_effective(cwd):
-        return None
     sid = rl.claude_session_key(data)
+    # Operator intent outranks liveness: a watchdog that is off stays off, however dead its ticks
+    # look. This gate is deliberately BEFORE the liveness check below. Clearing on the way out
+    # matters as much as not arming: with stopContinue off the tick tears the cron down itself, so
+    # a stamp left behind would make that dead cron look alive and suppress the re-arm that
+    # re-enabling depends on.
+    if not rl.is_stopcontinue_watchdog_effective(cwd):
+        rl.clear_watchdog_tick_seen(cwd, sid)
+        return None
+    # Defense in depth: never arm in response to a watchdog tick. The tick reaches the agent
+    # THROUGH this hook, so this is also where the cron's liveness is observed, for free.
+    if "stopContinueWatchdog tick" in prompt:
+        rl.set_watchdog_tick_seen(cwd, sid)
+        return None
     rearm = (
         rl.is_watchdog_teardown_ready(cwd, sid)
         or rl.watchdog_disarm_deadline_passed(cwd, sid)
+        # The restart-safe path: the cron is gone and no tick has arrived to say otherwise.
+        or rl.watchdog_ticks_presumed_dead(cwd, sid)
     )
     rl.clear_watchdog_disarm(cwd, sid)
     rl.clear_watchdog_teardown_ready(cwd, sid)
     if not rearm:
         return None
+    # Asking counts as liveness for one window, so a busy stretch that legitimately produces no
+    # ticks does not append an arm block to every prompt. If the arm did not take, the marker
+    # ages out and this retries.
+    rl.set_watchdog_tick_seen(cwd, sid)
     return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd), sid)
 
 

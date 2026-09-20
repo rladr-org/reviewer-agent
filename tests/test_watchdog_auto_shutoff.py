@@ -534,6 +534,59 @@ def test_flag_off_clears_both_markers(tmp_path, monkeypatch):
     assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
 
 
+def test_stopcontinue_off_clears_the_tick_seen_marker(tmp_path, monkeypatch):
+    """The nastier half of the disable story, and the one the stop hook used to miss entirely.
+
+    With stopContinue off the tick prompt DELETES the cron itself (a missing flag file is its
+    teardown trigger), so the cron is gone -- but the stop hook returned at `if not flag_active`
+    before any marker clearing ran, leaving a fresh tick stamp behind. Re-enabling then looked
+    'alive' and suppressed the re-arm for up to two intervals, with no cron in existence."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_watchdog_active(repo, 1)              # watchdog ON, stopContinue OFF
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    rl.set_watchdog_tick_seen(repo, "claude-stop")
+    tr = _real_turn_transcript(tmp_path, "finish X", "Done.")
+    p = run_stop(_stop_input(repo, tr), {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+                 "FAKE_CODEX_STDOUT": "STOP_OK -- done.", "FAKE_CODEX_EXIT": "0"})
+    assert p.returncode == 0, p.stderr
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert Path(rl.watchdog_tick_seen_file(repo, "claude-stop")).exists() is False
+
+
+def test_ups_clears_the_tick_seen_marker_when_not_effective(tmp_path, monkeypatch):
+    """The same hole on the prompt path: returning early without clearing would let a stamp from
+    before the disable survive and suppress the re-arm after re-enabling."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_watchdog_active(repo, 1)              # watchdog ON, stopContinue OFF
+    rl.set_watchdog_tick_seen(repo, "claude-ups")
+    p = run_ups(repo, "do the next thing", home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""                             # still no arm while disabled
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert Path(rl.watchdog_tick_seen_file(repo, "claude-ups")).exists() is False
+
+
+def test_re_enabling_after_a_disable_re_arms_on_the_next_prompt(tmp_path, monkeypatch):
+    """End to end over the disable/re-enable round trip: whatever liveness was recorded before the
+    disable must not survive it, so the first prompt after re-enabling re-arms immediately rather
+    than waiting out two intervals with no cron."""
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    rl.set_watchdog_tick_seen(repo, "claude-ups")             # cron looked alive...
+    rl.clear_stopcontinue_active(repo)                        # ...then stopContinue goes off
+    assert run_ups(repo, "while off", home, "claude-ups").stdout.strip() == ""
+    rl.set_stopcontinue_active(repo)                          # back on
+    p = run_ups(repo, "back to work", home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert rl.WATCHDOG_MARKER in p.stdout
+
+
 def test_flag_off_also_clears_the_tick_seen_marker(tmp_path, monkeypatch):
     """Otherwise a tick stamp from before the operator turned the watchdog off survives off/on and
     makes a cron that no longer exists look alive, suppressing the re-arm that re-enabling needs."""
