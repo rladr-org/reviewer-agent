@@ -174,11 +174,32 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
 
   - **Custom `REVIEWER_SCRATCH_ROOT` dedicated to the reviewer** (nothing else writes there): remove
     it wholesale — `rm -rf "$REVIEWER_SCRATCH_ROOT"`.
-  - **Custom `REVIEWER_SCRATCH_ROOT` that is a SHARED directory:** **stop — do not delete anything
-    under it.** The tool's per-session subdirectories are named after sanitized reviewer session ids
-    and cannot be distinguished by name from unrelated entries, so there is no ownership-safe automatic
-    removal. Report scratch cleanup as **incomplete** and ask the operator to remove the reviewer's own
-    scratch subdirectories by hand.
+  - **Custom `REVIEWER_SCRATCH_ROOT` that is a SHARED directory:** do **not** remove the root, but do
+    not hand the problem to the operator either — they did not choose these names and have no way to
+    recognise them. The names are **computable, not opaque**: every scratch directory is
+    `<root>/_sanitize(<commit-reviewer session id>)`.
+
+    Enumerate precisely, and note both details — getting either wrong in a shared root means
+    deleting somebody else's directory:
+
+    - The id files are named `<project-stem>.sess_<claude-session-id>` + a **role suffix** +
+      `.codex` (`session_id_file` / `_project_session_stem` in `reviewer_state.py`). Match on the
+      role suffix and the trailing `.codex`, **not** on a leading `sess_` — the project stem comes
+      first. Each file holds its id as its only line.
+    - Use **only the commit-reviewer role** (`.reviewer.codex`). The stop-supervisor role
+      (`.stop.codex`) runs no commit audit and therefore owns **no** `commit_scratch_dir` entry, so
+      sanitizing a stop id yields a name the tool never created — in a shared root that name may
+      belong to something else entirely.
+
+    Remove exactly those subdirectories and touch nothing else. Do this **before** removing state
+    (the bullet below) — deleting state first destroys the only record of which directories were
+    the tool's.
+
+    Session rotation unlinks the id files of older generations, so scratch from a rotated generation
+    may no longer be enumerable. Remove what is identifiable, then report how many were removed and
+    that unidentifiable residue was left deliberately: residue in a shared directory is a far better
+    outcome than deleting data belonging to something else, and that residue is what
+    `sweep_orphan_scratch_dirs()` would have reclaimed on its mtime lease had the plugin stayed.
 
   **Check:** the dedicated managed scratch directory is gone, no unrelated data was removed, and any
   shared-root case was reported as incomplete rather than guessed at.
@@ -199,20 +220,29 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
   whose prompt contains `stopContinueWatchdog`, or end the session that owns it.
 
   **Check:** `CronList` reports no marker-tagged task.
-- **The plugin cache — `~/.claude/plugins/cache/reviewer-agent/`.** `claude plugin uninstall` clears
-  the registry entries in `installed_plugins.json` and `known_marketplaces.json`, but leaves **every
-  installed version directory on disk**, one per version ever installed. On a machine that has
-  followed a few releases this is tens of megabytes of dormant source — 88 MB across seven versions
-  on the machine this was written from. Nothing reads it once the plugin is gone.
+- **The plugin cache — `~/.claude/plugins/cache/reviewer-agent/`. DO THIS AFTER THE STEP 4 RESTART,
+  NOT HERE.** `claude plugin uninstall` clears the registry entries in `installed_plugins.json` and
+  `known_marketplaces.json`, but leaves **every installed version directory on disk**, one per
+  version ever installed. On a machine that has followed a few releases this is tens of megabytes of
+  dormant source — 88 MB across seven versions on the machine this was written from. Nothing reads it
+  once the plugin is gone *and every session that knew about it has been restarted*.
 
-  Prefer moving it to the Step 0 backup over deleting it, so a rollback is still possible:
+  **Why the ordering is load-bearing:** hooks are snapshotted per session, and the snapshot stores an
+  absolute path into this directory. A session that was running at uninstall time still tries to exec
+  hooks from it, so removing it first makes **every** `UserPromptSubmit` and `Stop` in that session
+  fail with `Plugin directory does not exist: …/reviewer-agent/<version>`, on every turn, until the
+  operator restarts. Measured, not hypothetical. State, scratch and briefs are safe to remove here;
+  this one is not.
+
+  After the restart, prefer moving it to the Step 0 backup over deleting it, so a rollback is still
+  possible:
 
   ```bash
   mv ~/.claude/plugins/cache/reviewer-agent "$BK"/plugin-cache
   ```
 
-  **Check:** `~/.claude/plugins/cache/reviewer-agent` no longer exists, and `claude plugin list`
-  still shows every unrelated plugin.
+  **Check:** `~/.claude/plugins/cache/reviewer-agent` no longer exists, `claude plugin list` still
+  shows every unrelated plugin, and no hook error appears on the next prompt.
 - **Operator permission rules naming the plugin path.** `~/.claude/settings.json` may hold
   `permissions.allow` entries pointing at `~/.claude/plugins/cache/reviewer-agent/.../reviewer_cmd.py`.
   These are the **operator's own configuration**, not the tool's, and a dangling allow rule grants
@@ -239,9 +269,10 @@ If a commit is still gated, a hook entry was missed: re-inspect `~/.claude/setti
 ## Report when done
 
 State plainly: which install shape was found; exactly what was removed and what was intentionally
-kept (reviewer scratch — and whether a shared custom scratch root was left for the operator to clear
-by hand — state, briefs, the timeout key, any preflight hook, the watchdog cron, the plugin cache and
-any operator permission rules naming its path); the backup location from Step 0; and
-the fact that a restart is required before the change is live. If you stopped early, say at which step
+kept (reviewer scratch — and, for a shared custom scratch root, **how many owned directories you
+removed** and whether any unidentifiable residue was left behind, never a request for the operator
+to pick through it themselves — state, briefs, the timeout key, any preflight hook, the watchdog
+cron, the plugin cache and any operator permission rules naming its path); the backup location from
+Step 0; and the fact that a restart is required before the change is live. If you stopped early, say at which step
 and why — a truthful partial report is more useful than a confident summary of a teardown that did not
 finish.
