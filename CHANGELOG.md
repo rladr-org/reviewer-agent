@@ -5,6 +5,23 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [1.3.1]
+
+### Fixed
+
+- Re-arm the `stopContinueWatchdog` recovery cron from tick liveness, so a host restart
+  cannot leave it silently absent. The cron lives only in the host session's memory and is
+  destroyed by a restart; recreating it needs an instruction delivered to the agent, and on a
+  resumed session the host does not deliver the `SessionStart` hook's `additionalContext` — so
+  nothing re-armed it while every flag still reported healthy. The `UserPromptSubmit` hook now
+  records a timestamp each time a tick actually arrives and asks for a re-arm when none has been
+  seen for two intervals. Detecting the missing ticks rather than the specific host behaviour also
+  covers a hand-deleted cron, the seven-day auto-expiry and a crashed scheduler.
+- Clear the watchdog markers when *either* half of `stopContinue` + watchdog is disabled, and
+  before the Stop hook's `stopContinue`-off early return rather than after it. With `stopContinue`
+  off the tick tears its own cron down, so a marker left behind made a cron that no longer existed
+  look alive and suppressed the re-arm for up to two intervals after re-enabling.
+
 ## [1.3.0]
 
 First release without a prerelease label. It carries the Codex stopContinue work developed across
