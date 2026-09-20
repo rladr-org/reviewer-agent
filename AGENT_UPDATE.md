@@ -164,10 +164,28 @@ diff -q <PLUGIN_DIR>/stop_hook.py "$(python3 -c "import json,os;print(json.load(
 session.** The session you are in keeps the old hook code until Claude Code restarts. Nothing you
 did in steps 3–4 reaches a running session.
 
-**Check (after restart):** `claude plugin list` shows the new version. If `stopContinue` and
-`stopContinueWatchdog` are active for a repository, the new session's `SessionStart` hook re-arms
-the watchdog recovery cron automatically — you do not re-arm it by hand. The accepted-risk receipt
-and per-repo enablement are unchanged, because state was never touched.
+**Check (after restart):** `claude plugin list` shows the new version. The accepted-risk receipt and
+per-repo enablement are unchanged, because state was never touched.
+
+If `stopContinue` and `stopContinueWatchdog` are active for a repository, the watchdog recovery cron
+is re-armed automatically and you do not re-arm it by hand — but **not by `SessionStart`, and not at
+the restart itself.** The restart destroys the cron (it lives in the host session's memory, not on
+disk), and `SessionStart` emits an arm instruction that the host does **not** deliver on a resumed
+session, so nothing has re-armed it by the time the new session opens.
+
+What recovers it is tick liveness, and the timing is **bounded rather than immediate**. The
+`tick_seen` marker is on disk and survives the restart that killed the cron, so a prompt only
+triggers the re-arm once that marker is older than two watchdog intervals (14 minutes at the default
+7). Restart shortly after a tick and the marker still looks fresh: the cron is genuinely gone, yet
+the next prompt will *not* re-arm it. So:
+
+- an empty `CronList` immediately after a restart is expected, not a fault;
+- so is an empty one after your first prompt, if that prompt came soon after the last tick;
+- within about two intervals a prompt re-arms it, and `CronList` then shows exactly one task.
+
+If it is still missing well past that, see
+[`docs/plans/watchdog_auto_shutoff.md`](docs/plans/watchdog_auto_shutoff.md) — the arm can also be
+requested by hand from the agent with `CronList`/`CronCreate`.
 
 ## Step 6 — Pi backend only: refresh the extension
 

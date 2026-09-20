@@ -37,10 +37,12 @@ in Python — never in the model:**
   **fails safe** (if it cannot read a file, it does not delete). A surviving cron keeps
   ticking, so an ignored teardown is retried next tick; a successful teardown removes the cron,
   so ticks stop on their own.
-- **Re-arm → the Stop hook's signal, with a reliable fallback.** `UserPromptSubmit` re-arms iff
+- **Re-arm → the Stop hook's signal, with two reliable fallbacks.** `UserPromptSubmit` re-arms iff
   `teardown_ready` exists, OR (defensively, and still reliably in Python) the disarm marker is
-  present and older than one interval. Both are hook-side clock checks; the model never gates
-  re-arm.
+  present and older than one interval, OR the cron looks **dead** — no tick seen for more than two
+  intervals. All three are hook-side clock checks; the model never gates re-arm. The third covers
+  the case the first two cannot see at all: a cron that vanished without any marker being written,
+  which is what a host restart does. See *Tick liveness* below.
 
 The model-compliance surface stays at exactly the existing tick (a presence check), and its
 **worst case degrades to today's behavior** (a tick per interval while the model keeps ignoring
@@ -62,7 +64,10 @@ The model-compliance surface stays at exactly the existing tick (a presence chec
    honest, a STOP_OK writes the disarm marker only when none already exists (a heartbeat tick
    must never reset an aging marker's `ts`).
 4. **Graceful degradation, never silent failure.** An ignored teardown tick is retried next
-   interval; an early/erroneous delete is recovered by the re-arm fallback or SessionStart.
+   interval; an early/erroneous delete is recovered by the re-arm fallback. Do **not** count
+   `SessionStart` as that recovery: it emits its arm instruction but the host does not deliver the
+   hook's `additionalContext` on a **resumed** session (measured 2026-09-19), so on the restart path
+   it recovers nothing. Tick liveness is what actually closes that hole.
 5. **The operator never sees a fake "keep working."** Real STOP_OK stays STOP_OK. The only
    visible artifact of a shutoff is the idle tick(s) leading up to it, and only after a genuine
    idle interval.
@@ -83,7 +88,7 @@ The model-compliance surface stays at exactly the existing tick (a presence chec
 
 ## Mechanism
 
-### 1. Two per-session state files
+### 1. Three per-session state files
 
 Both keyed by `claude_session_id = claude_session_key(data)` (the same key `reviewer_state.py`
 already uses for per-session reviewer isolation):
@@ -93,13 +98,34 @@ already uses for per-session reviewer isolation):
 - `watchdog_teardown_ready_file(proj, sid)` — presence only. Written by the Stop hook once an
   idle tick observes that `now − disarm.ts ≥ interval`. This is the tick's teardown trigger AND
   the primary re-arm signal.
+- `watchdog_tick_seen_file(proj, sid)` — JSON `{"ts": "<iso tick time>", "session_id": "<sid>"}`.
+  Written by `UserPromptSubmit` when a tick actually arrives, and again when an arm is requested.
+  `watchdog_ticks_presumed_dead()` reads it: absent, unreadable, or older than **two** intervals
+  means the cron is gone.
+
+  **Its fail direction is the opposite of the other two, deliberately.** An absent or corrupt
+  `disarm` must never read as "old enough to tear down", because tearing down wrongly loses the
+  watchdog. An absent or corrupt `tick_seen` must read as **dead**, because the only cost of being
+  wrong is one redundant arm instruction, while being wrong the other way leaves the watchdog
+  silently absent — which is the failure this file exists to prevent.
+
+  **Two intervals, not one:** a tick only fires while the REPL is idle, so a genuinely busy session
+  can miss one without anything being wrong. Writing the marker on *arm* as well as on *tick* bounds
+  re-asking to once per window rather than once per prompt during a long busy stretch.
+
+  It is never written on an ordinary prompt. Doing so would keep it permanently fresh and mask a
+  dead scheduler forever — the one implementation mistake that would pass every other test here.
 
 **Why session-scoped.** `CronCreate` is session-local: each session registers its own cron, and
 a session's `CronList`/`CronDelete` only see that session's crons. A project-scoped marker would
-let session A's stop drive session B's tick to tear down session B's *own* live cron. Session
-scoping (`<proj>.watchdog_disarm.<hash>` / `<proj>.watchdog_teardown_ready.<hash>`) makes each
-session own only its own markers; the arm-instruction bakes the session-specific `teardown_ready`
-path into the tick prompt (section 3). Orphan markers from a killed session are harmless — their
+let session A's stop drive session B's tick to tear down session B's *own* live cron. All three
+markers share one session-scoped stem — `wd_<sha1(canonical project + session)[:20]>`, plus
+`.disarm` / `.teardown_ready` / `.tick_seen` (`_watchdog_marker_stem`) — so each session owns only
+its own; the arm-instruction bakes the session-specific `teardown_ready` path into the tick prompt
+(section 3). The stem is a fixed-length digest rather than a readable path because the readable
+form grows with the project path and, with the atomic writer's temp sibling on top, could exceed
+the filesystem's name limit — at which point the Stop hook's fail-open would swallow ENAMETOOLONG
+and auto-shutoff would silently stop. Orphan markers from a killed session are harmless — their
 session id never appears in a live session's hook, tick, or prompt.
 
 ### 2. `stop_hook.py`: the decision (pure Python, reliable clock)
@@ -222,21 +248,41 @@ Register a `UserPromptSubmit` hook wired to a new `userpromptsubmit_hook.py`. On
 prompt:
 
 - Read stdin (`cwd`, `session_id`, prompt text).
-- If the prompt looks like a watchdog tick (marker substring) → emit nothing (defense in depth).
-- If `is_stopcontinue_watchdog_effective(cwd)` is false → emit nothing.
-- Otherwise, with `sid = claude_session_key(data)`, compute (all in Python):
+- With `sid = claude_session_key(data)`: if `is_stopcontinue_watchdog_effective(cwd)` is false →
+  `clear_watchdog_tick_seen(proj, sid)` and emit nothing. The clear matters as much as the silence:
+  with `stopContinue` off the tick tears its own cron down, so a stamp left behind would make a dead
+  cron look alive and suppress the re-arm after re-enabling. This gate is deliberately **before**
+  the tick check below, so operator intent outranks liveness.
+- If the prompt looks like a watchdog tick (marker substring) → `set_watchdog_tick_seen(proj, sid)`
+  and emit nothing. The tick reaches the agent through this hook, so liveness is observed for free;
+  arming in response to a tick is still forbidden (defense in depth).
+- Otherwise compute (all in Python):
   `rearm = is_watchdog_teardown_ready(proj, sid) OR (is_watchdog_disarm_set(proj, sid) AND
-  now − disarm.ts ≥ watchdog_interval(proj))`. Clear **both** markers for `sid`. Emit
-  `additionalContext` carrying `watchdog_arm_instruction(proj, watchdog_interval(proj), sid)`
-  **iff** `rearm`.
+  now − disarm.ts ≥ watchdog_interval(proj)) OR watchdog_ticks_presumed_dead(proj, sid)`.
+  Clear the disarm and teardown_ready markers for `sid`. **Iff** `rearm`: also
+  `set_watchdog_tick_seen(proj, sid)` — asking counts as liveness for one window, so a long busy
+  stretch that legitimately produces no ticks does not append an arm block to every prompt — then
+  emit `additionalContext` carrying
+  `watchdog_arm_instruction(proj, watchdog_interval(proj), sid)`.
 
-**Why the two-term gate.** `teardown_ready` is the normal signal (a tick reached the interval and
+**Why the three-term gate.** `teardown_ready` is the normal signal (a tick reached the interval and
 tore down). The age fallback closes the residual hole where the model deleted the cron *before*
 `teardown_ready` was written: on the next prompt after a full idle interval the fallback re-arms
-anyway. Both terms are false during active work (no idle interval elapsed, no `teardown_ready`),
-so there is no per-prompt reconcile noise; the reconcile only runs after genuine idle, where it is
-appropriate (and idempotent if the cron happens to still be live). This is why the toggle need not
-clear markers (section 5).
+anyway. The liveness term closes a hole neither of the first two can see, because it leaves no
+marker at all — a cron that simply **ceased to exist**, which is what a host restart does, and also
+what a hand-deleted cron, the seven-day auto-expiry and a crashed scheduler do.
+
+All three are false during active work with a live cron (no idle interval elapsed, no
+`teardown_ready`, ticks arriving), so there is no per-prompt reconcile noise; the reconcile runs
+after genuine idle or genuine death, where it is appropriate (and idempotent if the cron happens to
+still be live). This is why the toggle need not clear markers (section 5).
+
+**The liveness term is bounded, not instant.** `tick_seen` is on disk and survives the restart that
+killed the cron, so a restart that lands within two intervals of the last tick leaves the marker
+looking fresh: the cron is gone but no prompt re-arms until the marker ages out. Worst case is
+therefore roughly two intervals of no watchdog after a restart, and the operator sees `CronList`
+empty during that window. That is the deliberate trade for not re-arming on every prompt of a busy
+session; shortening it means accepting that noise instead.
 
 ### 5. `stopcontinue_watchdog_toggle.py`: resolve the session id from the environment
 
@@ -260,10 +306,18 @@ and `UserPromptSubmit`).
 `CLAUDE_CODE_SESSION_ID` and assert the emitted arm-instruction embeds the session-scoped
 `teardown_ready` path; add a case asserting `on` fails closed when the variable is unset.
 
-### 6. `session_start_hook.py`: unchanged behavior
+### 6. `session_start_hook.py`: emits an arm the host may not deliver
 
-The existing SessionStart arm remains the **primary** arm and the backstop for a lost cron; it
-only threads its session id into `watchdog_arm_instruction` (signature change, behavior unchanged).
+SessionStart still emits the arm instruction and threads its session id into
+`watchdog_arm_instruction`. Treat it as **best-effort only, not the backstop.** On a *resumed*
+session the host runs the hook but does not deliver its `additionalContext`: measured 2026-09-19,
+where the hook logged `watchdog re-arm context injected` while the session transcript recorded no
+`hook_additional_context` entry at all, and the same hook at a non-resume start did record one.
+The log line reports *emission*, not delivery, so the failure is silent.
+
+The real backstop is the liveness term in section 4. On the first cold restart after a fresh
+install this was observed working end to end: `[session_start] … injected` at 14:10:31 reaching
+nothing, then `[userpromptsubmit] … injected` at 14:10:35 reaching the agent and re-arming.
 
 ## Scope: Claude Code host only
 
@@ -375,11 +429,22 @@ roundtrip, session-scoped (session B never sees A's markers; distinct paths).
 - Effective + teardown_ready present → emits the arm-instruction AND clears both markers.
 - Effective + no teardown_ready but disarm age ≥ interval → emits the arm-instruction (the
   fallback that closes the early-delete hole).
-- Effective + disarm present but age < interval, no teardown_ready → emits **nothing**, clears
-  both.
-- Effective + no markers → nothing.
-- Not effective (watchdog flag off, or stopContinue off) → nothing.
-- Prompt body contains the tick marker → nothing.
+- Effective + fresh `tick_seen` + disarm present but age < interval, no teardown_ready → emits
+  **nothing**, clears both (the active-work case).
+- Effective + **no `tick_seen`** → emits the arm-instruction (the cron is presumed dead; this is
+  the restart path, and the redundant-arm case described under *End-to-end* below).
+- Effective + `tick_seen` older than two intervals → emits the arm-instruction.
+- Effective + `tick_seen` unreadable/corrupt → emits the arm-instruction (fails toward arming).
+- Effective + fresh `tick_seen`, no other marker → emits **nothing**, and must **not** refresh
+  `tick_seen` (an ordinary prompt never stamps; stamping here would mask a dead scheduler forever).
+- Arming **from this hook**, for any of the reasons above → also stamps `tick_seen`, so the next
+  prompt inside the window is silent. (Arms emitted by `SessionStart` or the toggle stamp nothing;
+  that asymmetry is deliberate — see *One redundant arm per arm cycle* below.)
+- Session A's fresh `tick_seen` must not make session B look alive.
+- Not effective (watchdog flag off, **or** stopContinue off) → nothing, **and clears `tick_seen`**
+  so a stale stamp cannot survive off→on and suppress the re-arm re-enabling needs.
+- Prompt body contains the tick marker → nothing, but **stamps `tick_seen`** (liveness observed for
+  free); when not effective, stamps nothing.
 
 **Toggle:** `on` with `CLAUDE_CODE_SESSION_ID` set → arm-instruction embeds the session-scoped
 teardown_ready path. `on` with neither env var set → fails closed (nonzero, no arm).
@@ -396,10 +461,30 @@ keeping), so an outdated-prompt cron is upgraded to the `teardown_ready` tick.
 session_id(B)) reads a different teardown_ready path; B's stop writes `disarm(B)` and leaves A's
 markers untouched.
 
-**End-to-end:** flag on → prompt (no markers → no re-arm; SessionStart already armed) → work
-STOP_OK (disarm set, verdict STILL STOP_OK) → idle: two ticks with the age check turning
-teardown_ready on → teardown tick (teardown_ready present → CronDelete shape) → prompt
-(teardown_ready present → re-arm, both cleared). Assert no KEEP_WORKING ever emitted.
+**End-to-end:** flag on → first prompt (no `tick_seen` yet → treated as dead → **re-arms**, and
+stamps `tick_seen`; see *One redundant arm per arm cycle* below) → second prompt (`tick_seen` fresh →
+silent) → work STOP_OK (disarm set, verdict STILL STOP_OK) → idle: two ticks, each stamping
+`tick_seen`, with the age check turning teardown_ready on → teardown tick (teardown_ready present →
+CronDelete shape) → prompt (teardown_ready present → re-arm, markers cleared). Assert no
+KEEP_WORKING ever emitted.
+
+**Tick liveness:** absent marker → dead; corrupt marker → dead (fail toward arming); fresh →
+alive; older than two intervals → dead; an ordinary prompt must **not** refresh the marker (an
+implementation that stamped on every prompt would mask a dead scheduler forever while passing every
+other case here); session A's fresh marker must not make session B look alive; disabling either
+half of `stopContinue`+watchdog clears the marker so a stale stamp cannot survive off→on and
+suppress the re-arm that re-enabling needs.
+
+**One redundant arm per arm cycle, accepted deliberately.** Neither `SessionStart` (section 6) nor
+the toggle (section 5) records `tick_seen` — they emit the arm instruction and nothing else. So after
+a successful arm from either, the first ordinary prompt still sees no marker, classifies the cron as
+dead, and asks for a reconcile it does not strictly need. This is bounded to **one** prompt per arm
+cycle — not per session, since disabling clears `tick_seen`, so an off→on toggle starts a fresh
+cycle and earns one more — and is harmless, because the arm instruction reconciles
+to *exactly one* cron rather than creating a second. The alternative — having every arm source stamp
+`tick_seen` — would suppress the liveness check precisely when an emitted arm was never delivered,
+which is the failure this whole mechanism exists to catch. Prefer one redundant reconcile over a
+silent hole.
 
 ## Non-goals
 
@@ -410,10 +495,12 @@ teardown_ready on → teardown tick (teardown_ready present → CronDelete shape
 - **Distinguishing "done for the session" from a brief pause.** The interval is the threshold,
   checked in Python.
 - **Guaranteeing the arm itself against model non-compliance.** Arming still relies on the model
-  executing the injected arm-instruction (SessionStart primary; UserPromptSubmit after idle; the
-  toggle on `on`), and teardown relies on the tick honoring a presence check. A model that
+  executing the injected arm-instruction (SessionStart on a **cold** start only — it is not the
+  backstop on a resumed one, section 6; UserPromptSubmit after idle or on a dead cron; the toggle on
+  `on`), and teardown relies on the tick honoring a presence check. A model that
   CronDeletes against an explicit "reply ok" instruction (not a misjudgement — the tick has no
-  clock to misjudge) could drop protection until the next SessionStart; this is a pre-existing,
+  clock to misjudge) could drop protection until a later prompt's liveness check; this is a
+  pre-existing,
   low-stakes property (the watchdog is a recovery convenience, not a safety-critical gate), and
   the re-arm age fallback recovers it on the next post-idle prompt.
 - **Detecting activity via anything other than `UserPromptSubmit`.**
