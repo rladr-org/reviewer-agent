@@ -189,6 +189,35 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
 - **Per-repository briefs.** Each protected repo has a hand-written `reviewerAgent.md`. Leave them
   unless the operator asks — they are not the tool's to delete.
 - **The Pi extension**, only if `pi` was used: `rm -rf ~/.pi/agent/extensions/git-read-only`.
+- **The `stopContinueWatchdog` recovery cron — remove this whenever `stopContinue` was used, even on
+  a "keep everything" uninstall.** The cron lives in the host session, not on disk, and its tick
+  tears itself down only when a flag file is missing or the session's `teardown_ready` marker is
+  present. Keeping state (the bullet above) keeps those flag files, so **the self-teardown condition
+  never fires and the tick runs forever against a plugin that is gone** — every few minutes, in
+  every session that still has one armed. Uninstalling the code cannot cancel it: only the agent can,
+  and only from the session that created it. Ask the agent to `CronList` and `CronDelete` every task
+  whose prompt contains `stopContinueWatchdog`, or end the session that owns it.
+
+  **Check:** `CronList` reports no marker-tagged task.
+- **The plugin cache — `~/.claude/plugins/cache/reviewer-agent/`.** `claude plugin uninstall` clears
+  the registry entries in `installed_plugins.json` and `known_marketplaces.json`, but leaves **every
+  installed version directory on disk**, one per version ever installed. On a machine that has
+  followed a few releases this is tens of megabytes of dormant source — 88 MB across seven versions
+  on the machine this was written from. Nothing reads it once the plugin is gone.
+
+  Prefer moving it to the Step 0 backup over deleting it, so a rollback is still possible:
+
+  ```bash
+  mv ~/.claude/plugins/cache/reviewer-agent "$BK"/plugin-cache
+  ```
+
+  **Check:** `~/.claude/plugins/cache/reviewer-agent` no longer exists, and `claude plugin list`
+  still shows every unrelated plugin.
+- **Operator permission rules naming the plugin path.** `~/.claude/settings.json` may hold
+  `permissions.allow` entries pointing at `~/.claude/plugins/cache/reviewer-agent/.../reviewer_cmd.py`.
+  These are the **operator's own configuration**, not the tool's, and a dangling allow rule grants
+  nothing once the path is gone — so this document does not remove them. Mention them and leave the
+  decision to the operator.
 
 ## Step 4 — restart and verify (operator-only)
 
@@ -198,6 +227,9 @@ Ask the operator to **restart Claude Code**, then confirm:
   `askq_reroute_hook.py`, or a `commit_hook.py` chained in `bash_gate.py`).
 - A normal Bash command runs — the operator's own preflight/approval hook survived.
 - A `git commit` in a previously gated repository is **no longer** intercepted by a reviewer.
+- No `stopContinueWatchdog` tick arrives in the new session. One that keeps firing means a cron
+  survived somewhere: ask the agent to `CronList`/`CronDelete` it (Step 3), because the plugin is no
+  longer there to tear it down.
 
 If a commit is still gated, a hook entry was missed: re-inspect `~/.claude/settings.json` and
 `bash_gate.py` and repeat Step 2S.
@@ -208,7 +240,8 @@ If a commit is still gated, a hook entry was missed: re-inspect `~/.claude/setti
 
 State plainly: which install shape was found; exactly what was removed and what was intentionally
 kept (reviewer scratch — and whether a shared custom scratch root was left for the operator to clear
-by hand — state, briefs, the timeout key, any preflight hook); the backup location from Step 0; and
+by hand — state, briefs, the timeout key, any preflight hook, the watchdog cron, the plugin cache and
+any operator permission rules naming its path); the backup location from Step 0; and
 the fact that a restart is required before the change is live. If you stopped early, say at which step
 and why — a truthful partial report is more useful than a confident summary of a teardown that did not
 finish.
