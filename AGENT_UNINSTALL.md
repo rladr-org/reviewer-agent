@@ -244,7 +244,8 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
   **Check:** `~/.claude/plugins/cache/reviewer-agent` no longer exists, `claude plugin list` still
   shows every unrelated plugin, and no hook error appears on the next prompt.
 - **Operator permission rules naming the plugin path.** `~/.claude/settings.json` may hold
-  `permissions.allow` entries pointing at `~/.claude/plugins/cache/reviewer-agent/.../reviewer_cmd.py`.
+  `permissions.allow` entries pointing at `~/.claude/plugins/cache/reviewer-agent/.../reviewer_cmd.py`,
+  and a matching `permissions.deny` entry that refuses `..` paths under that same prefix.
   These are the **operator's own configuration**, not the tool's, and a dangling allow rule grants
   nothing once the path is gone — so this document does not remove them. Mention them and leave the
   decision to the operator.

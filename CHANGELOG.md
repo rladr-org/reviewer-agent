@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [Unreleased]
+
+### Fixed
+
+- `AGENT_INSTALL.md`: the documented allow rule for the manual commands never matched. It mixed a
+  mid-rule `*` (the version segment) with the legacy trailing `:*`, and Claude Code matches
+  everything before a trailing `:*` literally, so the `*` was never expanded and the host warned at
+  startup that the rule "mixes * with the trailing :* prefix syntax". The rule now ends in ` *`.
+  The doc also wrongly said a `*` matches one path segment; it matches any text, including `/` and
+  `..`, so the doc now pairs the rule with a `..` deny rule that keeps it from approving a
+  same-named script outside the plugin cache. `tests/test_reviewer_cmd_allow_rule.py` guards both.
+
 ## [1.3.1]
 
 ### Fixed

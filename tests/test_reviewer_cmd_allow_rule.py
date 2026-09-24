@@ -74,6 +74,30 @@ def test_agent_install_documents_a_version_independent_allow_rule():
         "plugin update")
 
 
+def test_agent_install_allow_rule_does_not_mix_star_with_trailing_colon_star():
+    doc = (ROOT / "AGENT_INSTALL.md").read_text(encoding="utf-8")
+    # Claude Code recognizes `:*` only as the END of a pattern and matches everything before it
+    # literally, so `Bash(python3 ".../*/reviewer_cmd.py":*)` compares the `*` as a literal character
+    # and never matches -- the host warns "mixes * with the trailing :* prefix syntax" at startup. A
+    # mid-rule wildcard must use the space form: `.../*/reviewer_cmd.py" *)`.
+    rules = re.findall(r'Bash\(python3 [^\n)]*reviewer_cmd\.py[^\n)]*\)', doc)
+    assert rules, "AGENT_INSTALL.md no longer documents a reviewer_cmd.py allow rule"
+    for rule in rules:
+        assert not ("*/" in rule and rule.endswith(":*)")), (
+            "{} mixes a mid-rule * with the trailing :* prefix syntax; Claude Code matches it as a "
+            "literal prefix and it never matches -- end it with ' *)' instead".format(rule))
+
+
+def test_agent_install_documents_the_dotdot_deny_rule():
+    doc = (ROOT / "AGENT_INSTALL.md").read_text(encoding="utf-8")
+    # A Bash-rule `*` matches ANY text, including `/` and `..`, so the version wildcard also approves
+    # `.../reviewer-agent/../../../tmp/x/reviewer_cmd.py` -- an arbitrary script that merely shares
+    # the name. Deny rules take precedence, so the doc must pair the allow rule with a `..` deny.
+    assert re.search(r'"deny":\s*\[\s*"Bash\(python3 [^\n)]*/\*\.\.\*\)"', doc), (
+        "AGENT_INSTALL.md must pair the wildcard allow rule with a deny rule "
+        "(Bash(python3 \".../*..*)) that refuses a `..` path out of the plugin cache")
+
+
 def test_agent_install_documents_the_on_classifier_exception():
     doc = (ROOT / "AGENT_INSTALL.md").read_text(encoding="utf-8")
     # The permission allow rule does NOT clear the state-changing `on`; the docs must keep telling

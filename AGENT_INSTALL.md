@@ -357,12 +357,25 @@ and the installed path is version-stamped —
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/reviewer_cmd.py` — so a rule that pins the
 version goes STALE on the next `claude plugin update`. Wildcard the version segment with `*` so the
 rule survives updates: run `claude plugin list` for your install path, then keep every segment
-literal EXCEPT the version, which becomes `*` (a single `*` matches one path segment, so it stays
-scoped to `reviewer_cmd.py` under any version):
+literal EXCEPT the version, which becomes `*`. End the rule with a space and `*` (` *)`), not the
+legacy `:*` suffix: Claude Code recognizes `:*` only at the end of a pattern and matches everything
+before it literally, so `.../*/reviewer_cmd.py":*` compares the `*` as a literal character, never
+matches, and draws a startup warning that it "mixes * with the trailing :* prefix syntax".
+
+A Bash-rule `*` matches ANY text, including `/` and `..` — it does not stop at one path segment — so
+the allow rule alone would also approve `.../reviewer-agent/../../../tmp/x/reviewer_cmd.py`, an
+arbitrary script that merely shares the name. Pair it with a deny rule (deny rules take precedence)
+that refuses any `..` after the plugin-cache prefix:
 
 ```json
-{ "permissions": { "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*/reviewer_cmd.py\":*)"] } }
+{ "permissions": {
+  "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*/reviewer_cmd.py\" *)"],
+  "deny": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*..*)"]
+} }
 ```
+
+The deny rule also refuses a normal invocation whose arguments contain `..`; none of the reviewer
+commands take such an argument.
 
 `/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
 
