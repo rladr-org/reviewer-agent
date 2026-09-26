@@ -61,6 +61,8 @@ from reviewer_git import (  # noqa: F401
     git_c_effective_dir,
     git_head,
     is_git_commit,
+    CommitIntent,
+    commit_intent,
     commit_confirmation_command,
     is_git_repo,
     parse_commit_request,
