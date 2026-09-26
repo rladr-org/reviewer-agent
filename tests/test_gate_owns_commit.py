@@ -268,3 +268,20 @@ def test_a_stage_during_review_blocks_publication_and_preserves_the_work(
     staged = _git(repo, "diff", "--cached", "--name-only").split()
     assert "late.py" in staged  # the newer work was neither reset nor stashed
     assert "f.py" in staged
+
+
+def test_stage_and_commit_in_one_call_is_refused_accurately_with_an_empty_index(
+        tmp_path, monkeypatch, capsys):
+    repo = _claude_repo(tmp_path)
+    _git(repo, "reset", "-q")  # nothing staged: the case that said "nothing is staged"
+    _activate(repo, monkeypatch, tmp_path)
+    called = []
+    _approve(monkeypatch, record=called)
+
+    out = _run(repo, "git add f.py" + " && " + "git commit -m x", capsys, monkeypatch)
+
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "stages and commits in one call" in reason
+    assert "nothing is staged" not in reason
+    assert called == []

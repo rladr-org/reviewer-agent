@@ -427,6 +427,56 @@ def _unsupported_reason(token):
     return "`{}` is not one of the options the gate carries".format(token)
 
 
+_STAGING_SUBCOMMANDS = ("add", "rm", "mv", "stage")
+
+
+def _git_subcommand(words):
+    """The subcommand of a `git ...` word list (global options and `-C <path>` skipped), or None."""
+    if not words or words[0] != "git":
+        return None
+    index = 1
+    while index < len(words) and words[index].startswith("-"):
+        name = words[index].split("=", 1)[0]
+        index += 2 if (name in _GIT_GLOBAL_VALUE and "=" not in words[index]) else 1
+    return words[index] if index < len(words) else None
+
+
+def _compound_reason(tokens):
+    """Why a call holding more than the one `git commit` is refused, naming its real cause.
+
+    Staging in the same call is the common case, and the generic "would be dropped" text used to
+    name the COMMIT as the dropped part -- the gate reads the index before the call runs, so the
+    staging is what never happens."""
+    segments, current = [], []
+    for token in tokens:
+        if token in _SHELL_OPS or _REDIR_RE.match(token):
+            segments.append(current)
+            current = []
+        else:
+            current.append(token)
+    segments.append(current)
+    others, commit_seen = [], False
+    for segment in segments:
+        if not segment:
+            continue
+        if not commit_seen and _git_subcommand(segment) == "commit":
+            commit_seen = True  # the one the gate would perform; every other part is dropped
+            continue
+        others.append(" ".join(segment))
+    staging = [" ".join(s) for s in segments if _git_subcommand(s) in _STAGING_SUBCOMMANDS]
+    if staging:
+        return (
+            "this call stages and commits in one call ({}), but the gate reads the index BEFORE "
+            "the call runs, so the staging would never happen first. Run `{}` as its own tool "
+            "call, then a plain `git commit -m ...`".format(" && ".join(staging), staging[0])
+        )
+    return (
+        "the gate performs the commit itself and then declines this tool call, so anything else "
+        "in the call would be dropped without running{}. Send only the `git commit`, and run the "
+        "rest as its own tool call.".format(" (here: {})".format("; ".join(others)) if others else "")
+    )
+
+
 def parse_commit_request(command):
     """`(request, None)` for a call the gate can perform itself, else `(None, reason)`.
 
@@ -450,16 +500,8 @@ def parse_commit_request(command):
     if not tokens:
         return None, "there is no command to run"
 
-    for index, token in enumerate(tokens):
-        if token in _SHELL_OPS or _REDIR_RE.match(token):
-            rest = " ".join(tokens[index + 1:]).strip()
-            return None, (
-                "the gate performs the commit itself and then declines this tool call, so "
-                "anything else in the call would be dropped without running{}. Send only the "
-                "`git commit`, and run the rest as its own tool call.".format(
-                    " (here: {})".format(rest) if rest else ""
-                )
-            )
+    if any(token in _SHELL_OPS or _REDIR_RE.match(token) for token in tokens):
+        return None, _compound_reason(tokens)
     if tokens[0] != "git":
         return None, (
             "the gate carries only a single plain `git commit`, and this call starts with "

@@ -60,6 +60,18 @@ def test_the_refusal_names_what_it_found_so_the_agent_can_split_the_call():
     assert "push" in error
 
 
+def test_staging_in_the_same_call_gets_an_accurate_refusal():
+    error = _refusal("git add f.py" + " && " + "git commit -m x")
+    assert "stages and commits in one call" in error
+    assert "git add f.py" in error
+    assert "(here: git commit" not in error  # the old text named the COMMIT as the dropped part
+
+
+def test_the_refusal_names_the_parts_that_would_be_dropped():
+    error = _refusal("git commit -m x" + " && " + "git push")
+    assert "git push" in error and "git commit -m x" not in error.split("(here:")[-1]
+
+
 # --------------------------------------------------------------------------
 # The message
 # --------------------------------------------------------------------------

@@ -134,6 +134,24 @@ def main(raw=None):
         )
         return 0
 
+    # The gate performs the reviewed commit ITSELF and then DENIES the tool call, so the call must
+    # be exactly one plain `git commit`: anything else in it would be dropped unrun. Refuse an
+    # unsupported shape BEFORE spending a review -- and before the empty-index check, so that
+    # `git add f && git commit` is refused for staging in the same call, not for "nothing is
+    # staged". The message and carried flags are recovered here.
+    # See docs/plans/claude_commit_transaction_design.md.
+    commit_request, parse_reason = rl.parse_commit_request(command)
+    if commit_request is None:
+        rl.log("[commit] key={} unsupported commit shape ({}) cmd={!r} -> denied".format(
+            key, rl.short(parse_reason, 200), rl.short(command, 120)))
+        print(json.dumps(rl.deny_output(
+            "reviewerAgent performs the reviewed commit itself, so it accepts exactly one plain "
+            "`git commit` and nothing else: {}.".format(parse_reason),
+            "[reviewerAgent] git commit blocked before review: {}".format(
+                rl.short(parse_reason, 200)),
+        )))
+        return 0
+
     staged = rl.staged_files(cwd)
     if not staged:
         reason = (
@@ -186,21 +204,6 @@ def main(raw=None):
             backend=backend,
         )
 
-    # The gate performs the reviewed commit ITSELF and then DENIES the tool call, so the call must
-    # be exactly one plain `git commit`: anything else in it would be dropped unrun. Refuse an
-    # unsupported shape BEFORE spending a review; the message and carried flags are recovered here.
-    # See docs/plans/claude_commit_transaction_design.md.
-    commit_request, parse_reason = rl.parse_commit_request(command)
-    if commit_request is None:
-        rl.log("[commit] key={} unsupported commit shape ({}) cmd={!r} -> denied".format(
-            key, rl.short(parse_reason, 200), rl.short(command, 120)))
-        print(json.dumps(rl.deny_output(
-            "reviewerAgent performs the reviewed commit itself, so it accepts exactly one plain "
-            "`git commit` and nothing else: {}.".format(parse_reason),
-            "[reviewerAgent] git commit blocked before review: {}".format(
-                rl.short(parse_reason, 200)),
-        )))
-        return 0
     # The digest of the staged set the reviewer is about to judge: git's own write-tree hash,
     # covering content, modes, names and structure. Recorded now and compared just before the
     # commit -- equal means what gets committed is exactly what was reviewed. An empty result
