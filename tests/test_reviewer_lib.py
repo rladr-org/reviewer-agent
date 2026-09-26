@@ -34,6 +34,7 @@ COMMIT_POSITIVE = [
     "git -C /path/to/repo commit -m x",
     "git add -A && git commit -m x",
     "cd sub; git commit",
+    "git commit-tree abc123",  # #15: commit-tree writes a commit the reviewer never sees
 ]
 COMMIT_NEGATIVE = [
     "git status",
@@ -42,7 +43,6 @@ COMMIT_NEGATIVE = [
     "git add -A",
     "ls -la",
     "echo committed files",
-    "git commit-tree abc123",
     "git show HEAD",
     "git committed",
 ]

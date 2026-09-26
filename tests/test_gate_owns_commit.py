@@ -285,3 +285,52 @@ def test_stage_and_commit_in_one_call_is_refused_accurately_with_an_empty_index(
     assert "stages and commits in one call" in reason
     assert "nothing is staged" not in reason
     assert called == []
+
+
+def test_a_nested_commit_in_an_active_repo_is_refused_before_review(tmp_path, monkeypatch, capsys):
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    called = []
+    _approve(monkeypatch, record=called)
+    before = _git(repo, "rev-parse", "HEAD")
+    for command in ("bash -c 'git commit -m x'", "/usr/bin/git commit -m x",
+                    "git cherry-pick HEAD"):
+        out = _run(repo, command, capsys, monkeypatch)
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny", command
+    assert called == [] and _git(repo, "rev-parse", "HEAD") == before
+
+
+def test_an_inactive_repo_is_never_touched(tmp_path, monkeypatch, capsys):
+    # Review Focus 1.
+    repo = _claude_repo(tmp_path)
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))  # gate NOT enabled here
+    for command in ("git merge feature", "bash -c 'git commit -m x'", "git cherry-pick HEAD"):
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+            {"cwd": repo, "session_id": "s", "tool_name": "Bash",
+             "tool_input": {"command": command}})))
+        assert commit_hook.main() == 0
+        assert capsys.readouterr().out.strip() == "", command
+
+
+def test_a_heredoc_mentioning_a_commit_runs_in_an_active_repo(tmp_path, monkeypatch, capsys):
+    # Review Focus 2, end to end.
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"cwd": repo, "session_id": "s", "tool_name": "Bash",
+         "tool_input": {"command": "cat > notes.md <<'EOF'\nthen git commit -m x\nEOF"}})))
+    assert commit_hook.main() == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_cd_into_an_active_repo_from_elsewhere_is_gated(tmp_path, monkeypatch, capsys):
+    repo = _claude_repo(tmp_path)
+    _activate(repo, monkeypatch, tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"cwd": str(elsewhere), "session_id": "s", "tool_name": "Bash",
+         "tool_input": {"command": "cd {} && git commit -m x".format(repo)}})))
+    assert commit_hook.main() == 0
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"][
+        "permissionDecision"] == "deny"

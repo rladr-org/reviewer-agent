@@ -69,37 +69,44 @@ def main(raw=None):
     if not isinstance(data, dict):
         raise ValueError("hook input must be a JSON object")
 
-    # Cheap precision check FIRST so the canonical-root resolution (a git subprocess)
-    # runs only for actual commits, never on every Bash command.
     command = (data.get("tool_input") or {}).get("command") or ""
-    if not rl.is_git_commit(command):
-        return 0
-
     raw_cwd = data.get("cwd") or rl.project_dir()
-    # A `git -C <target> commit` whose target is a shell variable / command substitution the gate
-    # cannot resolve: it cannot know which repository the commit targets. Fail CLOSED when the
-    # reviewer is active for ANY project -- an unexpandable $VAR may point at one of those active
-    # repos, and gating the session cwd instead would review the WRONG repo (a fail-open). The
-    # session cwd's own activation does not matter (an inactive session can still target an active
-    # repo). Stay out of the way only when the reviewer is off everywhere (off means off).
-    if rl.commit_c_unresolvable(command) and rl.any_reviewer_active():
-        reason = (
-            "reviewerAgent cannot determine which repository this commit targets: its `git -C` "
-            "path is a shell variable or command substitution the gate cannot resolve, so it "
-            "cannot review the correct staged set. Re-run from the repository directory as a plain "
-            "`git commit`, or pass a literal path (`git -C /absolute/path commit`)."
-        )
-        rl.log("[commit] key={} unresolvable -C target cmd={!r} -> denied (fail-closed)".format(
-            rl.canonical_project_key(raw_cwd), rl.short(command, 120)))
-        print(json.dumps(rl.deny_output(
-            reason,
-            "[reviewerAgent] git commit blocked: the `-C` target is a shell variable the gate "
-            "cannot resolve, so it cannot confirm the target repository. Use a literal path or "
-            "commit from the repo directory.",
-        )))
+    intent = rl.commit_intent(command, raw_cwd)
+    if intent.kind is None:
         return 0
-    cwd = rl.git_c_effective_dir(command, raw_cwd)  # honor `git -C <path>`: gate the commit's repo
+    # The command text does not say which repository this acts on (`git -C "$R"`, `cd "$R"`, a
+    # `cd` that may not have run, `GIT_DIR=...`): the gate cannot know. Fail CLOSED while the
+    # reviewer is active for ANY project -- the real target may be one of them -- and stay out of
+    # the way when it is off everywhere (off means off).
+    if intent.target is None:
+        if rl.any_reviewer_active():
+            reason = (
+                "reviewerAgent cannot determine which repository this commit targets: the "
+                "command reaches it through a shell variable, a command substitution, a `cd` "
+                "that may not have run, or a git location setting, so the gate cannot review "
+                "the correct staged set. Re-run from the repository directory as a plain "
+                "`git commit`, or pass a literal path (`git -C /absolute/path commit`).{}".format(
+                    " Also: {}.".format(intent.reason) if intent.kind == "other" else "")
+            )
+            rl.log("[commit] key={} unresolvable target cmd={!r} -> denied (fail-closed)".format(
+                rl.canonical_project_key(raw_cwd), rl.short(command, 120)))
+            print(json.dumps(rl.deny_output(
+                reason,
+                "[reviewerAgent] git commit blocked: the gate cannot tell which repository it "
+                "targets. Use a literal path or commit from the repo directory.",
+            )))
+        return 0
+    cwd = intent.target
     if not rl.is_active(cwd):  # resolves cwd -> canonical project root internally
+        return 0
+    if intent.kind == "other":
+        rl.log("[commit] key={} commit-producing form refused ({}) cmd={!r}".format(
+            rl.canonical_project_key(cwd), rl.short(intent.reason, 120), rl.short(command, 120)))
+        print(json.dumps(rl.deny_output(
+            "reviewerAgent reviews every commit in this repository, and this call would create "
+            "one it cannot review: {}.".format(intent.reason),
+            "[reviewerAgent] blocked before review: {}".format(rl.short(intent.reason, 200)),
+        )))
         return 0
     claude_sid = rl.claude_session_key(data)
     key = rl.canonical_project_key(cwd)

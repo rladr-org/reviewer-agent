@@ -353,3 +353,118 @@ def test_inline_argv_with_global_options_is_refused():
 def test_an_alias_in_a_repository_the_gate_cannot_name_is_refused():
     intent = rl.commit_intent("GIT_DIR=/repo/.git git ci -m x", CWD)
     assert intent.kind == "other" and intent.target is None
+
+
+@pytest.mark.parametrize("command,needle", [
+    ("git commit-tree abc -m x", "commit-tree"),
+    ("git merge feature", "--no-commit"),
+    ("git merge --no-ff feature", "--no-commit"),
+    ("git merge --continue", "--no-commit"),
+    ("git cherry-pick abc123", "cherry-pick -n"),
+    ("git revert HEAD", "--no-commit"),
+    ("git am 0001.patch", "git apply --index"),
+    ("git pull", "--ff-only"),
+    ("git pull --rebase", "--ff-only"),
+    # Git resolves these options last-wins, so a later switch re-enables the commit:
+    ("git merge --no-commit --commit feature", "--no-commit"),
+    ("git merge --no-commit --comm feature", "--no-commit"),  # an abbreviation of --commit
+    ("git merge --squash --no-squash feature", "--no-commit"),
+    ("git merge --ff-only --no-ff feature", "--no-commit"),
+    ("git merge --ff-only --ff feature", "--no-commit"),
+    ("git cherry-pick -n --commit abc123", "cherry-pick -n"),  # --commit negates --no-commit
+    ("git revert --no-commit --commit HEAD", "--no-commit"),
+    ("git cherry-pick --skip", "cherry-pick -n"),  # resumes the sequence, committing the rest
+])
+def test_other_commit_producers_are_refused_with_the_no_commit_route(command, needle):
+    intent = rl.commit_intent(command, CWD)
+    assert intent.kind == "other" and needle in intent.reason, command
+
+
+@pytest.mark.parametrize("command", [
+    "git merge --no-commit --no-ff feature", "git merge --squash feature",
+    "git merge --ff-only origin/main", "git merge --abort",
+    "git merge --commit --no-commit feature", "git merge --no-commit --ff feature",
+    "git merge --squash --commit feature",  # git refuses the combination; nothing is committed
+    "git cherry-pick -n abc123", "git cherry-pick --no-commit abc", "git cherry-pick -xn abc",
+    "git revert --no-commit HEAD", "git revert -n HEAD", "git am --abort",
+    "git merge-base a b", "git log --merges",
+])
+def test_no_commit_modes_are_allowed(command):
+    assert rl.commit_intent(command, CWD).kind is None, command
+
+
+@pytest.fixture
+def pull_repo(tmp_path, monkeypatch):
+    """A repository on branch `main` whose pull mode comes only from its own config."""
+    from repo_context import init_repo
+    for name in ("HOME", "XDG_CONFIG_HOME"):
+        monkeypatch.setenv(name, str(tmp_path))  # no global pull.rebase from the host
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    return str(repo)
+
+
+@pytest.mark.parametrize("command", [
+    "git pull --ff-only", "git pull --no-commit", "git pull --squash",
+    "git pull --rebase --no-rebase --no-commit", "git pull --rebase=false --squash",
+])
+def test_no_commit_pull_modes_are_allowed(pull_repo, command):
+    assert rl.commit_intent(command, pull_repo).kind is None, command
+
+
+@pytest.mark.parametrize("command", [
+    "git pull --no-commit --commit", "git pull --squash --no-squash", "git pull --ff-only --ff",
+    "git pull --no-commit --rebase", "git pull -r --no-commit", "git pull --ff-only --rebase",
+    "git -c pull.rebase=true pull --no-commit",
+    "git -c branch.main.rebase=merges pull --squash",
+    'git -c "$CFG" pull --no-commit',  # may set pull.rebase
+])
+def test_pull_that_rebases_or_re_enables_the_commit_is_refused(pull_repo, command):
+    intent = rl.commit_intent(command, pull_repo)
+    assert intent.kind == "other" and "--ff-only" in intent.reason, command
+
+
+@pytest.mark.parametrize("command", [
+    "git merge -m --no-commit feature",        # the token is -m's message, not a switch
+    "git merge --message --squash feature",
+    "git merge -s --ff-only feature",
+    "git cherry-pick -m --no-commit abc",
+    "git cherry-pick -Sn HEAD",           # `n` is -S's attached key id, not --no-commit
+    "git revert -Sn HEAD",
+    "git merge --some-new-option --no-commit feature",  # it may have taken the switch as a value
+])
+def test_a_no_commit_switch_used_as_an_option_value_does_not_count(command):
+    assert rl.commit_intent(command, CWD).kind == "other", command
+
+
+@pytest.mark.parametrize("command", [
+    "git merge -m msg --no-commit feature",
+    "git merge --strategy ours --no-commit feature",
+    "git merge -X theirs --squash feature",
+    "git merge --no-edit --no-commit feature",
+    "git merge -S --no-commit feature",   # -S takes its key only attached
+    "git cherry-pick -nS HEAD",
+])
+def test_option_values_are_skipped_before_the_no_commit_switch(command):
+    assert rl.commit_intent(command, CWD).kind is None, command
+
+
+def test_ff_only_overrides_a_configured_rebase_on_git_that_honours_it(pull_repo):
+    # git >= 2.34 fast-forwards or fails under --ff-only whatever pull.rebase says; older git
+    # (Ubuntu 20.04's 2.25) rebases, so there it stays refused.
+    import subprocess
+    subprocess.run(["git", "-C", pull_repo, "config", "pull.rebase", "true"], check=True)
+    version = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+    numbers = tuple(int(n) for n in version.split()[2].split(".")[:2])
+    expected = None if numbers >= (2, 34) else "other"
+    assert rl.commit_intent("git pull --ff-only", pull_repo).kind == expected
+
+
+@pytest.mark.parametrize("key", ["pull.rebase", "branch.main.rebase"])
+def test_configured_rebase_makes_a_no_commit_pull_commit(pull_repo, key):
+    # Verified: under pull.rebase=true, `git pull --no-commit` rebases and moves HEAD.
+    import subprocess
+    subprocess.run(["git", "-C", pull_repo, "config", key, "true"], check=True)
+    assert rl.commit_intent("git pull --no-commit", pull_repo).kind == "other"
+    assert rl.commit_intent("git pull --no-rebase --no-commit", pull_repo).kind is None

@@ -82,7 +82,8 @@ def is_git_repo(path):
 
 
 def is_git_commit(command):
-    return _COMMIT_RE.search(command or "") is not None
+    """Back-compat predicate: does `command` run any commit-producing git (see commit_intent)?"""
+    return commit_intent(command, ".").kind is not None
 
 
 def _commit_c_scan(command, cwd):
@@ -504,6 +505,11 @@ def parse_commit_request(command):
 
     if any(token in _SHELL_OPS or _REDIR_RE.match(token) for token in tokens):
         return None, _compound_reason(tokens)
+    if tokens[0] != "git" and os.path.basename(tokens[0]) == "git":
+        return None, (
+            "the gate runs `git` itself from PATH, so call it by its plain name "
+            "(`git commit -m ...`), not `{}`".format(tokens[0])
+        )
     if tokens[0] != "git":
         return None, (
             "the gate carries only a single plain `git commit`, and this call starts with "
@@ -1045,11 +1051,259 @@ def _config_key(key):
     return head.lower() + dot + (middle + "." if middle else "") + last.lower()
 
 
+# subcommand -> the no-commit route to offer when it would commit
+_COMMIT_PRODUCERS = {
+    "commit-tree": "`git commit-tree` writes a commit object the reviewer never sees and has no "
+                   "no-commit form; stage the change and run a plain `git commit -m ...`",
+    "merge": "`git merge` creates a merge commit the reviewer never sees. Run `git merge "
+             "--no-commit --no-ff <branch>` (or `--squash`, or `--ff-only`), resolve, then a "
+             "plain `git commit -m ...`",
+    "cherry-pick": "`git cherry-pick` commits without review. Run `git cherry-pick -n <commit>`, "
+                   "then a plain `git commit -m ...`",
+    "revert": "`git revert` commits without review. Run `git revert --no-commit <commit>`, then "
+              "a plain `git commit -m ...`",
+    "am": "`git am` commits without review. Run `git apply --index <patch>`, then a plain "
+          "`git commit -m ...`",
+    "pull": "`git pull` can create a merge commit or rebased commits the reviewer never sees. "
+            "Run `git pull --ff-only`, `--no-commit` or `--squash` with rebasing off, or "
+            "`git fetch` then `git merge --ff-only` (or `--no-commit`/`--squash` and a plain "
+            "`git commit -m ...`)",
+}
+_FALSE_WORDS = {"false", "no", "off", "0", ""}
+
+
+def _abbreviates(arg, option):
+    """git accepts any unambiguous prefix of a long option. Matching a prefix as the option that
+    RE-ENABLES a commit errs toward refusing; git itself rejects an ambiguous one."""
+    return len(arg) > 2 and option.startswith(arg)
+
+
+# Options that take a value (so the next word is not a switch), and the long options known to
+# take none, per subcommand family. A no-commit switch counts only where it cannot be an option's
+# value: after a known flag, an operand, or nothing -- never right after an option this list does
+# not know, which might have consumed it.
+_MERGE_VALUED_SHORT = set("mFsX")
+# `-S[<keyid>]` (merge, pull, cherry-pick, revert): an OPTIONAL value, only ever attached. It
+# never takes the next word, and whatever follows it in its cluster is the key id.
+_ATTACHED_ONLY_SHORT = set("S")
+_MERGE_VALUED_LONG = {"--message", "--file", "--strategy", "--strategy-option", "--cleanup",
+                      "--into-name"}
+_FETCH_VALUED_SHORT = set("oj")
+_FETCH_VALUED_LONG = {"--upload-pack", "--depth", "--deepen", "--shallow-since",
+                      "--shallow-exclude", "--refmap", "--server-option", "--jobs",
+                      "--negotiation-tip"}
+_MERGE_FLAGS = {
+    "--commit", "--no-commit", "--squash", "--no-squash", "--ff", "--no-ff", "--ff-only",
+    "--edit", "--no-edit", "--stat", "--no-stat", "--summary", "--no-summary", "--log",
+    "--no-log", "--verify", "--no-verify", "--signoff", "--no-signoff", "--progress",
+    "--no-progress", "--autostash", "--no-autostash", "--allow-unrelated-histories",
+    "--rerere-autoupdate", "--no-rerere-autoupdate", "--verbose", "--quiet", "--gpg-sign",
+    "--no-gpg-sign", "--verify-signatures", "--no-verify-signatures", "--overwrite-ignore",
+    "--no-overwrite-ignore", "--abort", "--quit", "--continue", "--rebase", "--no-rebase",
+    "--all", "--append", "--prune", "--tags", "--no-tags", "--force", "--keep", "--unshallow",
+    "--update-shallow", "--ipv4", "--ipv6", "--dry-run", "--recurse-submodules",
+    "--no-recurse-submodules", "--set-upstream"}
+_PICK_VALUED_SHORT = set("mX")
+_PICK_VALUED_LONG = {"--mainline", "--strategy", "--strategy-option", "--cleanup"}
+_PICK_FLAGS = {
+    "--commit", "--no-commit", "--edit", "--no-edit", "--ff", "--allow-empty",
+    "--allow-empty-message", "--keep-redundant-commits", "--empty", "--signoff", "--gpg-sign",
+    "--no-gpg-sign", "--rerere-autoupdate", "--no-rerere-autoupdate", "--abort", "--quit",
+    "--continue", "--skip", "--reference"}
+
+
+def _options(rest, valued_short, valued_long, known_long):
+    """[(name, value, trusted)] for each option in `rest` up to `--`, option VALUES skipped: a
+    long option `--name[=value]`, or one entry per letter of a short cluster (`-xn`). `trusted`
+    is False for an option straight after an unrecognised long option, which may have taken it
+    as its value."""
+    found, suspect, k = [], False, 0
+    while k < len(rest):
+        arg = rest[k]
+        k += 1
+        if arg == "--":
+            break
+        if not arg.startswith("-") or arg == "-":
+            suspect = False
+            continue
+        trusted, suspect = not suspect, False
+        if arg.startswith("--"):
+            name, eq, value = arg.partition("=")
+            found.append((name, value if eq else None, trusted))
+            if not eq and name in valued_long:
+                k += 1
+            elif not eq and name not in known_long:
+                suspect = True
+            continue
+        for j, letter in enumerate(arg[1:], 1):
+            found.append(("-" + letter, None, trusted))
+            if letter in _ATTACHED_ONLY_SHORT:
+                break  # `-Skeyid`: the rest of the cluster is its value, never more letters
+            if letter in valued_short:
+                if j == len(arg) - 1:
+                    k += 1  # `-m msg`: the value is the next word; `-mmsg` carried it
+                break
+    return found
+
+
+def _merge_options(rest, pull):
+    return _options(rest,
+                    _MERGE_VALUED_SHORT | (_FETCH_VALUED_SHORT if pull else set()),
+                    _MERGE_VALUED_LONG | (_FETCH_VALUED_LONG if pull else set()),
+                    _MERGE_FLAGS)
+
+
+def _merge_state(rest, pull=False):
+    """(may_commit, ff_only) for `git merge`/`git pull` with these arguments. Options resolve
+    last-wins, as git resolves them: `--commit` undoes `--no-commit`, `--no-squash` undoes
+    `--squash`, `--ff`/`--no-ff` undo `--ff-only`. A no-commit switch counts only when spelled in
+    full and where it cannot be an option's value; an option that turns committing back on counts
+    wherever it appears, abbreviated or not."""
+    commit, squash, ff_only = True, False, False
+    for name, _, trusted in _merge_options(rest, pull):
+        if name in ("--abort", "--quit") and trusted:
+            return False, ff_only
+        if name == "--no-commit":
+            commit = commit and not trusted
+        elif name == "--squash":
+            squash = squash or trusted
+        elif name == "--ff-only":
+            ff_only = ff_only or trusted
+        elif _abbreviates(name, "--continue"):
+            return True, False
+        elif _abbreviates(name, "--commit"):
+            commit = True
+        elif _abbreviates(name, "--no-squash"):
+            squash = False
+        elif _abbreviates(name, "--no-ff") or _abbreviates(name, "--ff"):
+            ff_only = False
+    return not (squash or not commit or ff_only), ff_only
+
+
+def _merge_commits(rest, pull=False):
+    """Whether `git merge`/`git pull` with these arguments may create a commit."""
+    return _merge_state(rest, pull)[0]
+
+
+def _picks_commit(rest):
+    """Whether `git cherry-pick`/`git revert` with these arguments commits. `-n`/`--no-commit`
+    (also inside a short cluster such as `-xn`) stops it, until a later `--commit` -- the
+    negation git derives from `--no-commit` -- turns committing back on."""
+    commit = True
+    for name, _, trusted in _options(rest, _PICK_VALUED_SHORT, _PICK_VALUED_LONG, _PICK_FLAGS):
+        if name in ("--abort", "--quit") and trusted:
+            return False
+        if name in ("--no-commit", "-n"):
+            commit = commit and not trusted
+        elif _abbreviates(name, "--continue") or name == "--skip":
+            return True  # both resume the sequencer, which commits the remaining picks
+        elif _abbreviates(name, "--commit"):
+            commit = True
+    return commit
+
+
+def _config_value(target, overrides, key):
+    """`key` as git would read it for a command in `target`: a `-c` override first, then the
+    repository's configuration. Returns the value, None when unset, or False when it cannot be
+    read."""
+    if key in overrides:
+        return overrides[key]
+    if target is None or _UNKNOWN_CONFIG in overrides:
+        return False
+    try:
+        p = subprocess.run(["git", "-C", str(target), "config", "--get", key],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if p.returncode == 1:
+        return None
+    return p.stdout.strip() if p.returncode == 0 else False
+
+
+def _git_version():
+    """(major, minor) of the git on PATH, or (0, 0) when it cannot be read."""
+    global _GIT_VERSION
+    if _GIT_VERSION is None:
+        try:
+            out = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                                 timeout=5).stdout
+            _GIT_VERSION = tuple(int(n) for n in re.findall(r"\d+", out)[:2])
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            _GIT_VERSION = (0, 0)
+        if len(_GIT_VERSION) != 2:
+            _GIT_VERSION = (0, 0)
+    return _GIT_VERSION
+
+
+_GIT_VERSION = None
+# From git 2.34, `pull --ff-only` fast-forwards or fails even when pull.rebase is set; before
+# that (Ubuntu 20.04 ships 2.25) rebase mode ignored --ff-only and rebased local commits.
+_FF_ONLY_BEATS_REBASE = (2, 34)
+
+
+def _pull_rebases(rest, target, overrides):
+    """(rebases, from_config) for `git pull`: the last `--rebase[=…]`/`-r`/`--no-rebase` on the
+    command line, else `branch.<current>.rebase`, else `pull.rebase`. Anything it cannot read
+    counts as rebasing, so the gate refuses rather than guesses. `--no-rebase` counts only where
+    it cannot be an option's value; a rebase switch counts anywhere."""
+    rebase = None
+    for name, value, trusted in _merge_options(rest, pull=True):
+        if name == "--no-rebase":
+            rebase = False if trusted else rebase
+        elif _abbreviates(name, "--rebase"):
+            if value is not None and value.lower() in _FALSE_WORDS:
+                rebase = False if trusted else rebase
+            else:
+                rebase = True
+        elif name == "-r":
+            rebase = True
+    if rebase is not None:
+        return rebase, False
+    if target is None:
+        return True, True
+    try:
+        p = subprocess.run(["git", "-C", str(target), "symbolic-ref", "--short", "-q", "HEAD"],
+                           capture_output=True, text=True, timeout=5)
+        branch = p.stdout.strip() if p.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return True, True
+    keys = (["branch.{}.rebase".format(branch)] if branch else []) + ["pull.rebase"]
+    for key in keys:
+        value = _config_value(target, overrides, key)
+        if value is False:
+            return True, True
+        if value is not None:
+            return value.lower() not in _FALSE_WORDS, True
+    return False, True
+
+
+def _pull_commits(rest, target, overrides):
+    """Whether `git pull` may create a commit: rebase mode may, unless it came from
+    configuration and `--ff-only` overrides it (git >= 2.34); otherwise judge it as a merge."""
+    may_commit, ff_only = _merge_state(rest, pull=True)
+    rebases, from_config = _pull_rebases(rest, target, overrides)
+    if rebases:
+        return not (from_config and ff_only and _git_version() >= _FF_ONLY_BEATS_REBASE)
+    return may_commit
+
+
 def _subcommand_intent(sub, rest, target, overrides):
-    """Classify one resolved git subcommand. Task 8 adds the other commit producers."""
     if sub == "commit":
         return CommitIntent("commit", target, None)
-    return _NO_INTENT
+    if sub not in _COMMIT_PRODUCERS:
+        return _NO_INTENT
+    if sub == "commit-tree":
+        commits = True
+    elif sub == "merge":
+        commits = _merge_commits(rest)
+    elif sub == "pull":
+        commits = _pull_commits(rest, target, overrides)
+    elif sub in ("cherry-pick", "revert"):
+        commits = _picks_commit(rest)
+    else:  # am
+        commits = not any(arg.split("=", 1)[0] in ("--abort", "--quit", "--show-current-patch")
+                          for arg in rest)
+    return CommitIntent("other", target, _COMMIT_PRODUCERS[sub]) if commits else _NO_INTENT
 
 
 def _classify_git(args, here, depth, home, overrides=None):

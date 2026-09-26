@@ -184,6 +184,35 @@ review, refuses and asks for a fresh one rather than committing something unrevi
 itself is an ordinary `git commit`: the repository's own hooks run exactly as configured, and the
 gate does not second-guess what they do.
 
+#### What the gate cannot see
+
+The gate reads the agent's Bash command before it runs. It follows real command positions,
+`cd` (a `cd` in a subshell, pipeline or background job does not move a later commit, and a
+`cd` it cannot be sure ran makes the target unknown, which it refuses while any project has the
+reviewer on), `bash -c`/`sh -c`/`eval`, a heredoc, here-string or pipe feeding a shell, wrappers
+such as `env`, `sudo`, `nohup`, `timeout` and `xargs`, variables assigned earlier in the same
+command, `git -c alias.*` and repository aliases. A command it cannot read at all — one held in
+a variable set outside the command, or printed by another command and run with `eval` — is
+refused while the repository is gated. It refuses a `merge`, `cherry-pick`, `revert`, `am` or
+`pull` that would commit, judging the options the way git does (the last of
+`--commit`/`--no-commit` wins, and a `pull` in rebase mode, whether from the command line or from
+`pull.rebase`/`branch.<name>.rebase`, is refused — except `pull --ff-only` under a configured
+rebase on git 2.34 or later, which fast-forwards or fails). Each of those has a no-commit route:
+`--no-commit`, `--squash`, `--ff-only`, `-n`, or `git apply --index` for `am`. `commit-tree` has
+none, so it is refused outright; stage the change and make a plain `git commit` instead. Inline
+`python -c`/`node -e` scripts that mention `git` and then a commit-producing subcommand are
+refused too. It cannot see:
+
+- a script file (`./release.sh`, `make`, `npm run …`), a sourced one (`source`/`.`), or a script
+  a shell reads from a file or a download, that commits or changes directory;
+- git reached through a symlink with another name;
+- an inline script that assembles `git` or `commit` from smaller pieces at run time;
+- `git rebase`, which replays existing commits;
+- plumbing (`hash-object`/`mktree`/`update-ref`) run from a script.
+
+These are the limits of reading a command's text. Keep them in mind when writing
+`reviewerAgent.md`.
+
 **Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
 no supported configuration, no supported platform, and no supported host version — "supported"
 would imply an undertaking, and there is none.
