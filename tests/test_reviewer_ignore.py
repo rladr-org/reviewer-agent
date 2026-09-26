@@ -35,7 +35,8 @@ def make_repo(tmp_path):
     `git show HEAD:...` for the delayed-application case)."""
     proj = tmp_path / "proj"
     proj.mkdir()
-    subprocess.run(["git", "init", "-q", "-b", "main", str(proj)], check=True)
+    from repo_context import init_repo
+    init_repo(proj)
     git(str(proj), "commit", "--allow-empty", "-q", "-m", "init")
     return str(proj)
 

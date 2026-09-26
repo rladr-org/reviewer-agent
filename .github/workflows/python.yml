@@ -100,6 +100,22 @@ jobs:
         working-directory: plugins/reviewer-agent-codex
         run: /tmp/venv/bin/python -m pytest -p no:cacheprovider
 
+  old-git:
+    # Ubuntu 20.04's git 2.25.1. GitHub retired the Ubuntu 20.04 runner, so run its image as a
+    # container (`ubuntu:20.04`, a Docker image, not a runner label). Nothing here may require
+    # a newer git (operator policy).
+    name: root and Codex suites on git 2.25 (ubuntu:20.04)
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04
+    steps:
+      - name: Git before checkout
+        # Without git in the container, checkout falls back to a tarball with no .git, and the
+        # tests that need a working tree would skip instead of running on the old git.
+        run: apt-get update -qq && apt-get install -y -qq git >/dev/null
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Suites on old git
+        run: sh tools/ci_old_git.sh
+
   structure:
     name: structure, versions, licence and export
     runs-on: ubuntu-latest

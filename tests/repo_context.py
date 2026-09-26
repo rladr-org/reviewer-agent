@@ -34,3 +34,14 @@ requires_repository = pytest.mark.skipif(
     not IS_REPOSITORY,
     reason="needs a Git working tree; this is a released source archive, not a checkout",
 )
+
+
+def init_repo(path, branch="main"):
+    """`git init` with HEAD on `branch`, without init's branch flag (git 2.28+): Ubuntu 20.04
+    ships 2.25.
+
+    `symbolic-ref` on an unborn HEAD has worked since the earliest gits, so this names the
+    branch the same way on every version, independent of `init.defaultBranch`."""
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "symbolic-ref", "HEAD",
+                    "refs/heads/" + branch], check=True)
