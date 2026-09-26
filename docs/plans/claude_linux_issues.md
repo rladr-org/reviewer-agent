@@ -992,9 +992,9 @@ def test_an_unset_or_empty_home_is_not_trusted(monkeypatch, home):
 
 
 def test_the_first_command_of_a_call_resolves_home(monkeypatch):
-    monkeypatch.setenv("HOME", "/home/me")
-    assert rl.commit_intent("git -C ~/repo commit -m x", CWD).target == "/home/me/repo"
-    assert rl.commit_intent("cd ~/repo && git commit -m x", CWD).target == "/home/me/repo"
+    monkeypatch.setenv("HOME", "/home/x")
+    assert rl.commit_intent("git -C ~/repo commit -m x", CWD).target == "/home/x/repo"
+    assert rl.commit_intent("cd ~/repo && git commit -m x", CWD).target == "/home/x/repo"
 
 
 def test_a_cd_to_an_existing_directory_moves_a_later_commit(tmp_path):
@@ -3794,14 +3794,14 @@ dash, and the Task 6-8 classifier on old git.
 
 The operator runs, or authorizes, these:
 
-1. `git pull --ff-only` in `/home/ubuntu/reviewer-agent`. Then
+1. `git pull --ff-only` in `~/reviewer-agent`. Then
    `time <venv>/bin/python -m pytest -m smoke -q -p no:cacheprovider`: under 60 s (#5). Then the
    full suite in the background with `TMPDIR` on NFS: green, including the three low-disk tests (#8).
 2. Bump the version (Step 5), then `claude plugin marketplace update` + `claude plugin update`,
    and restart Claude Code.
-3. With **no** `codexBin` in config, run a gated commit in `/home/ubuntu/test`: it is reviewed,
+3. With **no** `codexBin` in config, run a gated commit in `~/test`: it is reviewed,
    with no "missing binary" fail-closed (#4).
-4. Re-run the report's probe table in `/home/ubuntu/test` with the gate on:
+4. Re-run the report's probe table in `~/test` with the gate on:
    - `/usr/bin/git commit`, `bash -c 'git commit …'`, `git cherry-pick`, `git revert`: **DENY** with
      the no-commit route;
    - `echo "… git commit …"` and a heredoc mentioning it: **ALLOW**;
