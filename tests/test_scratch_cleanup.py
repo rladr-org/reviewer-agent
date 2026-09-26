@@ -162,9 +162,19 @@ def test_streaming_audit_scopes_tmpdir_to_scratch_dir(scratch_env, monkeypatch):
 # --------------------------------------------------------------------------
 # warn-only disk reporting: a line or None, never raises, never affects the verdict
 # --------------------------------------------------------------------------
+def _fake_free(monkeypatch, free_bytes):
+    """Report `free_bytes` free on every path. An NFS mount reported 8 EiB free (2026-09 Ubuntu
+    host), so a merely "impossibly high" threshold is not a test of anything."""
+    import reviewer_state
+    real = reviewer_state.shutil.disk_usage
+    monkeypatch.setattr(reviewer_state.shutil, "disk_usage",
+                        lambda p: real(p)._replace(free=free_bytes))
+
+
 def test_low_disk_warning_warns_below_threshold(scratch_env, monkeypatch):
     _dir_for("x", create=True)  # ensure the root exists
-    monkeypatch.setenv("REVIEWER_DISK_WARN_BYTES", str(10 ** 15))  # ~1 PB: always below
+    monkeypatch.setenv("REVIEWER_DISK_WARN_BYTES", str(10 ** 9))
+    _fake_free(monkeypatch, 10 ** 6)
     w = rl.low_disk_warning()
     assert w and "low disk" in w.lower()
 
@@ -176,7 +186,8 @@ def test_low_disk_warning_silent_above_threshold(scratch_env, monkeypatch):
 
 
 def test_low_disk_warning_missing_root_does_not_raise(scratch_env, monkeypatch):
-    monkeypatch.setenv("REVIEWER_DISK_WARN_BYTES", str(10 ** 15))
+    monkeypatch.setenv("REVIEWER_DISK_WARN_BYTES", str(10 ** 9))
+    _fake_free(monkeypatch, 10 ** 6)
     # Root does not exist (no dir created): must fall back to an existing ancestor, never raise.
     assert rl.low_disk_warning() is not None
 

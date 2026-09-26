@@ -300,7 +300,8 @@ def test_low_disk_warning_surfaces_on_stderr_without_blocking_the_commit(tmp_pat
             "REVIEWER_HOME": home,
             "REVIEWER_CODEX_BIN": FAKE,
             "REVIEWER_SCRATCH_ROOT": str(scratch_root),
-            "REVIEWER_DISK_WARN_BYTES": str(10 ** 18),   # ~1 EB free required -> always warns
+            # above any value statvfs can report (block counts are 64-bit; x block size < 2**84)
+            "REVIEWER_DISK_WARN_BYTES": str(10 ** 30),
             "FAKE_CODEX_VERDICT": "APPROVED",
         },
     )
