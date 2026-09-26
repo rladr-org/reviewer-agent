@@ -261,7 +261,8 @@ def test_run_cancellation_terminates_nested_process_promptly():
     assert time.monotonic() - started < 2
 
 
-def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path):
+@pytest.mark.parametrize("startup_delay", [0, 0.75])
+def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path, startup_delay, monkeypatch):
     if os.name != "posix":
         return
 
@@ -283,6 +284,7 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path):
         [
             "import subprocess, sys, time",
             "from pathlib import Path",
+            "time.sleep({!r})".format(startup_delay),
             "descendant = subprocess.Popen(",
             "    [sys.executable, '-c', {!r}],".format(descendant_script),
             "    start_new_session=True,",
@@ -295,6 +297,16 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path):
             "time.sleep(30)",
         ]
     )
+    real_popen = subprocess.Popen
+    processes = []
+
+    def start(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        if reviewer_script in args[0]:
+            processes.append(process)
+        return process
+
+    monkeypatch.setattr(backend.subprocess, "Popen", start)
     descendant_pid = None
     try:
         code, _output, error = backend._run(
@@ -306,6 +318,12 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path):
         descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
         _assert_heartbeat_stopped(heartbeat_path, "detached descendant")
     finally:
+        for process in processes:
+            if process.poll() is None:
+                backend._terminate(process)
+            process.wait(timeout=5)
+        if descendant_pid is None and descendant_pid_path.exists():
+            descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
         if descendant_pid is not None:
             try:
                 os.killpg(descendant_pid, signal.SIGKILL)

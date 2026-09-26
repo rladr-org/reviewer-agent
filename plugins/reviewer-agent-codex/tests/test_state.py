@@ -2,6 +2,8 @@
 import hashlib
 import subprocess
 
+import pytest
+
 from reviewer_codex import prompts, state
 
 
@@ -188,3 +190,43 @@ def test_feature_flags_follow_the_git_common_directory(git_repo, isolated_state,
     state.set_feature(git_repo, "reviewer")
     assert state.project_key(git_repo) == state.project_key(worktree)
     assert state.feature_enabled(worktree, "reviewer")
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_project_key_with_old_git_resolves_common_dir_against_repo(
+    git_repo, tmp_path, monkeypatch, absolute
+):
+    real_git = state._git
+
+    def old_git(path, *args):
+        if args == ("rev-parse", "--path-format=absolute", "--git-common-dir"):
+            return "--path-format=absolute\n.git"
+        if args == ("rev-parse", "--git-common-dir"):
+            return str(git_repo / ".git") if absolute else ".git"
+        return real_git(path, *args)
+
+    monkeypatch.setattr(state, "_git", old_git)
+    monkeypatch.chdir(tmp_path)
+
+    assert state.project_key(git_repo) == str((git_repo / ".git").resolve())
+
+
+def test_project_key_uses_plain_common_dir_for_linked_worktree(
+    git_repo, tmp_path, monkeypatch
+):
+    worktree = tmp_path / "linked"
+    subprocess.run(
+        ["git", "-C", str(git_repo), "worktree", "add", "-qb", "linked", str(worktree)],
+        check=True,
+    )
+    real_git = state._git
+
+    def old_git(path, *args):
+        if "--path-format=absolute" in args:
+            return "--path-format=absolute\n" + real_git(path, "rev-parse", "--git-common-dir")
+        return real_git(path, *args)
+
+    monkeypatch.setattr(state, "_git", old_git)
+    monkeypatch.chdir(tmp_path)
+    assert state.project_key(worktree) == state.project_key(git_repo)
+    assert state.project_key(worktree) == str((git_repo / ".git").resolve())

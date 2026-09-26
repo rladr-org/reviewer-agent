@@ -5,10 +5,105 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from reviewer_codex import liveness, state, supervisor
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("raw", ["{", "[]", '"event"',
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":"bad"}',
+    '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":42}}',
+])
+def test_pre_tool_malformed_input_explicitly_denies(raw, isolated_state):
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/hook_pre_tool.py")],
+        input=raw, text=True, capture_output=True,
+        env=dict(os.environ, REVIEWER_CODEX_STATE_DIR=str(isolated_state)), timeout=10,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("failure", ["bootstrap", "package"])
+def test_pre_tool_import_failure_explicitly_denies(tmp_path, isolated_state, failure):
+    script = tmp_path / "hook_pre_tool.py"
+    script.write_bytes((ROOT / "scripts/hook_pre_tool.py").read_bytes())
+    (tmp_path / "_bootstrap.py").write_text(
+        "raise RuntimeError('private import detail')\n" if failure == "bootstrap" else ""
+    )
+    package = tmp_path / "reviewer_codex"
+    package.mkdir()
+    (package / "__init__.py").write_text("raise RuntimeError('private import detail')\n")
+    result = subprocess.run(
+        [sys.executable, str(script)], input="{}", text=True, capture_output=True,
+        env=dict(os.environ, REVIEWER_CODEX_STATE_DIR=str(isolated_state)), timeout=10,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert not isolated_state.exists()
+    assert "private import detail" not in result.stdout
+
+
+@pytest.mark.parametrize("tool_name,tool_input", [("Bash", None), ("mcp__other__tool", "value")])
+def test_pre_tool_preserves_optional_and_other_tool_input(git_repo, isolated_state, tool_name, tool_input):
+    result = _run("hook_pre_tool.py", {
+        "hook_event_name": "PreToolUse", "tool_name": tool_name,
+        "cwd": str(git_repo), "tool_input": tool_input,
+    }, isolated_state)
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_shell_liveness_failure_does_not_block_non_commit(git_repo, tmp_path):
+    obstructed_state = tmp_path / "obstructed"
+    obstructed_state.write_text("not a directory")
+    result = _run("hook_pre_tool.py", {
+        "hook_event_name": "PreToolUse", "tool_name": "Bash",
+        "cwd": str(git_repo), "session_id": "root", "tool_use_id": "shell",
+        "tool_input": {"command": "git status"},
+    }, obstructed_state)
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_pre_tool_ticket_failure_explicitly_denies(git_repo, isolated_state):
+    state.set_feature(git_repo, "reviewer")
+    (isolated_state / "commit-tickets").write_text("obstruction")
+    payload = {
+        "hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": str(git_repo),
+        "session_id": "root",
+        "tool_input": {"command": "git -C {} commit -m private-command-detail".format(git_repo)},
+    }
+    result = _run("hook_pre_tool.py", payload, isolated_state)
+    assert result.returncode == 0
+    output = json.loads(result.stdout)["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "review_token=" not in output["permissionDecisionReason"]
+    assert "private-command-detail" not in result.stdout
+
+
+@pytest.mark.parametrize("failure", ["python", "script", "crash"])
+def test_pre_tool_launcher_failure_blocks(tmp_path, isolated_state, failure):
+    hooks = json.loads((ROOT / "hooks/hooks.json").read_text())["hooks"]
+    command = hooks["PreToolUse"][0]["hooks"][0]["command"]
+    home = tmp_path / "home"
+    source = home / "cache/reviewer-agent-codex/version"
+    source.mkdir(parents=True)
+    if failure == "crash":
+        (source / "scripts").mkdir()
+        (source / "scripts/hook_pre_tool.py").write_text("raise SystemExit(1)\n")
+    env = dict(os.environ, HOME=str(home), PLUGIN_ROOT=str(source),
+               REVIEWER_CODEX_STATE_DIR=str(isolated_state))
+    if failure == "python":
+        env["PATH"] = str(tmp_path / "empty-path")
+    result = subprocess.run(
+        command, shell=True, input="{}", text=True, capture_output=True, env=env, timeout=10,
+    )
+    assert result.returncode == 2
+    assert "reviewer-agent" in result.stderr
 
 
 def _run(script, payload, isolated_state, *args):
@@ -214,6 +309,26 @@ def test_prompt_hook_accepts_risk_and_enables_reviewer_in_one_turn(
     output = json.loads(result.stdout)
     assert output["systemMessage"] == "reviewerAgent: ON for {}".format(git_repo)
     assert output["continue"] is False
+
+
+@pytest.mark.parametrize("kind", ["template", "empty", "unreadable"])
+def test_prompt_hook_refuses_unedited_brief_template(git_repo, isolated_state, kind):
+    brief = {"empty": b"\n", "unreadable": b"\xff"}.get(
+        kind, (ROOT / "reviewerAgent.md.template").read_bytes()
+    )
+    (git_repo / "reviewerAgent.md").write_bytes(brief)
+    payload = {
+        "session_id": "root", "cwd": str(git_repo),
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "$reviewer-agent-codex:reviewer-agent on acceptRisk",
+    }
+    result = _run("hook_prompt.py", payload, isolated_state)
+    assert result.returncode == 0
+    assert not state.feature_enabled(git_repo, "reviewer")
+    message = json.loads(result.stdout)["systemMessage"]
+    assert "reviewerAgent.md" in message
+    disclaimer = state.disclaimer_sha256(ROOT / "DISCLAIMER.md")
+    assert not state.risk_accepted(git_repo, disclaimer)
 
 
 def test_prompt_hook_requires_explicit_risk_acceptance_before_enabling_stop(

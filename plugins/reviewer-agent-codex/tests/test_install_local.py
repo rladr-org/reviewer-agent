@@ -65,6 +65,23 @@ def make_plugin(source: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("failure", ["missing", "old"])
+def test_install_checks_hook_python_before_writing(tmp_path, monkeypatch, failure):
+    source = tmp_path / "checkout"
+    make_plugin(source)
+    home = tmp_path / "home"
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    if failure == "old":
+        executable = binaries / "python3"
+        executable.write_text("#!/bin/sh\nprintf '3.8.10\\n'\nexit 0\n")
+        executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binaries))
+    with pytest.raises(InstallError, match="Python 3.9"):
+        install_local(source, home=home, install=False)
+    assert not home.exists()
+
+
 def test_install_local_creates_personal_marketplace_and_source_link(tmp_path):
     source = tmp_path / "checkout"
     home = tmp_path / "home"

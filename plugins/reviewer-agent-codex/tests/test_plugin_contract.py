@@ -179,10 +179,13 @@ def test_hook_command_prefers_replacement_cache_over_source_fallback(tmp_path):
     assert result.stdout == "cache\n"
 
 
-def test_repository_guidance_requires_tdd_and_amygdala():
+def test_repository_guidance_requires_tdd_and_portable_python():
     guidance = (ROOT / "AGENTS.md").read_text(encoding="utf-8").lower()
     assert "red" in guidance and "green" in guidance and "refactor" in guidance
-    assert "amygdala" in guidance
+    assert "amygdala" not in guidance
+    assert "python 3.9+" in guidance
+    assert "requirements-dev.txt" in guidance
+    assert "python -m pytest -p no:cacheprovider" in guidance
 
 
 def test_readme_documents_one_command_local_install():
@@ -234,10 +237,11 @@ def test_all_skill_prompts_use_plugin_namespaced_invocations():
         assert "$reviewer-agent-codex:" in metadata, path
 
 
-def test_reviewer_brief_template_uses_namespaced_skill_invocation():
+def test_reviewer_brief_template_contains_only_reviewer_guidance():
     template = (ROOT / "reviewerAgent.md.template").read_text(encoding="utf-8")
-    assert "$reviewer-agent-codex:reviewer-agent on" in template
-    assert "`$reviewer-agent on`" not in template
+    assert "Copy this file" not in template
+    assert "$reviewer-agent" not in template
+    assert "Review only the staged index" in template
 
 
 def test_plugin_packages_the_same_disclaimer_as_the_repository_root():
