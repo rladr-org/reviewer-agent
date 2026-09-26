@@ -188,7 +188,8 @@ def _hook_timeout_ceiling():
     being cancelled says nothing about the gate.
 
     BOTH spellings of a hook are searched, and that is not defensive coding. `hooks.json` ships
-    the EXEC form -- `"command": "python3"` with the script in `args` -- while an older
+    the EXEC form -- `"command": "/bin/sh"` with the launcher and then the script in `args`
+    (earlier, `"command": "python3"` with the script alone) -- while an older
     standalone install wires a single command STRING in settings.json. Searching only `command`
     matched nothing in the shipped manifest, so on an install with no legacy settings entry this
     returned "no ceiling" and the refusal below never fired: a budget at or above the hook's own

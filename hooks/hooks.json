@@ -7,8 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/commit_hook.py"],
+            "command": "/bin/sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/commit_hook.py"],
             "timeout": 3600
           }
         ]
@@ -18,8 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/askq_reroute_hook.py"],
+            "command": "/bin/sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/askq_reroute_hook.py"],
             "timeout": 60
           }
         ]
@@ -30,8 +30,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/session_start_hook.py"],
+            "command": "/bin/sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/session_start_hook.py"],
             "timeout": 120
           }
         ]
@@ -42,8 +42,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/stop_hook.py"],
+            "command": "/bin/sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/stop_hook.py"],
             "timeout": 630
           }
         ]
@@ -54,8 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/userpromptsubmit_hook.py"],
+            "command": "/bin/sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/userpromptsubmit_hook.py"],
             "timeout": 60
           }
         ]

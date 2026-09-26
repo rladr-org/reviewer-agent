@@ -74,11 +74,12 @@ def test_claude_hooks_resolve_python_from_path_in_exec_form():
         for hook in group["hooks"]
     ]
 
-    assert {hook["args"][0].rsplit("/", 1)[-1] for hook in command_hooks} == expected_scripts
+    assert {hook["args"][-1].rsplit("/", 1)[-1] for hook in command_hooks} == expected_scripts
     for hook in command_hooks:
-        assert hook["command"] == "python3"
+        assert hook["command"] == "/bin/sh"
         assert hook["args"] == [
-            f"${{CLAUDE_PLUGIN_ROOT}}/{hook['args'][0].rsplit('/', 1)[-1]}"
+            "${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh",
+            f"${{CLAUDE_PLUGIN_ROOT}}/{hook['args'][-1].rsplit('/', 1)[-1]}",
         ]
 
     assert "/usr/bin/python3" not in hooks_path.read_text(encoding="utf-8")

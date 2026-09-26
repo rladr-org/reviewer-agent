@@ -475,6 +475,23 @@ def test_the_ceiling_reads_the_exec_form_the_manifest_actually_uses(tmp_path, mo
     assert "settings.json" in where
 
 
+def test_the_ceiling_reads_the_launcher_form(tmp_path, monkeypatch):
+    # hooks.json runs every hook through `/bin/sh run_hook.sh <script>`: the script is args[-1].
+    import reviewer_model_toggle as t
+
+    fake_home = tmp_path / "home"
+    (fake_home / ".claude").mkdir(parents=True)
+    (fake_home / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [
+            {"type": "command", "command": "/bin/sh",
+             "args": ["/p/hooks/run_hook.sh", "/p/commit_hook.py"], "timeout": 1234}]}]}}),
+        encoding="utf-8")
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(t.Path, "home", classmethod(lambda _cls: fake_home))
+
+    assert t._hook_timeout_ceiling()[0] == 1234
+
+
 def test_timeout_below_the_floor_is_rejected(tmp_path, monkeypatch):
     # A too-small value would turn the fail-closed gate into "every commit blocked".
     home = str(tmp_path / "rh")
