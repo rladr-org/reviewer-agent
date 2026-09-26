@@ -107,17 +107,36 @@ hook trust from the CLI as described below.
 
 ### Shared repository install
 
-Clone the combined reviewer-agent repository, then run the Codex package's installer from the
-combined repository root:
+Clone the combined reviewer-agent repository into a permanent user-owned directory outside the
+repository to protect. The installer creates `~/plugins/reviewer-agent-codex` as a symlink to
+this checkout's package directory. Keep the checkout for source fallback and future updates;
+a temporary checkout can leave an existing cache working while breaking the next update.
+
+Use an available Python 3.9+ interpreter. From the combined repository root, prepare a test
+environment using `requirements-dev.txt` and run the nested suite before installing:
 
 ```bash
 git clone https://github.com/rladr-org/reviewer-agent.git
 cd reviewer-agent
+python3 -m venv /absolute/path/to/new-test-venv
+/absolute/path/to/new-test-venv/bin/python -m pip install -r requirements-dev.txt
+cd plugins/reviewer-agent-codex && /absolute/path/to/new-test-venv/bin/python -m pytest -p no:cacheprovider
+```
+
+Substitute your chosen environment path; no named conda environment is required. Test dependencies
+are not runtime dependencies. Run the installer from the combined repository root after the tests
+finish successfully:
+
+```bash
+cd /absolute/path/to/reviewer-agent
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-For a private repository, grant the colleague access first and use their normal authenticated Git
-transport. The repository also exposes a Codex team-marketplace manifest and can be registered for
+If cloning the configured source fails with an authentication error, verify access and use the
+operator's authenticated Git transport, whether the source is canonical, a fork, or a mirror.
+Keep the working transport, credential helper, and any SSH key-selection configuration available
+to `git pull --ff-only` during later updates. Do not put credentials into URLs or logs.
+The repository also exposes a Codex team-marketplace manifest and can be registered for
 discovery with:
 
 ```bash
@@ -155,6 +174,13 @@ makes the agent's `review_commit` call a blocking direct call instead of a yield
 operation. Completion review is invoked automatically by the Stop lifecycle hook. Use this
 installer for updates rather than invoking `codex plugin add` directly.
 
+Before writing configuration, the installer checks that `python3` on its PATH runs Python 3.9+.
+Launch Codex with a PATH that resolves an appropriate `python3` too; a check in the installer
+shell does not establish the environment of an already running GUI. PreToolUse converts input,
+import, and gate errors to an explicit deny. Its shell launcher exits with blocking status 2
+if Python or the hook script cannot run. These responses do not cover an untrusted/missing hook
+registration or a host that kills the whole launcher on timeout; verify actual host interception.
+
 Each command-based lifecycle hook also carries its own cache-eviction fallback. It uses the immutable
 `PLUGIN_ROOT` selected when the thread started while that directory exists. If a direct
 `codex plugin add` removes that version anyway, the command resolves the same hook through the
@@ -185,6 +211,19 @@ python3 plugins/reviewer-agent-codex/scripts/install_local.py
 The `reviewer-agent` and `stop-continue` flags are stored per repository and survive Codex restarts.
 You only need to enable them once unless you explicitly turn them off or delete the state directory.
 Upgrades also preserve risk-acceptance receipts; a current receipt does not require accepting again.
+
+Project identity uses the canonical Git common directory, resolving relative output against the
+repository root. This keeps linked worktrees together without the newer `--path-format` option.
+If an older installation ran with Git 2.25.1, its incorrect keys may have mixed records from
+unrelated repositories. This update does not migrate or delete those ambiguous records. Back up
+the state directory, inspect/quarantine the affected records, and deliberately reconfigure each
+repository; do not copy old authorization tickets or stop permits into the corrected keys.
+
+Copy `reviewerAgent.md.template` to the target repository as `reviewerAgent.md` if no brief exists,
+and replace its project-guidance placeholder with the project's rules and test commands before
+invoking `$reviewer-agent-codex:reviewer-agent on`. Enablement rejects an empty brief or the known
+untouched placeholder. Preserve customized briefs. In copies of older templates, remove the
+human-facing copy/enable preamble manually; the composer reads the complete file as instructions.
 
 Starting or resuming a thread never launches a reviewer model. Reviewer sessions are initialized
 only when an enabled commit gate or stop supervisor performs an actual review.
@@ -568,7 +607,8 @@ See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 
 ## Host versions it has been run against
 
-The installer warns when Codex CLI is below 0.154.0 or Python is below 3.9, then continues.
+The installer warns when Codex CLI is below 0.154.0, then continues. It refuses installation
+when the hook command `python3` is missing, cannot run, or reports a version below Python 3.9.
 Codex 0.154.0 is the exercised native-host baseline, including Stop and Interrupt hooks.
 The independent Claude package's Codex reviewer-backend baseline is separate.
 Reviewed commits use the installed Git's ordinary commit behavior, without private reference

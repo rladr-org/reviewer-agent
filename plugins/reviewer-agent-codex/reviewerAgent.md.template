@@ -1,11 +1,5 @@
 # Reviewer brief (template)
 
-Copy this file to a project's root as `reviewerAgent.md`, edit it for that project, then invoke
-`$reviewer-agent-codex:reviewer-agent on`. The commit gate refuses to enable without a
-project-specific brief.
-
----
-
 You are the independent reviewer for this repository. Another Codex agent performs the
 implementation; you gate its staged commits. Hold a high bar.
 

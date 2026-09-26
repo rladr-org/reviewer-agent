@@ -261,8 +261,13 @@ def test_run_cancellation_terminates_nested_process_promptly():
     assert time.monotonic() - started < 2
 
 
-@pytest.mark.parametrize("startup_delay", [0, 0.75])
-def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path, startup_delay, monkeypatch):
+@pytest.mark.parametrize(
+    "startup_delay,startup_budget", [(0, 10), (0.75, 10), (30, 0.2)],
+    ids=["immediate", "delayed", "startup-timeout"],
+)
+def test_run_timeout_terminates_descendant_that_started_new_session(
+    tmp_path, startup_delay, startup_budget, monkeypatch
+):
     if os.name != "posix":
         return
 
@@ -297,18 +302,40 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path, st
             "time.sleep(30)",
         ]
     )
+    # Keep the real timeout/termination path, but don't spend the cleanup deadline
+    # waiting for the OS to schedule the test fixture's nested interpreters.
     real_popen = subprocess.Popen
     processes = []
 
     def start(*args, **kwargs):
         process = real_popen(*args, **kwargs)
-        if reviewer_script in args[0]:
-            processes.append(process)
+        if reviewer_script not in args[0]:
+            return process
+        communicate = process.communicate
+        processes.append((process, communicate))
+        ready = False
+
+        def communicate_after_ready(input=None, timeout=None):
+            nonlocal ready
+            if timeout is not None and not ready:
+                deadline = time.monotonic() + startup_budget
+                while not (descendant_pid_path.exists() and heartbeat_path.exists()):
+                    if process.poll() is not None or time.monotonic() >= deadline:
+                        pytest.fail("detached descendant did not become ready within startup budget")
+                    time.sleep(0.02)
+                ready = True
+            return communicate(input=input, timeout=timeout)
+
+        process.communicate = communicate_after_ready
         return process
 
     monkeypatch.setattr(backend.subprocess, "Popen", start)
     descendant_pid = None
     try:
+        if startup_delay > startup_budget:
+            with pytest.raises(pytest.fail.Exception, match="startup budget"):
+                backend._run([sys.executable, "-c", reviewer_script], timeout=0.5)
+            return
         code, _output, error = backend._run(
             [sys.executable, "-c", reviewer_script], timeout=0.5
         )
@@ -318,17 +345,19 @@ def test_run_timeout_terminates_descendant_that_started_new_session(tmp_path, st
         descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
         _assert_heartbeat_stopped(heartbeat_path, "detached descendant")
     finally:
-        for process in processes:
-            if process.poll() is None:
-                backend._terminate(process)
-            process.wait(timeout=5)
-        if descendant_pid is None and descendant_pid_path.exists():
-            descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
-        if descendant_pid is not None:
-            try:
-                os.killpg(descendant_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        try:
+            for process, communicate in processes:
+                if process.poll() is None:
+                    backend._terminate(process)
+                communicate(timeout=5)
+        finally:
+            if descendant_pid is None and descendant_pid_path.exists():
+                descendant_pid = int(descendant_pid_path.read_text(encoding="utf-8"))
+            if descendant_pid is not None:
+                try:
+                    os.killpg(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 @pytest.mark.parametrize("evict_cache", [False, True])

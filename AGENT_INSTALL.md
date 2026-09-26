@@ -40,9 +40,11 @@ Later steps move between the plugin checkout and the repository being gated. Fix
 refer to them by name; a command run from the wrong one fails confusingly or writes to the wrong
 tree:
 
-- **`<PLUGIN_DIR>`** — this checkout, the one containing `AGENT_INSTALL.md` and `tests/`.
-- **`<TARGET_REPO>`** — the repository in which developer-agent commit attempts will be gated. It
-  may be the same directory, and often is not.
+- **`<PLUGIN_DIR>`** — a permanent user-owned checkout containing `AGENT_INSTALL.md` and `tests/`,
+  outside the protected repository.
+- **`<TARGET_REPO>`** — the repository in which developer-agent commit attempts will be gated.
+  Resolve both paths and require distinct directories; do not put the plugin checkout inside
+  `<TARGET_REPO>`.
 
 Shell commands below carry an explicit `cd`, so no step depends on where the previous one left you.
 
@@ -54,8 +56,7 @@ gate on the plugin checkout and the target repository stays ungated — with no 
 is a legitimate thing to ask for.
 
 So: **steps 4 to 7 must be run from a Claude Code session whose working directory is
-`<TARGET_REPO>`.** If `<PLUGIN_DIR>` and `<TARGET_REPO>` are the same directory, you are already
-there. If they are not, and your session is in `<PLUGIN_DIR>`, finish step 3 there, then open a
+`<TARGET_REPO>`.** If your session is in `<PLUGIN_DIR>`, finish step 3 there, then open a
 session in `<TARGET_REPO>` and continue from step 4. Do not try to work around this from the shell.
 
 There is no status subcommand to check this with beforehand. What you get instead is the path in
@@ -255,11 +256,19 @@ If `codex` lives somewhere non-standard, note the path; it goes in `REVIEWER_COD
 
 ## Step 3 — verify the checkout before trusting it
 
+Select an available Python 3.9+ interpreter and create a new test environment outside the
+checkout, as described in `INSTALL_WITH_AGENT.md`. No named conda environment is required.
+Install test dependencies before invoking pytest; the runtime remains standard-library-only.
+
+```bash
+python3 -m venv <TEST_VENV>
+<TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
+cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
+cd <PLUGIN_DIR> && <TEST_VENV>/bin/python tools/check_split_layering.py
 ```
-cd <PLUGIN_DIR>
-python3 -m pytest tests/ -q -p no:cacheprovider
-python3 tools/check_split_layering.py
-```
+
+Reuse an environment prepared by the shared guide rather than creating it twice. Keep the
+plugin checkout in a permanent directory; only the test environment may be temporary.
 
 **Check:** every test passes, with two expected skips (two state containers have no reset function,
 so their reset row skips itself), and the structural check prints

@@ -247,29 +247,30 @@ and coordinate shared-file edits with the Codex-side task. Do not assume `HANDOV
 the current task: at audit time it still described the abandoned display-label investigation.
 
 Runtime dependencies remain standard-library-only, with Python 3.9 compatibility. Follow
-applicable repository instructions and module-layering/facade conventions. In the maintainer's
-environment, run Python tooling through the `amygdala` conda environment.
+applicable repository instructions and module-layering/facade conventions. Use an available
+Python 3.9+ interpreter with the repository root's `requirements-dev.txt` installed; a virtual
+environment is sufficient.
 
 From the repository root:
 
 ```bash
-conda run --no-capture-output -n amygdala python -m pytest -p no:cacheprovider
-conda run --no-capture-output -n amygdala python tools/check_split_layering.py
-conda run --no-capture-output -n amygdala python tools/release_versions.py
-conda run --no-capture-output -n amygdala python tools/scan_release.py
+python -m pytest -p no:cacheprovider
+python tools/check_split_layering.py
+python tools/release_versions.py
+python tools/scan_release.py
 ```
 
 Regenerate the facade contract with `tools/gen_facade_contract.py` if the public facade changes.
 Run the independent Codex suite from `plugins/reviewer-agent-codex` to detect shared-file regressions:
 
 ```bash
-conda run --no-capture-output -n amygdala python -m pytest -p no:cacheprovider
+(cd plugins/reviewer-agent-codex && python -m pytest -p no:cacheprovider)
 ```
 
 After deterministic tests pass, validate the relevant live backend combinations:
 
 ```bash
-conda run --no-capture-output -n amygdala python tools/release_matrix.py \
+python tools/release_matrix.py \
   --scenario claude-codex --scenario claude-pi --scenario claude-claude
 ```
 

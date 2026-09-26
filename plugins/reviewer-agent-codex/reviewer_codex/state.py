@@ -327,8 +327,10 @@ def project_key(path):
     root = project_root(path)
     if not root:
         return None
-    common = _git(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    return os.path.realpath(common) if common else root
+    # Older Git echoes unknown rev-parse flags with exit zero. Plain common-dir
+    # works there too, but its relative result is anchored at Git's cwd, not ours.
+    common = _git(root, "rev-parse", "--git-common-dir")
+    return os.path.realpath(os.path.join(root, common)) if common else root
 
 
 def _project_stem(path):

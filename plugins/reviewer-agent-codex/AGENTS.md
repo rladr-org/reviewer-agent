@@ -6,10 +6,13 @@ Use test-driven development for every behavioral change:
 2. Make the minimum production change needed to reach green.
 3. Refactor only while the full suite remains green.
 
-Run Python tooling in the `amygdala` conda environment. The canonical test command is:
+Use an available Python 3.9+ interpreter. Create a virtual environment if needed.
+No named conda environment is required. From `plugins/reviewer-agent-codex`, install
+the repository root's test dependencies and run the canonical suite:
 
 ```bash
-conda run --no-capture-output -n amygdala python -m pytest -p no:cacheprovider
+python -m pip install -r ../../requirements-dev.txt
+python -m pytest -p no:cacheprovider
 ```
 
 Keep the runtime standard-library-only and compatible with Python 3.9+. Never parse Codex rollout

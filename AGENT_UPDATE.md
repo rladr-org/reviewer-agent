@@ -246,10 +246,11 @@ string** and will serve its cache for an unchanged version. The `+codex.<timesta
 exists precisely to defeat that: refreshing it is what makes Codex notice a reinstall.
 
 ```bash
-cd <PLUGIN_DIR>
-git pull                                          # if updating a tracked checkout
-python3 tools/release_cachebuster.py              # refresh +codex.<UTC>; never edit it by hand
-python3 plugins/reviewer-agent-codex/scripts/install_local.py
+git -C <PLUGIN_DIR> pull                         # if updating a tracked checkout
+python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
+(cd <PLUGIN_DIR>/plugins/reviewer-agent-codex && python -m pytest -p no:cacheprovider)
+python3 <PLUGIN_DIR>/tools/release_cachebuster.py  # refresh +codex.<UTC>; never edit it by hand
+python3 <PLUGIN_DIR>/plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
 After installation, run `codex` in a terminal and use `/hooks` in that interactive CLI to trust
@@ -258,8 +259,9 @@ Exit the CLI, fully quit and restart the Codex GUI, and start a new GUI chat. `/
 Codex GUI command. State under `~/.codex/reviewer-agent-codex/` survives,
 so features stay enabled per repository — no re-acceptance.
 
-For a checkout update, run the native plugin suite from `plugins/reviewer-agent-codex` before
-installing (`python3 -m pytest -p no:cacheprovider`; developers use the `amygdala` environment).
+The commands above install test dependencies and run the native plugin suite in an explicit
+package-directory subshell before installation. Use an available Python 3.9+ interpreter
+(and a virtual environment if needed) for `python`.
 The root suite does not collect it. Its backend and installer regressions exercise review launches
 during cache parking, after restoration, and after cache eviction without model calls.
 

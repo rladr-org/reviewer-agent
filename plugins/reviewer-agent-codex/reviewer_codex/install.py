@@ -33,6 +33,28 @@ def _run_command(command: List[str]) -> None:
     subprocess.run(command, check=True)
 
 
+def verify_hook_python() -> str:
+    """Check the interpreter command used by hooks, not just the installer Python."""
+    executable = shutil.which("python3")
+    message = "Hooks require Python 3.9+ as python3 on the Codex launch PATH."
+    if not executable:
+        raise InstallError(message)
+    try:
+        result = subprocess.run(
+            [executable, "-c", "import sys; print('.'.join(str(part) for part in sys.version_info[:3]))"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallError(message) from exc
+    try:
+        version = tuple(int(part) for part in result.stdout.strip().split("."))
+    except ValueError:
+        version = ()
+    if result.returncode != 0 or len(version) != 3 or version < (3, 9, 0):
+        raise InstallError(message + " Check " + executable)
+    return executable
+
+
 def _read_plugin_name(source: Path) -> str:
     manifest_path = source / ".codex-plugin" / "plugin.json"
     try:
@@ -172,6 +194,7 @@ def install_local(
     source = source.expanduser().resolve()
     home = (home or Path.home()).expanduser().resolve()
     plugin_name = _read_plugin_name(source)
+    verify_hook_python()
     source_link = home / "plugins" / plugin_name
     marketplace_path = home / ".agents" / "plugins" / "marketplace.json"
 

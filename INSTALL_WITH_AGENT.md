@@ -14,8 +14,11 @@ Before starting:
 
 1. Install and authenticate the developer host to be protected: Claude Code, or Codex CLI
    (optionally with the Codex GUI). The CLI is required for Codex hook trust.
-2. Confirm that the machine's Git client can read `rladr-org/reviewer-agent`; authentication is
-   needed only when installing from a private fork or mirror.
+2. Confirm that the machine's Git client can read the configured source, such as
+   `rladr-org/reviewer-agent`. If HTTPS requests credentials or SSH reports an authentication
+   failure, verify access and use the operator's authenticated Git transport. This applies to
+   the canonical source as well as forks and mirrors; a clone failure alone does not establish
+   repository visibility. Preserve the working transport and SSH configuration for later updates.
 3. For Claude Code only, install and authenticate at least one desired reviewer backend: `codex`,
    `pi`, or the `claude` CLI you are already running. They are alternatives; a Pi-only setup does
    not need Codex, and the `claude` backend needs no additional install. Its usage, quota, billing
@@ -30,7 +33,7 @@ terminal UI coverage. See the package's
 Then give the agent this prompt:
 
 ```text
-Clone https://github.com/rladr-org/reviewer-agent.git into a new user-owned directory outside this target repository if needed, then read `INSTALL_WITH_AGENT.md` completely and follow it to install reviewer-agent for this repository. Use the current developer host. Ask me for any required backend or feature choice, but otherwise perform and verify every step you are authorized to do.
+Clone https://github.com/rladr-org/reviewer-agent.git into a new permanent user-owned directory outside this target repository if needed, then read `INSTALL_WITH_AGENT.md` completely and follow it to install reviewer-agent for this repository. Use the current developer host. Ask me for any required backend or feature choice, but otherwise perform and verify every step you are authorized to do.
 ```
 
 If a checkout already exists, replace the clone clause with its absolute path. During installation,
@@ -56,10 +59,17 @@ Do not treat the installer checkout as the target repository. Changing a shell s
 directory does not change the developer host's project identity. Never enable the gate for
 `<INSTALLER_REPO>` unless it is also the operator's explicit target.
 
-If the installer repository is not present, clone it into a new, user-owned path outside
+If the installer repository is not present, clone it into a new, permanent user-owned path outside
 `<TARGET_REPO>` after obtaining any required network approval. Refuse to overwrite or reuse an
 unrelated non-empty path. If it is already present, preserve local changes; update it with
 `git pull --ff-only` only when the checkout is clean and the operator requested the current release.
+
+Do not use a session scratch directory or temporary checkout. Claude's local marketplace points
+to this checkout, and the Codex installer creates `~/plugins/reviewer-agent-codex` as a source
+symlink to its package directory. Moving or deleting the checkout breaks refresh/update and
+source fallback even if an existing immutable Codex cache continues working. Keep any required
+SSH host alias, key selection, or credential-helper configuration available to later updates;
+do not embed credentials in the remote URL or logs.
 
 ### 2. Resolve choices once
 
@@ -83,7 +93,31 @@ the applicable guide:
 - Codex: read `plugins/reviewer-agent-codex/README.md` completely, including its install and enable
   sections.
 
-Run the applicable package tests before installing. Do not continue when a required check fails.
+Use an available Python 3.9+ interpreter; no named conda environment is required. In the commands
+below, substitute its executable for `python3`, replace the angle-bracket paths, and choose a
+new `<TEST_VENV>` outside the checkout. Development dependencies are used only by tests, not by
+the hooks or MCP runtime:
+
+```bash
+python3 -m venv <TEST_VENV>
+<TEST_VENV>/bin/python -m pip install -r <INSTALLER_REPO>/requirements-dev.txt
+```
+
+Run the applicable package tests before installing, with an explicit working directory in the
+same shell call:
+
+```bash
+# Claude Code package
+cd <INSTALLER_REPO> && <TEST_VENV>/bin/python -m pytest -p no:cacheprovider
+# Codex package
+cd <INSTALLER_REPO>/plugins/reviewer-agent-codex && <TEST_VENV>/bin/python -m pytest -p no:cacheprovider
+```
+
+These suites can take several minutes. Use the host's background execution support and retain
+the final exit status when its foreground timeout is shorter; do not install until the applicable
+suite finishes successfully. A temporary test environment is fine; the plugin checkout must be
+permanent. Ensure `python3` is Python 3.9+ on the developer host's launch PATH as well: activating
+a test environment in one shell does not configure the hooks of a running GUI or another shell.
 
 ### 4A. Claude Code installation
 
@@ -123,6 +157,11 @@ acceptance. The operator must read the plugin's `DISCLAIMER.md` and personally i
 trust in the CLI, if no current acceptance receipt exists. Do not substitute `codex plugin add`:
 the local installer also configures the blocking reviewer MCP
 namespace as a direct-only tool.
+
+Verify the copied Codex brief contains actual project guidance and no remaining
+`Project-specific guidance (replace this paragraph)` placeholder. For existing briefs copied
+from an older template, remove the introductory copy/enable instructions while preserving
+the project's rules. Do not overwrite a customized brief; explain any required edits.
 
 For an upgrade, rerun this same installer and preserve the target repository's feature settings,
 risk-acceptance receipt, and project brief. Completion supervision runs only through Codex's

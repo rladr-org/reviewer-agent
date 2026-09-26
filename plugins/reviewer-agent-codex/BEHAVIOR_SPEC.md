@@ -5,6 +5,10 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 ## Commit gate
 
 - Disabled by default and enabled per canonical Git repository.
+- Repository identity uses plain `--git-common-dir`, resolving relative output against the
+  queried root. Linked worktrees share state; unrelated repositories have separate state.
+- Enablement requires a readable, nonempty project brief with the known template placeholder
+  replaced. Setup instructions live outside the model-facing template.
 - Intercepts only `git commit` commands.
 - Records the live staged set's `write-tree` digest (content, modes, names, and structure) before
   review, then compares it immediately before ordinary `git commit`. A changed digest requires
@@ -13,6 +17,12 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   the `-m`/`--message` text. Rejects all other commit options, pathspecs, alternate Git configuration,
   and compound shell commands before creating a ticket, with an explicit unsupported-form error.
 - Fails closed when the reviewer fails, times out, returns empty output, or rejects.
+- The PreToolUse entrypoint emits JSON deny on input, import, or gate exceptions. Its shell
+  launcher returns blocking exit 2 if the Python command fails. Missing/untrusted host hook
+  registration and host-enforced launcher timeouts remain outside that failure boundary.
+  Stop liveness/plan storage failures remain best effort. Installation checks Python 3.9+
+  through the same `python3` PATH command as the hooks before writing configuration; the
+  operator must also ensure that command resolves in the actual Codex launch environment.
 - On timeout, compare-safely retires only the reviewer thread that was actually invoked and clears
   only its matching staged-index cursor. A concurrent replacement survives, and the next commit
   retry starts a fresh reviewer with the full brief rather than resuming the timed-out thread.

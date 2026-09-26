@@ -20,8 +20,9 @@ Enforce these project rules:
 
 - Follow test-driven development for behavioral changes: demonstrate red, implement the minimum
   fix, then keep the full suite green while refactoring.
-- Run the canonical suite with
-  `conda run --no-capture-output -n amygdala python -m pytest -p no:cacheprovider`.
+- Use an available Python 3.9+ interpreter with the repository root's
+  `requirements-dev.txt` installed. From this package directory, run
+  `python -m pytest -p no:cacheprovider`; no named conda environment is required.
 - Keep runtime code compatible with Python 3.9+ and limited to the standard library.
 - Never parse Codex rollout JSONL; use documented hook payloads and lifecycle events.
 - Commit review is fail-closed and limited to the staged index. Stop supervision is fail-open,

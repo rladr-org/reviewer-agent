@@ -21,6 +21,16 @@ def apply_feature_action(
             return 1, "reviewerAgent: ERROR - brief not found at {}".format(
                 Path(root) / "reviewerAgent.md"
             )
+        if feature == "reviewer":
+            try:
+                brief = (Path(root) / "reviewerAgent.md").read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                return 1, "reviewerAgent: ERROR - cannot read reviewerAgent.md"
+            if not brief.strip() or "Project-specific guidance (replace this paragraph)" in brief:
+                return 1, (
+                    "reviewerAgent: ERROR - replace the reviewerAgent.md template placeholder "
+                    "with this project's review rules before enabling."
+                )
         disclaimer_hash = state.disclaimer_sha256(DISCLAIMER_PATH)
         if not state.risk_accepted(root, disclaimer_hash):
             if not accept_risk:
