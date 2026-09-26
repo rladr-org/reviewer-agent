@@ -1418,3 +1418,41 @@ def test_an_unset_codex_override_is_named_not_left_null(monkeypatch):
 
     monkeypatch.setattr(commit_hook.rl, "codex_effort", lambda: "")
     assert commit_hook._effort_label("codex") == "cli-default"
+
+
+@pytest.mark.parametrize("stdin_text", [
+    '{not json, "git commit -m x"',          # JSONDecodeError
+    json.dumps(["git commit -m x"]),          # not an object
+])
+def test_a_crash_on_a_commit_payload_denies_instead_of_exiting_nonzero(tmp_path, stdin_text):
+    # Claude Code blocks only on exit 2 or an explicit deny; exit 1 lets the call run.
+    p = subprocess.run([sys.executable, COMMIT], input=stdin_text,
+                       capture_output=True, text=True,
+                       env=dict(os.environ, REVIEWER_HOME=str(tmp_path / "rh")))
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "crashed" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_a_crash_on_an_unrelated_payload_stays_out_of_the_way(tmp_path):
+    p = subprocess.run([sys.executable, COMMIT], input='{not json, "ls -la"',
+                       capture_output=True, text=True,
+                       env=dict(os.environ, REVIEWER_HOME=str(tmp_path / "rh")))
+    assert p.returncode == 0
+    assert p.stdout.strip() == ""
+
+
+def test_a_crash_judges_the_parsed_command_not_the_whole_payload():
+    # "commit" in the cwd (or anywhere else in the JSON) must not block an unrelated command.
+    import commit_hook
+    unrelated = json.dumps({"cwd": "/repos/commit-helper", "tool_input": {"command": "git status"}})
+    committing = json.dumps({"cwd": "/repos/x", "tool_input": {"command": "git commit -m x"}})
+    assert commit_hook._crash_output(RuntimeError("boom"), unrelated) is None
+    out = commit_hook._crash_output(RuntimeError("boom"), committing)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_tool_input_null_is_not_a_crash(tmp_path):
+    p = run_hook({"cwd": str(tmp_path), "tool_input": None}, {})
+    assert p.returncode == 0 and p.stdout.strip() == ""

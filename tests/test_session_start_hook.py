@@ -141,3 +141,10 @@ def test_active_brief_failure_persists_nothing_and_does_not_crash(tmp_path, monk
     )
     assert p.returncode == 0
     assert rl.read_session_id(str(repo), "claude-x") is None
+
+
+def test_session_start_never_exits_nonzero_on_bad_input(tmp_path):
+    p = subprocess.run([sys.executable, HOOK], input="{not json",
+                       capture_output=True, text=True,
+                       env=dict(os.environ, REVIEWER_HOME=str(tmp_path / "rh")))
+    assert p.returncode == 0

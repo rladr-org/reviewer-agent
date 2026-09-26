@@ -67,26 +67,36 @@ def _watchdog_rearm_context(cwd, claude_sid):
 
 
 def main():
-    raw = sys.stdin.read()
-    data = json.loads(raw) if raw.strip() else {}
-    cwd = data.get("cwd") or rl.project_dir()
-    # Reclaim abandoned reviewer scratch on EVERY session start -- unconditional, so it also runs for
-    # inactive, Pi and Claude sessions (unlike the codex-only brief below). Liveness is the mtime
-    # lease, so a live session's dir is within the TTL and kept. Never blocks the session.
+    # One guard over the whole body: an escaped exception exits 1, which Claude Code reports as
+    # a hook error on every session start. SessionStart blocks nothing, so it fails open.
     try:
-        rl.sweep_orphan_scratch_dirs()
+        raw = sys.stdin.read()
+        data = json.loads(raw) if raw.strip() else {}
+        cwd = data.get("cwd") or rl.project_dir()
+        # Reclaim abandoned reviewer scratch on EVERY session start -- unconditional, so it also
+        # runs for inactive, Pi and Claude sessions (unlike the codex-only brief below). Liveness
+        # is the mtime lease, so a live session's dir is within the TTL and kept. Never blocks the
+        # session.
+        try:
+            rl.sweep_orphan_scratch_dirs()
+        except Exception as e:
+            rl.log("[session_start] scratch sweep EXCEPTION {}: {}".format(type(e).__name__, e))
+        try:
+            _brief_if_active(data, cwd)
+        except Exception as e:
+            rl.log("[session_start] brief EXCEPTION {}: {}".format(type(e).__name__, e))
+        ctx = _watchdog_rearm_context(cwd, rl.claude_session_key(data))
+        if ctx:
+            rl.log("[session_start] key={} watchdog re-arm context injected".format(
+                rl.canonical_project_key(cwd)))
+            print(json.dumps(rl.sessionstart_context_output(ctx)))
+        return 0
     except Exception as e:
-        rl.log("[session_start] scratch sweep EXCEPTION {}: {}".format(type(e).__name__, e))
-    try:
-        _brief_if_active(data, cwd)
-    except Exception as e:
-        rl.log("[session_start] brief EXCEPTION {}: {}".format(type(e).__name__, e))
-    ctx = _watchdog_rearm_context(cwd, rl.claude_session_key(data))
-    if ctx:
-        rl.log("[session_start] key={} watchdog re-arm context injected".format(
-            rl.canonical_project_key(cwd)))
-        print(json.dumps(rl.sessionstart_context_output(ctx)))
-    return 0
+        try:
+            rl.log("[session_start] EXCEPTION {}: {}".format(type(e).__name__, e))
+        except Exception:
+            pass
+        return 0
 
 
 if __name__ == "__main__":

@@ -27,8 +27,14 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import reviewer_audit as ra  # noqa: E402
-import reviewer_lib as rl  # noqa: E402
+try:
+    import reviewer_audit as ra  # noqa: E402
+    import reviewer_lib as rl  # noqa: E402
+except Exception as _exc:  # reported by the __main__ guard, which must not depend on rl
+    ra = rl = None
+    _IMPORT_ERROR = _exc
+else:
+    _IMPORT_ERROR = None
 
 # Resolved per invocation from rl.commit_review_timeout() (default 900s, raised from 600s
 # after a ~5700-line staged diff timed out): env > /reviewerModel state > config.json. Read at
@@ -56,13 +62,16 @@ def _effort_label(backend):
     return rl.codex_effort() or "cli-default"
 
 
-def main():
-    raw = sys.stdin.read()
+def main(raw=None):
+    if raw is None:
+        raw = sys.stdin.read()
     data = json.loads(raw) if raw.strip() else {}
+    if not isinstance(data, dict):
+        raise ValueError("hook input must be a JSON object")
 
     # Cheap precision check FIRST so the canonical-root resolution (a git subprocess)
     # runs only for actual commits, never on every Bash command.
-    command = data.get("tool_input", {}).get("command", "")
+    command = (data.get("tool_input") or {}).get("command") or ""
     if not rl.is_git_commit(command):
         return 0
 
@@ -622,5 +631,62 @@ def main():
     return 0
 
 
+def _crash_subject(raw):
+    """The text a crash is judged by: the payload's command when it parses to one, else the
+    whole raw payload (unparseable input may still be a commit, so it errs toward denying)."""
+    try:
+        data = json.loads(raw)
+        command = data["tool_input"]["command"]
+    except Exception:
+        return raw or ""
+    return command if isinstance(command, str) else (raw or "")
+
+
+def _crash_output(exc, raw):
+    """The fail-CLOSED answer when the gate itself failed, or None to stay out of the way.
+
+    Claude Code treats any exit status other than 2 as a NON-blocking error, so an escaped
+    exception used to let the commit run unreviewed. A crash cannot consult the gate's state
+    (reviewer_lib may be what failed), and this hook runs on every Bash call in every project,
+    so it denies only calls whose COMMAND mentions a commit. The raw payload is searched only
+    when it holds no parseable command, since "commit" elsewhere in it (a cwd such as
+    `/repos/commit-helper`) says nothing about the call."""
+    if "commit" not in _crash_subject(raw):
+        return None
+    reason = (
+        "reviewerAgent's commit gate crashed ({}: {}) before it could decide, so this call is "
+        "blocked rather than let a commit through unreviewed. Retry; if it repeats, see "
+        "~/.claude/reviewer-agent/logs/reviewer.log.".format(type(exc).__name__, exc)
+    )
+    return {
+        "systemMessage": "[reviewerAgent] commit gate crashed; call blocked (fail-closed).",
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        },
+    }
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _raw = ""
+    try:
+        _raw = sys.stdin.read()
+        if _IMPORT_ERROR is not None:
+            raise _IMPORT_ERROR
+        _code = main(_raw)
+    except Exception as _exc:
+        try:
+            import traceback
+            if rl is not None:
+                rl.log("[commit] EXCEPTION {} -> {}\n{}".format(
+                    type(_exc).__name__,
+                    "denied" if "commit" in _crash_subject(_raw) else "allowed (no commit)",
+                    rl.tail(traceback.format_exc(), 800)))
+        except Exception:
+            pass
+        _out = _crash_output(_exc, _raw)
+        if _out is not None:
+            print(json.dumps(_out))
+        _code = 0
+    raise SystemExit(_code)
