@@ -9,7 +9,7 @@ customization):
                       (default ~/.claude/reviewer-agent). MUST live outside the plugin
                       root, which the plugin system overwrites on update.
   REVIEWER_HOME       legacy alias for REVIEWER_STATE_DIR (pre-plugin single-dir install)
-  REVIEWER_CODEX_BIN  path to the codex binary  (default ~/.local/bin/codex)
+  REVIEWER_CODEX_BIN  path to the codex binary  (default ~/.local/bin/codex, else codex on PATH)
   CLAUDE_PROJECT_DIR  project the reviewer guards (default cwd)
 """
 import datetime

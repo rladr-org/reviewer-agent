@@ -973,7 +973,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_STATE_DIR` | `~/.claude/reviewer-agent` | Flags, session IDs, logs, reviews, and configuration. |
 | `REVIEWER_HOME` | — | Legacy alias for `REVIEWER_STATE_DIR`. |
 | `REVIEWER_BACKEND` | `codex` fallback | One-call/process override: `codex`, `pi` or `claude`. |
-| `REVIEWER_CODEX_BIN` | `~/.local/bin/codex` | Codex executable override. |
+| `REVIEWER_CODEX_BIN` | `~/.local/bin/codex` if it exists, else `codex` on `PATH` | Codex executable override; `codexBin` in `config.json` is more reliable for hooks. |
 | `REVIEWER_PI_BIN` | `pi` on `PATH` | Pi executable override; `piBin` in `config.json` is more reliable for hooks. |
 | `REVIEWER_PI_MODEL` | Pi default | Value passed to `pi --model`. |
 | `REVIEWER_PI_EFFORT` | `medium` | Value passed to `pi --thinking`. |
@@ -1210,7 +1210,6 @@ PI_GIT_READ_LIVE=1 node pi-extensions/git-read-only/test/live.mjs
   native Windows process control as a separate portability project.
 - Add an explicit opt-in Pi shell mode if Pi gains a permission model that can prevent writes and
   shell redirection. Pi remains shell-free by default.
-- Persist a nonstandard Codex path in `config.json` as `codexBin`, parallel to `piBin`.
 - Add a Pi backend to the Codex package. This requires a Codex-hosted blocking interface that does
   not assume the Pi user has installed or authenticated Codex.
 

@@ -94,11 +94,16 @@ def _tunable_int(env_var, key, default, minimum):
 
 
 def codex_bin():
-    return (
-        os.environ.get("REVIEWER_CODEX_BIN")
-        or config_get("codexBin")
-        or str(Path.home() / ".local" / "bin" / "codex")
-    )
+    """REVIEWER_CODEX_BIN, then config.json `codexBin`, then ~/.local/bin/codex when it exists,
+    then `codex` on PATH (an npm-global install in /usr/local/bin is common on Linux). The
+    ~/.local/bin path is the last resort so an error names a concrete location."""
+    explicit = os.environ.get("REVIEWER_CODEX_BIN") or config_get("codexBin")
+    if explicit:
+        return explicit
+    local = Path.home() / ".local" / "bin" / "codex"
+    if local.exists():
+        return str(local)
+    return shutil.which("codex") or str(local)
 
 
 def claude_bin():
