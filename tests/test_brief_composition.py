@@ -244,6 +244,14 @@ def test_system_prompt_does_not_duplicate_the_verdict_contract():
     assert "REJECTED:" not in rl.REVIEWER_STANDING_BRIEF
 
 
+def test_the_template_sends_no_setup_instructions_to_the_reviewer():
+    # #13: the whole file is the reviewer's brief, so setup prose for humans must not be in it.
+    text = (Path(__file__).resolve().parents[1] / "reviewerAgent.md.template").read_text(
+        encoding="utf-8")
+    assert "Copy this file" not in text
+    assert text.lstrip().startswith("You are the REVIEWER")
+
+
 def test_system_prompt_has_no_emoji():
     for ch in rl.REVIEWER_STANDING_BRIEF:
         assert ord(ch) < 0x2190, repr(ch)

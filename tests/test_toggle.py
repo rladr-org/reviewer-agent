@@ -35,6 +35,37 @@ def make_repo(tmp_path, with_brief=True):
     return str(proj)
 
 
+TEMPLATE = _BASE / "reviewerAgent.md.template"
+
+
+def _on_with_brief(tmp_path, brief_text):
+    """Enable the gate in a repository whose brief is `brief_text`; returns the process."""
+    home = str(tmp_path / "rh")
+    proj = make_repo(tmp_path)
+    (Path(proj) / "reviewerAgent.md").write_text(brief_text, encoding="utf-8")
+    return run_toggle(["on", "acceptRisk"], proj, home, {"FAKE_CODEX_STDOUT": "ack"})
+
+
+# #13: the brief is sent to the reviewer verbatim, so template leftovers reach it as instructions.
+def test_on_warns_when_the_brief_still_has_the_placeholder(tmp_path):
+    p = _on_with_brief(tmp_path, TEMPLATE.read_text(encoding="utf-8"))
+    assert p.returncode == 0, p.stderr
+    assert "edit me" in p.stdout
+
+
+def test_on_warns_about_the_old_templates_setup_preamble(tmp_path):
+    p = _on_with_brief(tmp_path, "# Reviewer brief (template)\n\nCopy this file to the root of "
+                                 "a project as `reviewerAgent.md`.\n\n---\n\nYou are the REVIEWER.\n")
+    assert p.returncode == 0, p.stderr
+    assert "setup instructions" in p.stdout
+
+
+def test_on_does_not_warn_about_an_edited_brief(tmp_path):
+    p = _on_with_brief(tmp_path, "You are a strict reviewer.\n")
+    assert p.returncode == 0, p.stderr
+    assert "WARNING" not in p.stdout
+
+
 def flag_exists(home, proj, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", home)
     return rl.is_active(proj)
