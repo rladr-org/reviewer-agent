@@ -265,6 +265,21 @@ The ticket preserves sign-off and quiet flags; the MCP call supplies the message
 pathspecs, alternate Git configuration, and compound shell commands are rejected explicitly before
 a ticket is created. Stage files first and run other shell commands separately.
 
+Detection follows executable command positions, including quoted or absolute Git names,
+wrappers, nested shells, substitutions, aliases and literal command variables. Quoted examples,
+comments and data heredocs are not commits. Visible `commit-tree`, merging `merge`/`pull`,
+`cherry-pick`, `revert` and `am` operations that can create commits are refused because the
+staged-index review cannot represent them. An inactive target earlier in a compound command
+does not hide a later protected target.
+
+This is bounded shell inspection, not a general execution sandbox. Script files, sourced code,
+commands assembled from runtime data, `rebase`, and other plumbing may be outside detection.
+Inline Python, Node, Perl and Ruby scripts are refused when they mention both a Git commit
+producer and a process-spawning primitive; mentioning a commit in a report alone is allowed.
+A script that spawns an unrelated process and also mentions a commit can still be refused.
+The Codex parser is packaged independently of the Claude runtime; updating one does not update
+the other.
+
 The gate records the staged set's `git write-tree` hash before review and compares it again
 immediately before committing. If staging changed, a fresh review is required. On approval it
 runs ordinary `git commit` in the real repository, with the configured hooks and signing. Hooks

@@ -9,7 +9,15 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   queried root. Linked worktrees share state; unrelated repositories have separate state.
 - Enablement requires a readable, nonempty project brief with the known template placeholder
   replaced. Setup instructions live outside the model-facing template.
-- Intercepts only `git commit` commands.
+- Detects visible commit-producing Git commands at executable shell positions, including
+  wrappers, nested shells, substitutions, aliases and literal command variables. Inert quoted
+  examples and data heredocs are not intercepted. Earlier inactive targets cannot hide later
+  protected targets. Only the supported plain commit form can receive a review ticket;
+  other detected commit-producing forms are refused.
+- Detection is bounded: external script files, sourced code, dynamically assembled commands,
+  rebase and other plumbing can remain outside its scope. Inline interpreter inspection requires
+  both a Git producer mention and a spawning primitive; unrelated spawning plus inert commit
+  text can still be refused. This is not a complete execution sandbox.
 - Records the live staged set's `write-tree` digest (content, modes, names, and structure) before
   review, then compares it immediately before ordinary `git commit`. A changed digest requires
   a fresh review. Git reads use the real repository; no private snapshot is injected.
