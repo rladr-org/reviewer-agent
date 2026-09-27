@@ -235,6 +235,17 @@ def test_opaque_commit_runners_are_refused(command):
     assert intent.kind == "other" and intent.reason
 
 
+# Task C2.3: a named interpreter's inline script that only carries "git commit" as data, with
+# no way to run a command, is not a commit. Backticks in Python are text (a Markdown report).
+@pytest.mark.parametrize("command", [
+    "python3 -c \"print('run git commit after review')\"",
+    "python3 - <<'EOF'\nopen('report.md', 'w').write('Next: `git commit -m x` once approved')\nEOF",
+    "node -e \"console.log('then git commit')\"",
+])
+def test_an_inline_script_that_only_mentions_a_commit_is_not_refused(command):
+    assert _kind(command) is None, command
+
+
 def test_a_repository_alias_is_resolved(tmp_path):
     import subprocess
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
