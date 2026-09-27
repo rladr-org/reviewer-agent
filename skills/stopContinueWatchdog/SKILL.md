@@ -29,4 +29,7 @@ left to a future SessionStart:
 - a **CANCEL** instruction: call `CronList` and `CronDelete` every task whose prompt contains the
   marker.
 
+The cron lives only in this Claude session: it dies with the process and fires only while the
+session is idle. After a restart, SessionStart re-arms it.
+
 Take no other action, and never invoke the toggle script yourself.

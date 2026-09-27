@@ -10,7 +10,8 @@ per the command's instructions; this script only owns the flag + interval and re
 `on` REQUIRES stopContinue to already be active: the tick relies on the Stop hook, which
 returns immediately when the stopContinue flag is off, so a watchdog without it would fire
 tick turns that are never supervised. Requiring the existing flag also keeps its
-risk-acceptance gate intact. `status` prints ACTIVE/INACTIVE for the tick's self-cancel check.
+risk-acceptance gate intact. `status` reports `stopContinueWatchdog: ON|OFF ...` for the operator;
+the tick checks the flag files itself.
 
 See docs/plans/stopcontinue_watchdog.md.
 """
@@ -81,9 +82,17 @@ def main(argv):
         return 0
     if action == "status" and len(argv) == 2:
         root = rl.canonical_project_key(proj)
-        # EFFECTIVE state, not the bare flag: if stopContinue was turned off after the watchdog
-        # was armed, the tick must read INACTIVE so it self-cancels its now-unsupervised cron.
-        print("ACTIVE" if rl.is_stopcontinue_watchdog_effective(root) else "INACTIVE")
+        # Labelled like `on`/`off`, because the skill relays one `stopContinueWatchdog: ON|OFF`
+        # line verbatim (#20). EFFECTIVE state, not the bare flag: armed while /stopContinue is
+        # off is reported OFF (dormant), since the Stop hook the tick relies on is inert.
+        if rl.is_stopcontinue_watchdog_effective(root):
+            print("stopContinueWatchdog: ON for {} (interval {} min).".format(
+                root, rl.watchdog_interval(root)))
+        elif rl.is_stopcontinue_watchdog_active(root):
+            print("stopContinueWatchdog: OFF for {} (armed, but dormant because /stopContinue "
+                  "is off).".format(root))
+        else:
+            print("stopContinueWatchdog: OFF for {}.".format(root))
         return 0
     print(
         "usage: stopcontinue_watchdog_toggle.py on [interval]|off|status", file=sys.stderr
