@@ -150,7 +150,10 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False):
         )
     if code == backend.CANCELLED_EXIT or (cancel_event and cancel_event.is_set()):
         return _cancelled(root, ticket, abort_callback_registered)
-    if code != 0 or not output.strip():
+    # A commit approval is neither a completion verdict nor executable remaining
+    # work. Treat role confusion like an invalid/empty ruling, not a directive.
+    commit_approval = bool(re.match(r"^\s*APPROVED\b", output, re.IGNORECASE))
+    if code != 0 or not output.strip() or commit_approval:
         completion = _complete_allowed_stop(cancel_event, root, ticket, outcome="failed_open")
         if completion == "cancelled":
             return _cancelled(root, ticket, abort_callback_registered)
@@ -160,7 +163,8 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False):
                 "task input or work changed while stopContinue was running",
                 directive="Address the new input or work and inspect newly started background work.",
             )
-        detail = stderr.strip() or "empty ruling"
+        detail = ("commit-gate approval is not a stop verdict" if commit_approval
+                  else stderr.strip() or "empty ruling")
         return _result(
             "failed_open",
             "stop supervisor failed; the next stop is allowed",

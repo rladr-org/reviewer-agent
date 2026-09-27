@@ -131,7 +131,8 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   cancellation. The registries are cleaned up after every outcome; unrelated Stop requests and
   other developer sessions are unaffected. The Interrupt handler is silent and bounded to three
   seconds, and cannot restart or prevent interruption.
-- Fails open on reviewer errors or empty output, with a failure message rather than an approval.
+- Fails open on reviewer errors, empty output, or a misplaced commit-gate `APPROVED` verdict,
+  with a failure message rather than an approval or an instruction to execute that verdict.
 - Treats quoted transcripts supplied for diagnosis as evidence, not as assignments to execute.
 - Continues Codex when the reviewer judges the user task incomplete.
 - Stops after a bounded number of hook-generated continuations. The budget survives fresh host

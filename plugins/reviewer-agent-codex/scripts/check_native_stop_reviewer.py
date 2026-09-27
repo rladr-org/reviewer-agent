@@ -70,6 +70,11 @@ def main():
         session = 'original-{}'.format(attempt)
         check(session + '-incomplete', session, REQUEST, 'I have not calculated it yet.', 'block')
         check(session + '-complete', session, REQUEST, '17 × 19 = 323.', 'allow')
+        check(session + '-followup-question', session,
+              'Does the Claude code update also work for Codex? Is the command detector '
+              'shared or separate code?',
+              'The requested calculation is complete. The command detectors are separate; '
+              'changing the Claude detector does not change the Codex implementation.', 'allow')
     state.record_prompt(repo, 'cancel', 'Calculate 17 times 19 and report the answer.')
     check('explicit-cancel', 'cancel', 'Cancel that task. Stop now; do not calculate it.',
           'Stopped as requested.', 'allow')
@@ -77,6 +82,25 @@ def main():
           'Explain whether the quoted statement "I have not calculated it yet." reports '
           'completed work. Only analyze the statement; do not perform any calculation.',
           'The quoted statement reports unfinished work; it does not give a calculated result.', 'allow')
+    check('architecture-question', 'architecture',
+          'The requested cancellation fix and tests are complete. Does the Claude command '
+          'detector update also work for Codex: is the code shared or separate? Explain only.',
+          'The command detectors are separate implementations. Updating Claude does not '
+          'change the Codex detector; a corresponding Codex change would be needed.', 'allow')
+    check('release-inventory', 'inventory',
+          'The cancellation fix is complete. Tell me what remains before release; '
+          'this request is for an assessment, not implementation or publication.',
+          'Before release, the command detector needs correction, the final suites and '
+          'backend matrix need to pass, and version metadata and the changelog need updating.',
+          'allow')
+    check('genuine-approval', 'approval',
+          'Inspect the prepared fix and run its tests. Do not commit it until I explicitly '
+          'approve the commit. The tests passed and inspection is complete.',
+          'Inspection and tests passed. May I commit the prepared fix? Your earlier '
+          'instruction reserves that decision for you.', 'allow')
+    check('already-authorized', 'authorized',
+          'Inspection and tests passed. I explicitly authorize committing the prepared fix now.',
+          'The fix is ready but I have not committed it. May I commit it?', 'block')
     passed = all(r['passed'] for r in records)
     print('PASS' if passed else 'FAIL: at least one real reviewer decision was incorrect', flush=True)
     return 0 if passed else 1
