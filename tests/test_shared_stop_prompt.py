@@ -63,3 +63,11 @@ def test_codex_distribution_loads_without_parent_repository(tmp_path):
     assert _read_prompts(tmp_path, env, claude=False) == [
         (tmp_path / PLUGIN / RESOURCE).read_text(encoding="utf-8").strip()
     ]
+
+
+def test_the_prompt_treats_operator_only_steps_as_a_hand_off():
+    # Task 11 (#19): a slash command or host restart is the operator's to do; a final message
+    # that asks for it is a proper hand-off, not unfinished agent work.
+    text = (ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8")
+    assert "OPERATOR-ONLY STEPS" in text
+    assert "slash command" in text

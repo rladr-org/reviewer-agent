@@ -580,6 +580,46 @@ def test_the_supervisor_judges_the_payloads_final_message(tmp_path, monkeypatch)
     assert "Summary: all probes done" in argv_file.read_text()
 
 
+# Task 11 (#19): re-issuing a directive the agent already answered cannot help. On 2026-09-24
+# the supervisor sent "ask the operator" three times for a message that already asked.
+def test_a_repeated_directive_is_detected(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    proj, sid = str(tmp_path), "S"
+    directive = "Ask the operator explicitly to run /reviewerModel effort clear and items 3-7."
+    assert not rl.directive_repeats(proj, sid, directive)
+    rl.record_directive(proj, sid, directive)
+    assert rl.directive_repeats(proj, sid, directive + " Then record the result.")
+
+
+def test_the_generic_continuation_never_counts_as_a_repeat(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    rl.record_directive(str(tmp_path), "S", rl.GENERIC_CONTINUE)
+    assert not rl.directive_repeats(str(tmp_path), "S", rl.GENERIC_CONTINUE)
+
+
+def test_clear_directive_forgets_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    rl.record_directive(str(tmp_path), "S", "do X")
+    rl.clear_directive(str(tmp_path), "S")
+    assert not rl.directive_repeats(str(tmp_path), "S", "do X")
+
+
+def test_the_same_directive_twice_in_one_stop_chain_lets_the_agent_stop(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Please run /reviewerModel effort clear, then tell me the result.")
+    env = {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+           "FAKE_CODEX_STDOUT": "Ask the operator explicitly to run /reviewerModel effort clear."}
+    first = json.loads(run_hook(_input(repo, tr), env).stdout)
+    assert first["decision"] == "block"
+    second = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
+    assert "decision" not in second
+    assert "repeated its previous directive" in second["systemMessage"]
+
+
 def test_the_stop_capsule_is_not_the_commit_reviewers(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     repo = make_repo(tmp_path)
