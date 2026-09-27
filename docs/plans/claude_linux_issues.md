@@ -2312,6 +2312,151 @@ git commit -m "fix: gate every commit-producing git form the command text reveal
 
 ---
 
+## Phase C2 — Follow-ups from the Phase C run (added 2026-09-26)
+
+Operator decisions after Phase C: fix the stop supervisor answering with the commit gate's word;
+narrow the unresolved-command-word rule (option (a) below); stop refusing inline scripts that
+mention "git commit" only as data (C2.3, a bounded fix); record red-phase commits as legitimate
+in `reviewerAgent.md` (this repository's brief, not the plugin's prompts, because the plan -> red
+-> green workflow is this project's convention, not something the plugin enforces everywhere).
+Phase D stays skipped. For Phase F: do Tasks 14-17. Check Task 13 (#18) live after the reinstall,
+and change it only if `/reviewerDirective` really fails here: the operator used it recently on
+Linux, and it worked. Phase H runs in a local Docker container (Ubuntu 20.04, git 2.25), not on the
+AWS host.
+
+### Task C2.1: The stop supervisor is never framed as the commit auditor, and never relays `APPROVED`
+
+Observed 2026-09-26 (reviewer.log, stop role session `01a0dc28…`): three consecutive stops were
+blocked with the directive `APPROVED`. The supervisor's own transcript shows it ran `git diff
+--cached` "before deciding whether this commit is safe to approve". Two causes:
+
+1. `apply_context(role=ROLE_STOP)` prepends `_CAPSULE_UNIVERSAL`, whose text is the commit
+   reviewer's job description ("find bugs … SUGGESTIONS, which never block a commit"). The operator
+   messages it carries that turn quoted a whole `REJECTED` commit review, and the final message was
+   a commit summary, so the supervisor answered as a commit auditor.
+2. `stop_hook.py` treats every reply other than `STOP_OK` as a directive, so the gate's approval
+   word was relayed as "NOT yet complete … Do the following: APPROVED".
+
+**Files:**
+- Modify: `reviewer_prompts.py` (`reviewer_capsule` takes `role`; new `_CAPSULE_STOP`; `apply_context` passes `role`)
+- Modify: `reviewer_stopcontinue.py` (`stop_ok_position` returns `"gate"` for a commit-gate verdict)
+- Modify: `stop_hook.py` (a `"gate"` reply allows the stop with a notice; it is not a directive and does not arm the watchdog)
+- Test: `tests/test_stop_hook.py`, `tests/test_brief_composition.py`
+
+**Behaviour:**
+- The stop role's capsule says: this call is NOT a commit audit; there is no staged set, so do not
+  run `git diff --cached` or review code for defects; quoted commit reviews in the operator messages
+  are history, not a request; the only valid replies are `STOP_OK` or a directive; never `APPROVED`
+  or `REJECTED`. It still names the brief's path, for project context only.
+- The commit capsule (`commit_audit=True`) and the question-answerer capsule are unchanged.
+- `stop_ok_position(out)` returns `"gate"` when the first non-empty line opens with the whole word
+  `APPROVED` (the commit gate's approval sentinel). `is_stop_ok` stays `first`/`last` only.
+- `stop_hook.py`: `keep_going` is False for `"gate"`. The stop is allowed (fail-open, like any
+  reply that carries no usable stop verdict), no nudge is spent, the watchdog is NOT armed (only a
+  real `STOP_OK` arms it), and a `systemMessage` says the supervisor answered with the commit gate's
+  verdict instead of a stop verdict. The log line shows `stop_ok=gate`.
+- A reply opening with `REJECTED` stays a directive: it carries content the agent can act on.
+
+**Tests (red first):**
+- `test_a_bare_commit_gate_approval_is_not_relayed_as_a_directive`: fake supervisor stdout
+  `APPROVED`. Expect no `decision`, the notice in `systemMessage`, nudge count 0, and
+  `stop_ok=gate` in the log.
+- `test_a_commit_gate_approval_with_suggestions_is_not_relayed`: stdout `APPROVED\nSUGGESTIONS:\n1. x`.
+  Same expectations.
+- `test_the_stop_capsule_is_not_the_commit_reviewers`: `apply_context(p, repo, role=ROLE_STOP)`
+  does not contain `"find bugs"` or `"never block a commit"`, and does contain `"NOT a commit
+  audit"` and `"STOP_OK"`. `apply_context(p, repo)` (reviewer role) still contains
+  `"REVIEWER STANDING REMINDER"`.
+
+### Task C2.2: Refuse an unresolved command word only when the visible text names a commit producer
+
+The Phase C rule refuses, in a gated repository, any command whose first word is an expansion the
+call does not assign (`"$PYTHON" -m pytest`, `$HOME/bin/x`, `eval "$(ssh-agent -s)"`). The operator
+rejected that as too broad. The gate guards against an agent skipping review, not against one
+deliberately hiding a commit. A script file (`bash release.sh`) is already a documented blind spot,
+so refusing every variable buys little and breaks everyday commands.
+
+**New rule (option (a)):** an unresolved command word is refused only when a later word of the same
+simple command is a commit-producing git subcommand (`_PRODUCER_WORDS`: `commit`, `commit-tree`,
+`merge`, `cherry-pick`, `revert`, `am`, `pull`), e.g. `$GIT_BIN commit -m x`. Otherwise it has no
+commit intent. `git $SUBCOMMAND` stays refused: `git` itself is visible and any subcommand may run.
+`git -c "$X" <alias>` is unchanged.
+
+**Files:**
+- Modify: `reviewer_git.py` (`_classify_segment`, the `_UNRESOLVABLE_C_RE.search(head)` branch)
+- Modify: `README.md` ("What the gate cannot see": drop "is refused while the repository is
+  gated" for commands it cannot read; add a bullet: a commit held entirely in a variable or command
+  output set outside the command, e.g. `$CMD` with `CMD='git commit -m x'` in the environment, or
+  `eval "$(…)"`)
+- Test: `tests/test_commit_intent.py`
+
+**Tests (red first):**
+- New `test_an_unresolved_command_word_without_a_commit_producer_is_not_refused`, parametrized:
+  `'"$PYTHON" -m pytest -q'`, `"$HOME/bin/tool --flag"`, `'eval "$(ssh-agent -s)"'`,
+  `'eval "$UNSET_ELSEWHERE"'`, `"$GIT_CMD -m x"`, `'bash -c "$(curl -s https://example.com/x)"'`.
+  Each has `kind is None`.
+- Move `'eval "$UNSET_ELSEWHERE"'` and the `curl` case out of
+  `test_code_the_text_cannot_show_is_refused`, and `"$GIT_CMD -m x"` out of
+  `test_a_command_word_the_call_cannot_pin_down_is_refused`. These cases now pin the documented
+  residual.
+- Unchanged and still refused: `$GIT_BIN commit -m x`, `$GIT_BIN --no-pager -C /tmp commit -m x`,
+  `cmd=git; false && cmd=echo; $cmd commit -m x`, `git $SUBCOMMAND -m x`.
+- `tests/test_commit_hook.py`: a gated repository allows `"$PYTHON" -m pytest` (no deny output).
+
+### Task C2.3: Inline scripts that carry "git commit" only as data are not refused
+
+`_INLINE_GIT_COMMIT_RE` scans the whole inline script, so a script that only *mentions* git and a
+producer is refused: `python3 -c "print('run git commit after review')"`, or a Python heredoc that
+writes a report containing "git commit". C2.2 does not cover this: the command word (`python3`) is
+resolved.
+
+**Bounded fix (not general interpreter analysis):** refuse an inline script only when it matches
+`_INLINE_GIT_COMMIT_RE` AND it contains a process-spawning primitive for its interpreter:
+
+| Interpreter | Spawning primitives (word match) |
+|---|---|
+| python | `subprocess`, `system`, `popen`, `exec[lv]p?e?`, `spawn[lv]?p?e?`, `posix_spawnp?`, `pty` |
+| node | `child_process`, `exec`, `execSync`, `execFile`, `execFileSync`, `spawn`, `spawnSync`, `fork` |
+| perl | `system`, `exec`, `qx`, `open`, or a backtick |
+| ruby | `system`, `exec`, `spawn`, `popen\w*`, `Open3`, `capture\w*`, a backtick, or `%x` |
+
+Backticks count only for perl and ruby, where they run a command. In Python they are text, and a
+Markdown report quoting `` `git commit` `` is exactly the harmless case. The residual is accepted
+and documented: a script that spawns something unrelated AND mentions "git commit" as text is still
+refused. Tying the match to the spawn call's own argument would need real interpreter analysis,
+which stays deferred.
+
+**Files:**
+- Modify: `reviewer_git.py` (new `_INLINE_SPAWN_RE` keyed by interpreter family; the
+  `_INTERPRETER_RE` branch in `_classify_segment` requires both matches)
+- Modify: `README.md` (the inline-script sentence says "that run a command and mention `git`
+  and a commit-producing subcommand")
+- Test: `tests/test_commit_intent.py`
+
+**Tests (red first):**
+- New `test_an_inline_script_that_only_mentions_a_commit_is_not_refused`, parametrized:
+  `python3 -c "print('run git commit after review')"`, and
+  `python3 - <<'EOF'\nopen('report.md', 'w').write('Next: `git commit -m x` once approved')\nEOF`.
+  Each has `kind is None`.
+- Unchanged and still refused (`test_opaque_commit_runners_are_refused`): `subprocess.run([...
+  'commit' ...])`, `os.system('git commit -m x')` in a heredoc, and node `execSync('git commit
+  -m x')`.
+
+### Commit order
+
+Each task gets its own red commit, then its own green commit, so no green commit leaves another
+task's already-committed tests red.
+
+1. This plan amendment with the `reviewerAgent.md` red-phase rule. The rule also covers the
+   green commit that follows: its tests are the ones its red commit already landed.
+2. C2.1 red, then C2.1 green.
+3. C2.2 red, then C2.2 green with its README change.
+4. C2.3 red, then C2.3 green with its README change.
+
+Then bump the version so the operator can reinstall and test live, and continue with Phase E.
+
+---
+
 ## Phase D — OPTIONAL: agent-only git hook backstop (run only on the operator's go-ahead)
 
 Skip this phase unless, after Phase C, the operator decides the documented residual is not
