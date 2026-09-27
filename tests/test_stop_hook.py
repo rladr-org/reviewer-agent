@@ -555,6 +555,31 @@ def test_a_commit_gate_rejection_is_still_a_directive(tmp_path, monkeypatch):
     assert "README still names the old flag" in out["reason"]
 
 
+def test_the_supervisor_judges_the_payloads_final_message(tmp_path, monkeypatch):
+    # Task 10 (#17): the transcript still ends on the opening paragraph and a thinking block;
+    # Claude Code's `last_assistant_message` is the real final message and must reach the prompt.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = tmp_path / "transcript.jsonl"
+    tr.write_text(
+        json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "Running everything now"}]}}) + "\n"
+        + json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "..."}]}}) + "\n")
+    stdin_file = tmp_path / "prompt.txt"
+    payload = dict(_input(repo, str(tr)), last_assistant_message="Summary: all probes done")
+    p = run_hook(
+        payload,
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_STDOUT": "STOP_OK",
+         "FAKE_CODEX_EXIT": "0", "FAKE_CODEX_STDIN_FILE": str(stdin_file)},
+    )
+    assert p.returncode == 0, p.stderr
+    assert "Summary: all probes done" in stdin_file.read_text()
+
+
 def test_the_stop_capsule_is_not_the_commit_reviewers(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     repo = make_repo(tmp_path)

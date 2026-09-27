@@ -1432,6 +1432,63 @@ def test_last_assistant_text_retries_until_text_flushes(tmp_path, monkeypatch):
     assert rl.last_assistant_text(path, retries=3) == "late-flushed summary"
 
 
+# Task 10 (#17): a NON-EMPTY read is not necessarily the final message. On 2026-09-24 the
+# supervisor judged a turn by its opening paragraph (the summary landed 0.3 s later) and ordered
+# finished work redone. Claude Code's Stop payload carries `last_assistant_message`.
+def _text_event(text):
+    return {"type": "assistant", "message": {"role": "assistant",
+                                             "content": [{"type": "text", "text": text}]}}
+
+
+def _thinking_event():
+    return {"type": "assistant", "message": {"role": "assistant",
+                                             "content": [{"type": "thinking", "thinking": "..."}]}}
+
+
+def test_a_non_empty_stale_read_waits_for_the_closing_summary(tmp_path, monkeypatch):
+    path = _transcript(tmp_path, _text_event("Running everything now: #15, then #12"),
+                       _thinking_event())
+
+    def flush(_secs):
+        with open(path, "a") as fh:
+            fh.write(json.dumps(_text_event("Summary: all probes done")) + "\n")
+    monkeypatch.setattr(reviewer_stopcontinue, "_sleep", flush)
+    text = rl.last_assistant_text(path)
+    assert text.endswith("Summary: all probes done")
+    assert "Running everything now" in text
+
+
+def test_the_payload_final_message_is_used_when_the_transcript_never_catches_up(
+        tmp_path, monkeypatch):
+    path = _transcript(tmp_path, _text_event("Running everything now"), _thinking_event())
+    monkeypatch.setattr(reviewer_stopcontinue, "_sleep", lambda _s: None)
+    text = rl.last_assistant_text(path, final_message="Summary: done")
+    assert text.endswith("Summary: done") and "Running everything now" in text
+
+
+def test_a_flushed_final_message_needs_no_wait(tmp_path, monkeypatch):
+    path = _transcript(tmp_path, _text_event("Opening"), _text_event("Summary: done"))
+
+    def fail(_s):
+        raise AssertionError("must not wait once the final message is on disk")
+    monkeypatch.setattr(reviewer_stopcontinue, "_sleep", fail)
+    assert rl.last_assistant_text(path, final_message="Summary: done").endswith("Summary: done")
+    assert rl.last_assistant_text(path).endswith("Summary: done")
+
+
+def test_a_final_phrase_seen_earlier_in_the_turn_does_not_settle_a_stale_read(
+        tmp_path, monkeypatch):
+    # The phrase appeared mid-turn; the transcript still ends with stale output. Membership would
+    # return the stale text; a terminal match waits, then appends the real final message.
+    path = _transcript(tmp_path, _text_event("Plan: finish, then write All done."),
+                       _text_event("Running the probes"), _thinking_event())
+    waits = []
+    monkeypatch.setattr(reviewer_stopcontinue, "_sleep", waits.append)
+    text = rl.last_assistant_text(path, final_message="All done.")
+    assert waits, "a stale read must be re-read"
+    assert text.endswith("All done.") and "Running the probes" in text
+
+
 def test_is_stop_ok_recognizes_the_sentinel():
     assert rl.is_stop_ok("STOP_OK") is True
     assert rl.is_stop_ok("stop_ok") is True
