@@ -149,9 +149,11 @@ def _main(data):
         )
         return 0
 
-    # A fresh (NOT hook-driven) stop is the first stop of a user turn -> reset the budget.
+    # A fresh (NOT hook-driven) stop is the first stop of a user turn -> reset the budget, and
+    # forget the previous chain's directive so it cannot count as a repeat.
     if not stop_active:
         rl.reset_nudge_count(cwd, claude_sid)
+        rl.clear_directive(cwd, claude_sid)
     used = rl.read_nudge_count(cwd, claude_sid)
     cap = rl.max_nudges()
     if used >= cap:
@@ -259,6 +261,16 @@ def _main(data):
         )
     )
 
+    # A directive that restates the previous one in this stop chain was already answered by the
+    # agent; re-issuing it only loops (#19). Let the stop through so the operator can respond.
+    if keep_going and stop_active and rl.directive_repeats(cwd, claude_sid, out):
+        rl.log("[stop] key={} supervisor repeated its previous directive -> allow stop".format(key))
+        print(json.dumps(rl.info_output(
+            "[stopContinue supervisor] repeated its previous directive, which the agent has "
+            "already answered; letting it stop so the operator can respond:\n" + rl.short(out))))
+        rl.clear_directive(cwd, claude_sid)
+        return 0
+
     # Pre-enactment delay: when the supervisor produced a verdict (a continue directive OR a
     # STOP_OK approval), pause BEFORE emitting it so the operator has a window to intervene. The
     # fail-open no-verdict paths (empty / failed reviewer) skip this. Budget-capped so the sleep
@@ -271,6 +283,7 @@ def _main(data):
 
     if keep_going:
         rl.bump_nudge_count(cwd, claude_sid)
+        rl.record_directive(cwd, claude_sid, out)
         reason = (
             # No "your message may never be shown -- restate it" directive here: a blocked
             # stop still shows the operator what the agent wrote, so that instruction only

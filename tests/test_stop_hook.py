@@ -588,7 +588,24 @@ def test_a_repeated_directive_is_detected(tmp_path, monkeypatch):
     directive = "Ask the operator explicitly to run /reviewerModel effort clear and items 3-7."
     assert not rl.directive_repeats(proj, sid, directive)
     rl.record_directive(proj, sid, directive)
-    assert rl.directive_repeats(proj, sid, directive + " Then record the result.")
+    # A restatement: case, punctuation and filler words differ, the asked-for work does not.
+    assert rl.directive_repeats(
+        proj, sid, "Please ask the operator explicitly to run /reviewerModel effort clear, "
+                   "and items 3-7!")
+    # Added work is not a repeat.
+    assert not rl.directive_repeats(proj, sid, directive + " Then record the result.")
+
+
+def test_a_directive_with_a_changed_target_is_not_a_repeat(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    rl.record_directive(str(tmp_path), "S", "Run test A and report the result.")
+    assert not rl.directive_repeats(str(tmp_path), "S", "Run test B and report the result.")
+
+
+def test_a_directive_with_a_changed_order_is_not_a_repeat(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    rl.record_directive(str(tmp_path), "S", "Run test A before test B.")
+    assert not rl.directive_repeats(str(tmp_path), "S", "Run test B before test A.")
 
 
 def test_the_generic_continuation_never_counts_as_a_repeat(tmp_path, monkeypatch):

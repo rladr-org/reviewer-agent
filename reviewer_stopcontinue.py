@@ -19,6 +19,7 @@ rebound and therefore deliberately kept private to `reviewer_backends`.
 
 """
 import datetime
+import difflib
 import json
 import os
 import re
@@ -270,6 +271,66 @@ def max_nudges():
     default 10, floored at 1). The supervisor stops nudging past this so a mis-judging
     reviewer can never loop the agent forever."""
     return _tunable_int("REVIEWER_STOPCONTINUE_MAX_NUDGES", "maxNudges", 10, 1)
+
+
+# The prompt's own generic continuation. It is identical every time BY DESIGN, so it can never
+# count as a repeat.
+GENERIC_CONTINUE = ("You said that there is more work to do, and it does not appear to require "
+                    "additional operator approval. In that case, continue your work.")
+
+
+def _normalize_directive(text):
+    return " ".join((text or "").lower().split())
+
+
+def last_directive_file(proj, claude_session_id):
+    return nudge_count_file(proj, claude_session_id).with_suffix(".last_directive")
+
+
+# Words that do not change what a directive asks for.
+_FILLER_WORDS = frozenset(
+    "a an the and or to then of for in on at it its this that these those is are be please "
+    "now also just so".split())
+
+
+def _content_words(normalized):
+    """The directive's content words IN ORDER: order carries meaning ("A before B")."""
+    words = (w.strip(".,;:!?()[]'\"`-/") for w in normalized.split())
+    return [w for w in words if w and w not in _FILLER_WORDS]
+
+
+def directive_repeats(proj, claude_session_id, directive, threshold=0.85):
+    """True when `directive` restates the previous continue directive of this stop chain.
+    Re-issuing it cannot help: the agent already answered it (2026-09-24: three identical "ask
+    the operator" directives for a message that already asked).
+
+    A restatement must be close in wording AND carry the same content words in the same order.
+    Similarity alone is not enough: "Run test A and report" and "Run test B and report" score
+    about 0.97, and "A before B" against "B before A" about 0.92, yet each second directive asks
+    for different work, and treating it as a repeat would let the agent stop with that work
+    undone."""
+    now = _normalize_directive(directive)
+    if not now or now == _normalize_directive(GENERIC_CONTINUE):
+        return False
+    try:
+        prev = last_directive_file(proj, claude_session_id).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return (bool(prev) and _content_words(prev) == _content_words(now)
+            and difflib.SequenceMatcher(None, prev, now).ratio() >= threshold)
+
+
+def record_directive(proj, claude_session_id, directive):
+    f = last_directive_file(proj, claude_session_id)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(_normalize_directive(directive), encoding="utf-8")
+
+
+def clear_directive(proj, claude_session_id):
+    try:
+        last_directive_file(proj, claude_session_id).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def stopcontinue_effort():
