@@ -1524,7 +1524,11 @@ def _classify_segment(words, here, body, depth, home):
                 break
         if not code and body is not None and "-" in words[1:]:
             code = body
-        if code and _INLINE_GIT_COMMIT_RE.search(code):
+        # A mention of a commit counts only in a script that can run a command (Task C2.3):
+        # `print('run git commit')`, or a report quoting it, is data.
+        family = "python" if name.startswith("python") else name
+        if (code and _INLINE_GIT_COMMIT_RE.search(code)
+                and re.search(_INLINE_SPAWN[family], code)):
             return CommitIntent("other", here, _INLINE_REASON), outer
     return _NO_INTENT, outer
 

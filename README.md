@@ -201,8 +201,11 @@ refuses a `merge`, `cherry-pick`, `revert`, `am` or
 rebase on git 2.34 or later, which fast-forwards or fails). Each of those has a no-commit route:
 `--no-commit`, `--squash`, `--ff-only`, `-n`, or `git apply --index` for `am`. `commit-tree` has
 none, so it is refused outright; stage the change and make a plain `git commit` instead. Inline
-`python -c`/`node -e` scripts that mention `git` and then a commit-producing subcommand are
-refused too. It cannot see:
+`python -c`/`node -e` scripts (and perl and ruby ones) that can run a command (`subprocess`,
+`os.system`, `child_process`, `system`, …) and mention `git` and then a commit-producing
+subcommand are refused too. One that only carries the words as text, such as a script that
+prints them or writes them into a report, is not. A script that runs some other command and
+also mentions a commit as text is still refused. It cannot see:
 
 - a script file (`./release.sh`, `make`, `npm run …`), a sourced one (`source`/`.`), or a script
   a shell reads from a file or a download, that commits or changes directory;
