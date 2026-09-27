@@ -24,6 +24,7 @@ import pytest
 
 import reviewer_backends
 import reviewer_lib as rl
+import reviewer_prompts
 
 PROJ = "/Users/x/proj"
 
@@ -190,11 +191,15 @@ def test_no_prompt_constant_has_a_missing_space_at_a_concatenation_seam():
     must use."""
     allowed = {"reviewerAgent", "stopContinue"}
     bad = []
+    texts = []
     for name in ("STOP_SUPERVISE_PROMPT", "REVIEWER_STANDING_BRIEF", "DEFAULT_BRIEF",
                  "COMMIT_PROMPT", "PI_COMMIT_PROMPT", "_CAPSULE_UNIVERSAL",
                  "_CAPSULE_COMMIT_HEAD", "_CAPSULE_COMMIT_REPEAT_HEAD",
                  "_CAPSULE_COMMIT_REPEAT_TAIL"):
-        text = getattr(rl, name)
+        texts.append((name, getattr(rl, name)))
+    # Not on the facade: the prompt module owns it, and only `reviewer_capsule` reads it.
+    texts.append(("_CAPSULE_STOP", reviewer_prompts._CAPSULE_STOP))
+    for name, text in texts:
         for m in re.finditer(r"\b([a-z]{2,})([A-Z][a-z]{2,})\b", text):
             if m.group(0) not in allowed:           # wordWord -> "pre-approvedby"/"repeatfull"
                 bad.append((name, m.group(0)))

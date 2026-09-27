@@ -230,7 +230,11 @@ def _main(data):
             timeout=STOP_TIMEOUT,
             extra_config=[rl.stopcontinue_effort_config()],
         )
-    keep_going = code == 0 and bool(out.strip()) and not rl.is_stop_ok(out)
+    # A commit-gate APPROVED is neither a completion verdict nor a directive (see
+    # `stop_ok_position`): relaying it told the agent "NOT yet complete ... APPROVED".
+    gate_verdict = code == 0 and rl.stop_ok_position(out) == "gate"
+    keep_going = (code == 0 and bool(out.strip()) and not rl.is_stop_ok(out)
+                  and not gate_verdict)
     if code != 0 and (rl.usage_limit_detail(err) or rl.model_rejection_detail(backend, err)):
         # Stop supervision fails OPEN, so this cannot block anything -- but silently allowing
         # every stop because the configured model is unreachable, or because the account's
@@ -290,6 +294,15 @@ def _main(data):
         )))
         # A genuine completion arms the watchdog idle countdown (disarm only on STOP_OK).
         _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
+    elif gate_verdict:
+        # Fail-open like any reply without a usable stop verdict, but visibly: silence would hide
+        # a supervisor that has lost its framing. The watchdog stays armed, as for any stop that
+        # was not a genuine STOP_OK.
+        print(json.dumps(rl.info_output(
+            "[stopContinue] the supervisor answered with the commit gate's verdict instead of "
+            "STOP_OK or a directive, so this stop was allowed without a completion check:\n"
+            + rl.short(out)
+        )))
     # else: empty / failure -> allow the stop silently (fail-open, logged above).
     return 0
 

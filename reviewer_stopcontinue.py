@@ -133,6 +133,8 @@ _STOP_OK_BARE_LINE = re.compile(r"^[\s*_`]*STOP_OK[\s*_`.!]*$")
 # task is genuinely complete.`), a longer token is not (`STOP_OKAY`). A bare `startswith` accepted
 # the latter, in conflict with the exact-token rule the Codex parser and the trailing line apply.
 _STOP_OK_OPENING = re.compile(r"^STOP_OK\b")
+# The commit gate's approval word, answered by a supervisor that took itself for the auditor.
+_GATE_APPROVAL_OPENING = re.compile(r"^[\s*_`]*APPROVED\b")
 
 
 def stop_ok_position(codex_out):
@@ -151,6 +153,12 @@ def stop_ok_position(codex_out):
                job is to keep the agent working, so the ambiguous reading resolves to continue)
                but reported distinctly so the stop hook can log it instead of silently inverting
                it. The stop-path analogue of the commit gate's APPROVED-and-REJECTED refusal.
+    "gate"  -- the first non-empty line opens with the whole word APPROVED: the commit gate's
+               approval, not a stop verdict (2026-09-26: framed as the commit auditor, the
+               supervisor answered APPROVED and it was relayed as a keep-working directive). It
+               neither permits the stop as a completion nor directs any work; the stop hook
+               allows the stop and says why. A REJECTED reply stays a directive: it carries
+               findings the agent can act on.
     None    -- no sentinel in an honored-or-contradictory position: a continue directive, or
                empty / whitespace-only / None input.
 
@@ -160,6 +168,8 @@ def stop_ok_position(codex_out):
         return None
     if _STOP_OK_OPENING.match(lines[0].upper()):
         return "first"
+    if _GATE_APPROVAL_OPENING.match(lines[0].upper()):
+        return "gate"
     if _STOP_OK_BARE_LINE.match(lines[-1].upper()):
         return "last"
     if any(_STOP_OK_BARE_LINE.match(ln.upper()) for ln in lines[1:-1]):

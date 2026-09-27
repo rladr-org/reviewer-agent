@@ -1343,6 +1343,22 @@ _CAPSULE_UNIVERSAL = (
 )
 
 
+# The stop supervisor's capsule. It used to get `_CAPSULE_UNIVERSAL`, which is the commit
+# reviewer's job description. On 2026-09-26 that framing, plus operator messages quoting a whole
+# REJECTED commit review, turned the supervisor into a commit auditor: it ran `git diff --cached`
+# and answered APPROVED three stops running, each relayed to the agent as a keep-working directive.
+_CAPSULE_STOP = (
+    "STOP SUPERVISOR STANDING REMINDER -- repeated on every call, and CURRENT: where it differs "
+    "from anything sent earlier in this session, this wins.\n"
+    "- This call is NOT a commit audit. There is no staged set to judge: do not run "
+    "`git diff --cached` and do not review code for defects. Commit reviews quoted in the "
+    "operator messages are history, not a request to you.\n"
+    "- Your only job is to decide whether the agent may end its turn. Reply with STOP_OK or a "
+    "directive, exactly as the instructions below say. Never reply APPROVED or REJECTED: those "
+    "are the commit gate's words, and here they are not a verdict.\n"
+)
+
+
 # Items 2 and 3 differ by backend: codex has a shell, pi is hermetically read-only. Telling pi to
 # run a shell command is unactionable, and pointing it at a plain file read as if that were the
 # staged content is wrong -- the working tree can carry unstaged edits that are not in the commit.
@@ -1473,16 +1489,27 @@ _CAPSULE_COMMIT_REPEAT_TAIL = (
 # a numbered item saying "when the block above is present" is unreadable when there is no block.
 
 
-def reviewer_capsule(proj, commit_audit=False, claude_session_id=None):
+def reviewer_capsule(proj, commit_audit=False, claude_session_id=None, role=ROLE_REVIEWER):
     """The per-invocation standing reminder for `proj`.
 
     `commit_audit` appends the staged-set half. Left False for the question answerer and the stop
     supervisor, which have no staged set to judge.
 
+    `role` ROLE_STOP selects the stop supervisor's own capsule (`_CAPSULE_STOP`) instead of the
+    commit reviewer's job description.
+
     `claude_session_id` scopes the prior-verdict pointer. Without it the saved verdict cannot be
     attributed to this reviewer, so it is not named -- see the comment at the pointer below.
     """
     brief = Path(canonical_project_key(proj)) / "reviewerAgent.md"
+    if role == ROLE_STOP:
+        if brief.exists():
+            return _CAPSULE_STOP + (
+                "- This repository's standing brief is at {}. Read it only for project context; "
+                "its commit-review contract does not apply to this call.\n\n".format(
+                    brief.resolve())
+            )
+        return _CAPSULE_STOP + "\n"
     if brief.exists():
         text = _CAPSULE_UNIVERSAL + (
             "- This repository's standing brief is at {}. Read that file if you need its detail "
@@ -1539,7 +1566,7 @@ def apply_context(prompt, proj, transcript_path=None, claude_session_id=None,
     message is resent every time."""
     since = read_operator_watermark(proj, claude_session_id, role) if claude_session_id else None
     blocks = [reviewer_capsule(proj, commit_audit=commit_audit,
-                               claude_session_id=claude_session_id)]
+                               claude_session_id=claude_session_id, role=role)]
     if transcript_path:
         block = operator_transcript_block(transcript_path, since_uuid=since)
         if block:
