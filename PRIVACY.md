@@ -40,7 +40,10 @@ Under `~/.claude/reviewer-agent/` (override with `REVIEWER_STATE_DIR`), and
   disclaimer SHA-256 hash, acceptance source, and local Unix timestamp; it is shared by both
   features within that host and repository.
 - **`reviews/`** — the latest verdict per project and session, plus a bounded history. **Verdicts
-  quote the diffs they judged**, so this directory contains excerpts of your source code.
+  quote the diffs they judged**, so this directory contains excerpts of your source code. For
+  Claude Code it also holds `<project>.audits.jsonl`, one record per commit audit (the reviewer
+  command line, model, token counts, commit hashes and staged file names), and `prompt_parts/`,
+  the prompt components those records point to. A prompt part can contain a diff of reviewed code.
 - **`logs/reviewer.log`** — one line per gated action, including bounded tails of the verdict and
   of stderr.
 - **`config.json`** — your settings, if you made one.
@@ -52,12 +55,18 @@ context may be sent during reviewer calls, and invoked tools have their own data
 
 ## Removing it
 
-Purge one project's retained reviews and rulings without uninstalling anything:
+Purge one project's retained reviews, rulings and audit data without uninstalling anything:
 
 ```bash
 /reviewerHistory clear                              # Claude Code
 $reviewer-agent-codex:reviewer-history clear        # Codex
 ```
+
+In Claude Code, `/reviewerHistory clear` also removes the project's audit log and every stored
+prompt part no other project's audit log references. Prompt parts are stored by content, so one
+part can serve several projects; a part another project still references is kept, and clearing
+that project too removes it. If another project's audit log cannot be read or parsed, every
+prompt part is kept, because the cleanup cannot tell which parts that project uses.
 
 Remove everything, for every project:
 

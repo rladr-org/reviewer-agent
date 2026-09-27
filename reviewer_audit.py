@@ -408,6 +408,77 @@ def append_audit_record(proj, record):
     return f
 
 
+def _shas_in(value, found):
+    """Collect every prompt-part reference in one record: the values of keys ending in `sha256`
+    (`brief_sha256`, `capsule_sha256`, `change_block_sha256`, ...)."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, str) and str(key).endswith("sha256") and _SHA256.match(item):
+                found.add(item)
+            else:
+                _shas_in(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _shas_in(item, found)
+    return found
+
+
+def _audit_shas(path):
+    """Every prompt-part sha256 `path` references, or None when the log cannot be read or any
+    non-blank line fails to parse. None means "unknown", never "references nothing"."""
+    found = set()
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    _shas_in(json.loads(line), found)
+                except ValueError:
+                    return None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return found
+
+
+def purge_project_audit_data(proj):
+    """Delete this project's audit log and every stored prompt part ONLY it referenced; returns
+    the paths removed.
+
+    Parts are content-addressed and shared across projects (a brief or capsule two repositories
+    both used is one file), so a part is removed only when no OTHER project's audit log names it.
+    One of them can hold a unified diff of reviewed code, which is what `/reviewerHistory clear`
+    promises to purge. If ANY sibling log cannot be listed, read or parsed, no part is removed:
+    "unshared" is never inferred from incomplete data. The project's own log is still removed."""
+    mine = audit_log_file(proj)
+    own = _audit_shas(mine) or set()  # an unreadable own log only means fewer deletions
+    shared = set()
+    try:
+        others = [p for p in mine.parent.glob("*.audits.jsonl") if p != mine]
+    except OSError:
+        others = None
+    for other in others or []:
+        refs = _audit_shas(other)
+        if refs is None:
+            others = None
+            break
+        shared |= refs
+    removed = []
+    for sha in (sorted(own - shared) if others is not None else []):
+        part = prompt_parts_dir() / (sha + ".txt")
+        try:
+            part.unlink()
+        except OSError:
+            continue
+        removed.append(str(part))
+    try:
+        mine.unlink()
+        removed.append(str(mine))
+    except OSError:
+        pass
+    return removed
+
+
 def read_audit_records(proj):
     """Every record for `proj`, oldest first. A corrupt line is skipped, not fatal: this is an
     append-only file written by short-lived processes, so a truncated tail must not destroy the

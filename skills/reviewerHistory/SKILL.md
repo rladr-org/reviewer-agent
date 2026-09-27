@@ -20,5 +20,6 @@ What is retained and why it is worth purging: every completed audit's full verdi
 verdicts quote the staged diff they judged, so the directory accumulates a plaintext record of
 the code under review as well as of the reviews. The cap (newest 100 per project by default,
 oldest pruned first) bounds its size; `clear` is how an operator removes it without uninstalling
-the plugin. `clear` removes this project's retained reviews and its saved latest rulings, and
-touches no other repository and no reviewer session.
+the plugin. `clear` removes this project's retained reviews, its saved latest rulings, its audit
+log, and the stored prompt parts no other project uses, and touches no other repository and no
+reviewer session.

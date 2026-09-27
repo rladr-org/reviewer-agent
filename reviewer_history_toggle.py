@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import reviewer_audit  # noqa: E402
 import reviewer_lib as rl  # noqa: E402
 
 
@@ -41,27 +42,27 @@ def _show(proj):
         "to change it.".format(rl.review_history_keep())
     )
     print(
-        "reviewerHistory: /reviewerHistory clear deletes this project's retained reviews and "
-        "its saved latest rulings. Other repositories are untouched."
+        "reviewerHistory: /reviewerHistory clear deletes this project's retained reviews, its "
+        "saved latest rulings, its audit log, and the stored prompt parts no other project "
+        "uses. Other repositories are untouched."
     )
     return 0
 
 
 def _clear(proj):
     root = rl.canonical_project_key(proj)
-    removed = rl.clear_review_history(proj)
+    removed = rl.clear_review_history(proj) + reviewer_audit.purge_project_audit_data(proj)
     if not removed:
         print(
-            "reviewerHistory: nothing to clear for {} -- no retained reviews and no saved "
-            "ruling.".format(root)
+            "reviewerHistory: nothing to clear for {} -- no retained reviews, saved ruling or "
+            "audit log.".format(root)
         )
         return 0
     rl.log("[history] cleared proj={} files={}".format(root, len(removed)))
     print(
-        "reviewerHistory: cleared {} file(s) for {} (retained reviews and saved rulings). "
-        "The next review starts a fresh record; reviewer sessions are unaffected.".format(
-            len(removed), root
-        )
+        "reviewerHistory: cleared {} file(s) for {} (retained reviews, saved rulings, the "
+        "audit log, and stored prompt parts no other project uses). The next review starts a "
+        "fresh record; reviewer sessions are unaffected.".format(len(removed), root)
     )
     return 0
 

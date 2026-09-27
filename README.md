@@ -700,7 +700,7 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerSession rotate` | Retire all backend role sessions so the next calls receive the current brief. |
 | `/reviewer-agent:reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
 | `/reviewer-agent:reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
-| `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews and saved rulings. |
+| `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews, saved rulings, audit log, and the stored prompt parts no other project uses. |
 
 > `/reviewer-agent:reviewerDirective` is handled by a `UserPromptSubmit` hook that reads its text
 > from JSON rather than a shell, so shell syntax in a directive no longer matters. Its content is
@@ -880,8 +880,9 @@ read when an entry is written, so changing it does not require reinstalling the 
 
 Retained verdicts quote the staged diffs they judged, so the history is a plaintext record of
 reviewed code as well as of reviews. `/reviewer-agent:reviewerHistory` reports what is retained for the current
-project and `/reviewer-agent:reviewerHistory clear` deletes it -- retained reviews and saved rulings, for that
-project only -- without uninstalling anything. The Codex package exposes the same two actions as
+project and `/reviewer-agent:reviewerHistory clear` deletes it -- retained reviews, saved rulings, the audit
+log, and the stored prompt parts no other project uses, for that project only -- without uninstalling
+anything. The Codex package exposes the same two actions as
 `$reviewer-agent-codex:reviewer-history status|clear`.
 
 ### Background work and stop supervision
