@@ -38,6 +38,22 @@ def _effective(home, monkeypatch):
     return rl.codex_model()
 
 
+def test_changing_the_model_retires_this_sessions_reviewers(tmp_path, monkeypatch):
+    # Task 12: a resumed session keeps the model it started with, so a new setting reached
+    # neither reviewer until something else rotated them.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    proj = str(tmp_path)
+    rl.write_session_id_if_absent(proj, "S", "STOP-1", role=rl.ROLE_STOP)
+    rl.write_session_id_if_absent(proj, "S", "REV-1", role=rl.ROLE_REVIEWER)
+    p = run_toggle(["gpt-5.5"], home, env_extra={"CLAUDE_CODE_SESSION_ID": "S",
+                                                   "CLAUDE_PROJECT_DIR": proj})
+    assert p.returncode == 0, p.stderr
+    assert rl.read_session_id(proj, "S", rl.ROLE_STOP) is None
+    assert rl.read_session_id(proj, "S", rl.ROLE_REVIEWER) is None
+    assert "retired" in p.stdout
+
+
 def test_set_persists_model_and_echoes(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     p = run_toggle(["gpt-5.5-codex"], home)

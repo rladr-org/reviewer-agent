@@ -637,6 +637,26 @@ def test_the_same_directive_twice_in_one_stop_chain_lets_the_agent_stop(tmp_path
     assert "repeated its previous directive" in second["systemMessage"]
 
 
+def test_the_stop_hook_retires_the_supervisor_after_n_reviews(tmp_path, monkeypatch):
+    # Task 12: the hook counts completed reviews and retires only the stop role's session.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    rl.write_session_id(repo, "claude-stop", "sid-rev", role=rl.ROLE_REVIEWER)
+    tr = _transcript(tmp_path, "Done.")
+    env = {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_STDOUT": "STOP_OK",
+           "FAKE_CODEX_EXIT": "0", "REVIEWER_STOP_ROTATE_EVERY": "2"}
+    p = run_hook(_input(repo, tr), env)
+    assert p.returncode == 0, p.stderr
+    assert rl.read_session_id(repo, "claude-stop", rl.ROLE_STOP) == "sid-stop"  # 1 of 2: kept
+    p = run_hook(_input(repo, tr), env)
+    assert p.returncode == 0, p.stderr
+    assert rl.read_session_id(repo, "claude-stop", rl.ROLE_STOP) is None  # 2 of 2: retired
+    assert rl.read_session_id(repo, "claude-stop", rl.ROLE_REVIEWER) == "sid-rev"
+
+
 def test_the_stop_capsule_is_not_the_commit_reviewers(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     repo = make_repo(tmp_path)

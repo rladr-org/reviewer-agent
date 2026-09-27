@@ -407,3 +407,19 @@ def test_the_session_brief_record_needs_no_role():
     # Keyed by the CODEX session id, not the Claude session id, so two roles get two brief
     # records with no change at all.
     assert rl.session_brief_file("stop-sid") != rl.session_brief_file("reviewer-sid")
+
+
+def test_the_stop_session_is_retired_after_n_reviews(tmp_path, monkeypatch):
+    # Task 12: every stop resends the operator transcript into one RESUMED stop session, so its
+    # context grew from 2.5k to 152k tokens. Retiring it every N reviews bounds that cost.
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    monkeypatch.setenv("REVIEWER_STOP_ROTATE_EVERY", "3")
+    proj, sid = str(tmp_path), "S"
+    rl.write_session_id_if_absent(proj, sid, "STOP-1", role=rl.ROLE_STOP)
+    rl.write_session_id_if_absent(proj, sid, "REV-1", role=rl.ROLE_REVIEWER)
+    assert rl.stop_rotate_every() == 3
+    assert [rl.record_stop_review(proj, sid) for _ in range(3)] == [1, 2, 3]
+    cleared = rl.retire_stop_session(proj, sid)
+    assert cleared and rl.read_session_id(proj, sid, rl.ROLE_STOP) is None
+    assert rl.read_session_id(proj, sid, rl.ROLE_REVIEWER) == "REV-1"  # commit reviewer kept
+    assert rl.record_stop_review(proj, sid) == 1  # the count restarts
