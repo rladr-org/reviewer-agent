@@ -244,3 +244,34 @@ def test_stop_prompt_prefers_known_tasks_with_generic_fallback():
     assert "cannot identify the unfinished tasks" in norm
     assert "do not invent tasks" in norm
     assert "quoted transcripts" in norm
+
+
+def _linked_worktree(git_repo):
+    import subprocess
+    worktree = git_repo.parent / "wt"
+    subprocess.run(["git", "-C", str(git_repo), "worktree", "add", "-q", "-b", "wt",
+                    str(worktree)], check=True)
+    return worktree
+
+
+def test_a_linked_worktree_uses_the_main_checkouts_uncommitted_brief(git_repo, isolated_state):
+    # 2026-09-27: an untracked reviewerAgent.md exists only in the main checkout, so a reviewer
+    # started in a linked worktree fell back to the default brief and rejected RED commits the
+    # project brief allows. The Claude plugin reads the canonical project's brief.
+    (git_repo / "reviewerAgent.md").write_text("Project rule: RED commits are allowed.\n",
+                                              encoding="utf-8")
+    worktree = _linked_worktree(git_repo)
+    assert not (worktree / "reviewerAgent.md").exists()  # untracked: not checked out there
+    assert prompts.project_brief(worktree) == "Project rule: RED commits are allowed."
+    capsule = prompts.commit_capsule(worktree, "root-session")
+    assert str((git_repo / "reviewerAgent.md").resolve()) in capsule
+    assert "has no project brief" not in capsule
+
+
+def test_a_linked_worktrees_own_brief_wins(git_repo, isolated_state):
+    (git_repo / "reviewerAgent.md").write_text("main brief\n", encoding="utf-8")
+    worktree = _linked_worktree(git_repo)
+    (worktree / "reviewerAgent.md").write_text("worktree brief\n", encoding="utf-8")
+    assert prompts.project_brief(worktree) == "worktree brief"
+    assert str((worktree / "reviewerAgent.md").resolve()) in prompts.commit_capsule(
+        worktree, "root-session")
