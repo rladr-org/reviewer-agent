@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import reviewer_lib as rl
 
 _BASE = Path(__file__).resolve().parent.parent
@@ -500,3 +502,69 @@ def test_mid_reply_stop_ok_still_continues_but_is_logged_as_mid(tmp_path, monkey
     t = _log_text(home)
     assert "keep_going=True" in t
     assert "stop_ok=mid" in t
+
+
+# --------------------------------------------------------------------------
+# The commit gate's verdict word is not a stop verdict (docs/plans/claude_linux_issues.md, Task
+# C2.1). Observed 2026-09-26: framed as the commit auditor, the supervisor answered `APPROVED`
+# three stops running, and each was relayed as "NOT yet complete ... Do the following: APPROVED".
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("reply", ["APPROVED", "APPROVED\nSUGGESTIONS:\n1. rename x"])
+def test_a_commit_gate_approval_is_not_relayed_as_a_directive(tmp_path, monkeypatch, reply):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.set_stopcontinue_watchdog_active(repo)  # only a real STOP_OK may arm its idle countdown
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Phases A-C are committed and the suite passes.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": reply, "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert "decision" not in out                            # the stop is allowed
+    assert "commit gate's verdict" in out["systemMessage"]  # and the operator is told why
+    assert rl.read_nudge_count(repo, "claude-stop") == 0    # no forced continuation was spent
+    # Not a completion verdict, so the watchdog stays armed to recover the strand.
+    assert rl.is_watchdog_disarm_set(repo, "claude-stop") is False
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
+    t = _log_text(home)
+    assert "keep_going=False" in t
+    assert "stop_ok=gate" in t
+
+
+def test_a_commit_gate_rejection_is_still_a_directive(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Done.")
+    p = run_hook(
+        _input(repo, tr),
+        {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE,
+         "FAKE_CODEX_STDOUT": "REJECTED:\n1. The README still names the old flag.",
+         "FAKE_CODEX_EXIT": "0"},
+    )
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out["decision"] == "block"
+    assert "README still names the old flag" in out["reason"]
+
+
+def test_the_stop_capsule_is_not_the_commit_reviewers(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    stop = rl.apply_context("TASK", repo, role=rl.ROLE_STOP)
+    assert "find bugs" not in stop
+    assert "never block a commit" not in stop
+    assert "NOT a commit audit" in stop
+    assert "STOP_OK" in stop
+    # The audit command is named only as something NOT to run.
+    assert "do not run `git diff --cached`" in stop
+    assert stop.count("git diff --cached") == 1
+    # The reviewer role's capsule is unchanged.
+    assert "REVIEWER STANDING REMINDER" in rl.apply_context("TASK", repo)
