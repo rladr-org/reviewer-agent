@@ -124,6 +124,17 @@ the protected repository inside WSL2. See *Platform support* in the README for s
 the bug-report checklist. Do not edit `hooks/hooks.json` to work around a platform failure; that
 file is plugin-managed and an update will silently revert the change.
 
+If the initial working directory is not inside a Git repository, stop and ask the operator which
+repository to protect; that answer is `<TARGET_REPO>`. Then check that Git has a complete author
+identity for it (a name AND an email):
+
+```
+git -C <TARGET_REPO> var GIT_AUTHOR_IDENT
+```
+
+If that fails, ask the operator to set `user.name` and `user.email`; otherwise the first commit
+fails for a reason that has nothing to do with the gate.
+
 ## Step 2 — detect the backends, then ASK which one to use
 
 There are three, `codex`, `pi` and `claude`. **None is a requirement and you do not get to pick
@@ -252,7 +263,66 @@ If they chose `pi`, the **pi backend** section below is mandatory, not optional 
 `git_read` extension pi cannot read the repository at all, and the gate is fail-closed, so every
 commit in the repo would be blocked. Complete it before step 6.
 
-If `codex` lives somewhere non-standard, note the path; it goes in `REVIEWER_CODEX_BIN` at step 6.
+**If they chose `codex`, check what the hooks will resolve, and persist its path when they
+would not find it.** Hooks resolve codex from `REVIEWER_CODEX_BIN`, then `codexBin` in the
+active config file, then `~/.local/bin/codex`, then `codex` on their own `PATH`, which is often
+just `/usr/bin:/bin`. An npm-global install elsewhere (for example under `nvm`) is then invisible
+to them and every commit is blocked. An npm install of codex is also a Node script
+(`#!/usr/bin/env node`), which then needs `node` on that `PATH` as well; a native codex binary
+does not. This asks the plugin's own resolver, under a hook-like `PATH`, and writes `codexBin`
+to the config file that resolver reads only when it finds nothing:
+
+```
+python3 - <<'PY'
+import json, os, shutil, sys
+sys.path.insert(0, "<PLUGIN_DIR>")
+import reviewer_lib as rl
+
+shell_path = os.environ.get("PATH", "")
+hook_path = "/usr/bin:/bin"
+
+
+def hook_resolves():
+    # The resolver the hooks use (REVIEWER_CODEX_BIN, codexBin in the active config file,
+    # ~/.local/bin/codex, then PATH), evaluated under a hook-like PATH.
+    os.environ["PATH"] = hook_path
+    try:
+        found = rl.codex_bin()
+    finally:
+        os.environ["PATH"] = shell_path
+    return found if os.path.isfile(found) else None
+
+
+seen = hook_resolves()
+print("hooks resolve codex:", seen or "NOTHING")
+target = seen or shutil.which("codex")
+if not target:
+    raise SystemExit("codex is not on this shell's PATH either - ask the operator where it is")
+with open(os.path.realpath(target), "rb") as fh:
+    first = fh.readline(200)
+if first.startswith(b"#!") and b"node" in first:
+    node = shutil.which("node", path=hook_path)
+    print("node script; node on the minimal hook PATH:", node or "NOTHING - ask the operator")
+if not seen:
+    if os.environ.get("REVIEWER_CODEX_BIN"):
+        raise SystemExit("REVIEWER_CODEX_BIN is set but names no file - fix or unset it")
+    cfg = rl.config_file()                        # honours REVIEWER_CONFIG_FILE / state dir
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(cfg.read_text()) if cfg.exists() else {}
+    data["codexBin"] = os.path.abspath(target)    # the stable link, not a versioned release dir
+    cfg.write_text(json.dumps(data, indent=2) + "\n")
+    print("wrote codexBin =", data["codexBin"], "to", cfg)
+    print("hooks resolve codex now:", hook_resolves() or "NOTHING")
+PY
+```
+
+**Check:** the last `hooks resolve codex` line names an existing file. `/usr/bin:/bin` is the
+worst case, not necessarily the real hook `PATH`: hooks inherit the `PATH` Claude Code itself was
+started with, which this shell cannot see. So if the script printed `node on the minimal hook
+PATH: NOTHING`, **stop and ask the operator** whether Claude Code is launched with `node` on its
+`PATH` (for example from a shell whose profile adds it). Continue only if they confirm. Otherwise
+this codex cannot start from a hook and the fail-closed gate would block every commit; the usual
+fix is a system-wide Node install.
 
 ## Step 3 — verify the checkout before trusting it
 
@@ -263,16 +333,30 @@ Install test dependencies before invoking pytest; the runtime remains standard-l
 ```bash
 python3 -m venv <TEST_VENV>
 <TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
-cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
+cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest -m smoke -q -p no:cacheprovider -rs
 cd <PLUGIN_DIR> && <TEST_VENV>/bin/python tools/check_split_layering.py
 ```
 
 Reuse an environment prepared by the shared guide rather than creating it twice. Keep the
 plugin checkout in a permanent directory; only the test environment may be temporary.
 
-**Check:** every test passes, with two expected skips (two state containers have no reset function,
-so their reset row skips itself), and the structural check prints
-`PASS [VERIFY]: acyclic, zero back-edges`.
+`-m smoke` runs the install-time subset: imports, distribution shape, host versions, the hook
+launcher and a real-git gate round trip, in under a minute. The full suite (about 1,500 tests,
+5–12 minutes) is for `CONTRIBUTING.md`; if the shared guide already ran it and it passed, the smoke
+run adds nothing. If you run the full suite, use background execution and wait for its exit
+status rather than a foreground command timeout.
+
+**Check:** every test passes; the structural check prints
+`PASS [VERIFY]: acyclic, zero back-edges`. Compare the `-rs` output against these expected skips:
+
+- smoke run: none, except when running as root, where
+  `tests/test_commit_intent.py`: `root can enter any directory` skips.
+- full suite, if run: the root-only skip above, plus exactly these three:
+  - `tests/test_split_shared_state.py`: `reviewer_state._MIGRATED_CONTROL_STEMS has no reset writer`
+  - `tests/test_split_shared_state.py`: `reviewer_manifest._TOPLEVEL_CACHE has no reset writer`
+  - `tests/test_reviewer_lib.py`: `REVIEWER_PROMPT_SPEC.md is maintainer-local and absent here`
+
+Any other skip is unexplained: report it rather than proceeding.
 
 If the suite fails, **stop**. You are about to install a gate that blocks commits; installing one
 whose own tests fail is not a recoverable position.
@@ -295,7 +379,7 @@ checkout; use the published `rladr-org/reviewer-agent` marketplace when installi
 the commands `/reviewerAgent`, `/reviewerDirective`, `/reviewerModel`, `/reviewerSession` and
 `/stopContinue` are offered.
 
-Hooks are snapshotted per session at start. An installing agent may finish step 5, but it must not
+Hooks are snapshotted per session at start. An installing agent may finish steps 5 and 5b, but it must not
 accept risk or enable either feature for the operator. The human must restart Claude Code before
 step 6. A session that was already running keeps the old hook snapshot, so the gate can appear
 installed and do nothing.
@@ -306,24 +390,32 @@ installed and do nothing.
 repository that has no brief.** It exits with `reviewerAgent: ERROR - brief not found at <path>`
 and changes nothing, so step 6 cannot succeed until this one has.
 
+`reviewerAgent.md` at the repository root is the reviewer's standing brief. Its contents are sent
+to the reviewer verbatim, once per Claude session (at session start, or on the first gated
+action), and establish the reviewer session that every later commit resumes. It is read from the
+canonical (main worktree) root, so one brief covers every linked worktree. The generic built-in
+brief is only a review-time fallback for a brief that has become empty or unreadable, so a corrupt
+brief cannot block every commit. Because the whole file is sent, it must contain only instructions
+for the reviewer — no setup notes for humans.
+
 **Refuse to overwrite an existing brief.** `cp` would silently replace hand-written content with a
 template:
 
 ```
-test -e <TARGET_REPO>/reviewerAgent.md \
-  && echo "EXISTS - leave it alone, do not overwrite" \
-  || cp <PLUGIN_DIR>/reviewerAgent.md.template <TARGET_REPO>/reviewerAgent.md
+test -e <TARGET_REPO>/reviewerAgent.md && echo "EXISTS - leave it alone, do not overwrite" || cp <PLUGIN_DIR>/reviewerAgent.md.template <TARGET_REPO>/reviewerAgent.md
 ```
 
 If it already exists, **report that** and leave the file untouched — it is very likely better than
-the template — then continue to step 6.
+the template — then continue to step 5b.
 
 If you created it, **edit it for that repository**: what the reviewer must enforce, the conventions
-it should know, the defect classes this codebase actually produces. Do not leave the template
+it should know, the defect classes this codebase actually produces, and its test command. Replace
+the template's `Project-specific guidance (edit me)` paragraph entirely. Do not leave the template
 unedited — a generic brief produces generic reviews, and this step is what determines whether the
-tool is worth having.
+tool is worth having. `/reviewerAgent on` warns if the placeholder is still there.
 
-**Check:** `<TARGET_REPO>/reviewerAgent.md` exists and describes that repository specifically.
+**Check:** `<TARGET_REPO>/reviewerAgent.md` exists and describes that repository specifically, and
+`grep -c "edit me" <TARGET_REPO>/reviewerAgent.md` prints `0`.
 
 **Optional for data-heavy repositories:** if the repository routinely commits large volumes
 of auto-generated data (dataset rows, generated manifests, captured HTML), consider adding a
@@ -335,27 +427,12 @@ failures on large data commits — the initial audit still runs on the full stag
 and codex may fetch a matched path on demand, so it is a mitigation rather than a guarantee. See the "Skimmed paths" section of the README for the fenced-block format. The file
 is optional; a missing file matches today's behavior (no exclusions).
 
-## Step 6 — human acceptance and enablement, per repository
+## Step 5b — offer the settings rules (agent, on approval)
 
-This step is operator-only. The installing agent must stop here, point the operator to
-[`DISCLAIMER.md`](DISCLAIMER.md), and wait for the operator to restart Claude Code in
-`<TARGET_REPO>`. The agent must not run either source toggle or add `acceptRisk` on the operator's
-behalf.
-
-**From the restarted Claude Code session whose working directory is `<TARGET_REPO>`** — see *Two
-paths* above — the operator first invokes:
-
-```
-/reviewerAgent on
-```
-
-**If Claude Code's auto mode is on, the toggle may be blocked** with a *"Permission for this
-action was denied by the Claude Code auto mode classifier"* error before the toggle script ever
-runs — the classifier reads the `on` argument as state-changing. **Turn auto mode off** for the
-enablement invocation (in `/config`, or set `permissions.defaultMode` to `default` in
-`~/.claude/settings.json`), invoke `/reviewerAgent on` (then `on acceptRisk`), and re-enable auto
-mode afterward if you want it back. The same applies to `/stopContinue on [acceptRisk]` and
-`/stopContinueWatchdog on`.
+These two optional blocks go in the operator's `~/.claude/settings.json`. Show them to the
+operator, explain what each allows, and write them only if the operator approves. They are
+not needed when auto mode is off. If your own write to `settings.json` is refused (auto mode can
+block an agent editing its host's settings), give the operator the JSON to add themselves.
 
 **One permission rule for the manual commands.** The six manual commands (`/reviewerAgent`,
 `/reviewerHistory`, `/reviewerModel`, `/reviewerSession`, `/stopContinue`, `/stopContinueWatchdog`)
@@ -388,9 +465,9 @@ commands take such an argument.
 
 `/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
 
-**Auto mode blocks `on` regardless of the allow-rule above.** The permission rule lets the
-non-state-changing invocations run; a state-CHANGING invocation (`on`) is independently flagged by
-auto mode's classifier and refused even with the rule. Either turn auto mode off for the single
+**Auto mode may block `on` even with the allow-rule above.** The permission rule lets the
+non-state-changing invocations run; on some Claude Code versions a state-CHANGING invocation (`on`)
+is independently flagged by auto mode's classifier and refused even with the rule. Either turn auto mode off for the single
 `on acceptRisk` invocation, or add an `autoMode.allow` classifier exception — read from
 `~/.claude/settings.json` (and managed settings) only, keep `"$defaults"`, and it survives updates
 because it names the dispatcher rather than a version:
@@ -401,6 +478,28 @@ because it names the dispatcher rather than a version:
   "Running the reviewer-agent dispatcher reviewer_cmd.py (under ~/.claude/plugins/cache/reviewer-agent/) with any subcommand and arguments, including its on/off/acceptRisk toggles: it only reads or flips this tool's own per-project flag files under ~/.claude/reviewer-agent/state and prints status; it never edits code, runs git, or accesses the network."
 ] } }
 ```
+
+## Step 6 — human acceptance and enablement, per repository
+
+This step is operator-only. The installing agent must stop here, point the operator to
+[`DISCLAIMER.md`](DISCLAIMER.md), and wait for the operator to restart Claude Code in
+`<TARGET_REPO>`. The agent must not run either source toggle or add `acceptRisk` on the operator's
+behalf.
+
+**From the restarted Claude Code session whose working directory is `<TARGET_REPO>`** — see *Two
+paths* above — the operator first invokes:
+
+```
+/reviewerAgent on
+```
+
+**If Claude Code's auto mode is on, the toggle may be blocked on some Claude Code versions**
+with a *"Permission for this action was denied by the Claude Code auto mode classifier"* error
+before the toggle script ever runs — the classifier reads the `on` argument as state-changing.
+**Turn auto mode off** for the enablement invocation (in `/config`, or set `permissions.defaultMode` to `default` in
+`~/.claude/settings.json`), invoke `/reviewerAgent on` (then `on acceptRisk`), and re-enable auto
+mode afterward if you want it back, or use the `autoMode.allow` exception from step 5b. The same
+applies to `/stopContinue on [acceptRisk]` and `/stopContinueWatchdog on`.
 
 Without auto mode blocking it, the plain `on` invocation must refuse without enabling and display:
 
@@ -423,8 +522,6 @@ repository.
 If instead it prints `reviewerAgent: ERROR - brief not found at <path>`, nothing was enabled: either
 step 5 did not run, or the session is in a directory other than the one you wrote the brief in.
 Compare the path it names against step 5's file before doing anything else.
-
-If `codex` is at a non-standard path from step 2, set `REVIEWER_CODEX_BIN` to it now.
 
 ## Step 7 — prove the gate actually gates
 

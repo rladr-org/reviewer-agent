@@ -18,6 +18,16 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   only when its visible text names a commit-producing subcommand or code that runs one.
 - An inline `python -c`/`node -e`/perl/ruby script is refused only when it can run a command and
   mentions a commit; one that only prints or writes the words is not.
+- The stop supervisor's session is retired every `stopRotateEvery` completed reviews (default 6,
+  `REVIEWER_STOP_ROTATE_EVERY`), so its per-stop cost no longer grows through a long session.
+- `/reviewerModel` changes (model or effort, set or clear) retire this project's reviewer sessions
+  for the current Claude session, so codex does not resume a session begun on another model.
+- `/stopContinueWatchdog status` prints `stopContinueWatchdog: ON|OFF for <root> ...`, like the
+  other watchdog commands, instead of a bare `ACTIVE`/`INACTIVE`.
+- `pytest -m smoke` runs a sub-minute install-time subset; `AGENT_INSTALL.md` step 3 uses it.
+- `reviewerAgent.md.template` no longer starts with setup notes, which were sent to the reviewer
+  as part of the brief; `/reviewerAgent on` warns about an untouched `(edit me)` placeholder or the
+  old preamble.
 
 ### Fixed
 
@@ -30,7 +40,17 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Tests no longer need git newer than 2.25 or a host with less than 1 PB free; CI runs both suites
   on git 2.25.
 - Codex plugin: fixes for the locally reproducible issues in the Codex Linux report.
-
+- The stop supervisor judges the turn's real final message: a transcript that has not yet flushed
+  the closing summary is re-read, and Claude Code's `last_assistant_message` is used when present.
+- A final message that asks the operator to run a slash command, restart, or log in may end the
+  turn, and a directive that repeats the one the agent just answered no longer loops.
+- `/reviewerHistory clear` also removes the project's audit log and the stored prompt parts no
+  other project uses; a prompt part can contain a diff of reviewed code.
+- `codex` is found on `PATH` when `~/.local/bin/codex` does not exist (an npm-global install on
+  Linux).
+- `AGENT_INSTALL.md`: asks which repository to protect when started outside one, checks for a Git
+  identity, persists `codexBin` when hooks would not find codex, lists the full suite's three
+  expected skips, and moves the optional settings rules into a step 5b of their own.
 - `AGENT_INSTALL.md`: the documented allow rule for the manual commands never matched. It mixed a
   mid-rule `*` (the version segment) with the legacy trailing `:*`, and Claude Code matches
   everything before a trailing `:*` literally, so the `*` was never expanded and the host warned at
