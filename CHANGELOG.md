@@ -31,6 +31,17 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Fixed
 
+- Codex native Interrupt now cancels pending commit reviews owned by the interrupted developer
+  session, including reviews targeting another worktree, when the host omits MCP cancellation.
+- The Codex gate now classifies executable commands using its independently packaged shell
+  parser; quoted reports and data heredocs no longer trigger commit review. An earlier inactive
+  target cannot hide a later protected target in a compound command.
+- Both parsers detect commits in Bash's `function name { ...; }` form and honor backslash or
+  mixed quoting in heredoc delimiters.
+- Codex Stop supervision treats a misplaced commit-gate `APPROVED` response as a failed review
+  and allows the stop, instead of relaying the verdict as a continuation instruction.
+- Codex reviewers in linked worktrees use the main checkout's project brief when the worktree
+  has no brief of its own; a worktree's own brief still takes precedence.
 - The stop supervisor no longer gets the commit reviewer's standing reminder. Framed as the commit
   auditor, it had answered `APPROVED`, and each answer was relayed as a keep-working directive. A
   commit-gate `APPROVED` reply now allows the stop and says why.

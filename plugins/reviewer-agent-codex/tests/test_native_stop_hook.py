@@ -49,6 +49,15 @@ def test_approval_is_silent_and_does_not_leave_a_permit(git_repo, review):
     assert len(review) == 2
 
 
+@pytest.mark.parametrize("ruling", ["APPROVED", "APPROVED\nSUGGESTIONS:\n1. Rename the helper."])
+def test_commit_gate_approval_is_not_a_completion_directive(git_repo, review, monkeypatch, ruling):
+    monkeypatch.setattr(backend, "review_turn", lambda *a, **k: (0, ruling, ""))
+    result = supervisor.supervise_hook(event(git_repo))
+    assert "decision" not in result
+    assert "fail-open" in result["systemMessage"]
+    assert not state.consume_stop_permit(git_repo, "native-session")
+
+
 def test_incomplete_returns_only_actionable_continuation(git_repo, review, monkeypatch):
     directive = "Run the missing integration check and report its result."
     monkeypatch.setattr(backend, "review_turn", lambda *a, **k: (0, directive, ""))
@@ -246,7 +255,7 @@ def test_native_stdio_cancellation_has_no_late_response(git_repo, review, monkey
 
     def incoming():
         while True:
-            line = source.get(timeout=5)
+            line = source.get(timeout=15)
             if line is None:
                 return
             yield line
@@ -260,7 +269,9 @@ def test_native_stdio_cancellation_has_no_late_response(git_repo, review, monkey
         source.put(json.dumps({"jsonrpc": "2.0", "id": 41, "method": "tools/call", "params": {
             "name": "stop_hook", "arguments": event(git_repo),
         }}) + "\n")
-        assert started.wait(2)
+        # Ticket/permit setup performs real Git calls; cancellation timing starts
+        # only after the reviewer has entered its controlled wait below.
+        assert started.wait(10)
         assert output.getvalue() == ""
         source.put(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
                                "params": {"requestId": 41, "reason": "Escape"}}) + "\n")

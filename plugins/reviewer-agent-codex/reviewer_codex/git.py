@@ -9,15 +9,9 @@ import tempfile
 import time
 
 from .process_tree import terminate_process_tree
+from .command_intent import commit_intent
 
 COMMIT_TIMEOUT = 300
-
-# Recognize a real `git ... commit` invocation. Biased toward precision: a false
-# positive would hijack a non-commit, while a false negative merely lets a commit
-# through unreviewed. Matches `git commit`, `git -C <path> commit`, and the same
-# after a separator/env-prefix; `commit` must be the subcommand token (so
-# `git committed` and `git commit-tree` do NOT match).
-_COMMIT_RE = re.compile(r"(?:^|[\s;&|()])git\s+(?:[^\s;&|]+\s+)*commit(?=$|[\s;&|])")
 
 # Short options to `git commit` that consume the FOLLOWING token as their value
 # (so that value is NOT mistaken for a pathspec): -m -F -C -c -t.
@@ -57,7 +51,8 @@ def is_git_repo(path):
 
 
 def is_git_commit(command):
-    return _COMMIT_RE.search(command or "") is not None
+    """Whether shell text visibly invokes a commit-producing operation."""
+    return commit_intent(command, None).kind is not None
 
 
 def _git_commit_context(command, cwd):

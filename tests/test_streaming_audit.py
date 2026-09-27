@@ -113,7 +113,9 @@ def test_streaming_audit_first_output_timeout_retries_then_succeeds(tmp_path, mo
     monkeypatch.setenv("FAKE_CODEX_DELAY_ONLY_ATTEMPT", "0")  # only the FIRST attempt hangs
     monkeypatch.setenv("FAKE_CODEX_FIRST_DELAY", "8")         # silent past N1 on attempt 0
     monkeypatch.setenv("FAKE_CODEX_VERDICT", "APPROVED")
-    code, verdict, _err = _audit(tmp_path, timeout=30, first_output_timeout=1, idle_timeout=30)
+    # A one-second startup allowance also timed out the healthy retry under release-test
+    # load. Three seconds permits interpreter startup but still kills the eight-second hang.
+    code, verdict, _err = _audit(tmp_path, timeout=30, first_output_timeout=3, idle_timeout=30)
     assert (code, verdict) == (0, "APPROVED")
     # idle_retried is now an integer count, not True/False.
     assert rl.last_invocation().get("idle_retried") == 1

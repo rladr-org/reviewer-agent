@@ -4,7 +4,8 @@
 import shlex
 
 from . import state
-from .git import git_c_effective_dir, git_commit_has_absolute_target, is_git_commit
+from .command_intent import commit_intent
+from .git import git_commit_has_absolute_target
 
 
 def _deny(reason, message):
@@ -64,14 +65,27 @@ def _supported_options(command):
 
 def review_commit(data):
     command = ((data.get("tool_input") or {}).get("command") or "")
-    if not is_git_commit(command):
+    # Hook cwd does not expose a shell call's workdir. Resolve targets only from
+    # command text, and keep looking after inactive targets in compound commands.
+    intent = commit_intent(command, None, _accept=lambda item: (
+        item.target is None or state.feature_enabled(item.target, "reviewer")
+    ))
+    if intent.kind is None:
         return None
-    cwd = git_c_effective_dir(command, data.get("cwd") or ".")
-    if not git_commit_has_absolute_target(command):
+    cwd = intent.target
+    if cwd is not None and intent.kind == "other":
+        return _deny(
+            "Unsupported commit-producing form: {}. No review token was created; "
+            "stage changes separately and use a single git -C /absolute/repository commit.".format(
+                intent.reason
+            ),
+            "[reviewer-agent-codex] Unsupported commit-producing form.",
+        )
+    if cwd is None or not git_commit_has_absolute_target(command):
         enabled_roots = state.enabled_feature_roots("reviewer")
         if not enabled_roots:
             return None
-        current_root = state.project_root(cwd)
+        current_root = state.project_root(cwd or data.get("cwd") or ".")
         target = (
             shlex.quote(current_root)
             if current_root in enabled_roots

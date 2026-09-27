@@ -6,6 +6,7 @@ import sys
 import threading
 from pathlib import Path
 
+from . import state
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
 from .supervisor import supervise_hook
@@ -77,10 +78,11 @@ STOP_HOOK_TOOL = {
 
 INTERRUPT_TOOL = {
     "name": "interrupt_stop",
-    "title": "Cancel interrupted completion review",
+    "title": "Cancel interrupted reviews",
     "description": (
         "Invoked automatically by the Interrupt lifecycle hook to cancel native Stop reviews "
-        "for the interrupted cwd, session, and turn. Do not call manually."
+        "for the interrupted cwd, session, and turn, and pending commit reviews owned by "
+        "that developer session. Do not call manually."
     ),
     "inputSchema": {
         "type": "object",
@@ -96,9 +98,10 @@ INTERRUPT_TOOL = {
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
 }
 
-# Native hook cancellation is not forwarded by every host. Interrupt uses the same
-# connection and can reach these tokens while the Stop workers remain blocked.
+# MCP cancellation is not forwarded by every host. Interrupt uses the same
+# connection and can reach these tokens while review workers remain blocked.
 _active_stops = {}
+_active_commits = {}
 _active_stops_lock = threading.Lock()
 
 
@@ -139,6 +142,11 @@ def _interrupt_stop(arguments):
     key = _stop_key(arguments, "Interrupt")
     with _active_stops_lock:
         tokens = tuple(_active_stops.get(key, ()))
+        if key is not None:
+            # A commit's explicit target can differ from the terminal cwd and its
+            # ticket may predate the current turn. Escape cancels all pending
+            # commit calls owned by this developer session, never another's.
+            tokens += tuple(_active_commits.get(key[1], ()))
     # Callbacks may write bypass state and must not run while holding the registry lock.
     # A token that completed between snapshot and cancellation rejects cancellation itself.
     for token in tokens:
@@ -273,15 +281,24 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
                 output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
                 output_stream.flush()
 
-    def run_call(message, cancelled):
+    def run_call(message, cancelled, commit_owner):
         request_id = message.get("id")
-        response = handle_message(
-            message,
-            commit_fn=commit_fn,
-            cancel_event=cancelled,
-        )
-        with active_lock:
-            active.pop(request_id, None)
+        try:
+            response = handle_message(
+                message,
+                commit_fn=commit_fn,
+                cancel_event=cancelled,
+            )
+        finally:
+            with active_lock:
+                active.pop(request_id, None)
+            if commit_owner is not None:
+                with _active_stops_lock:
+                    tokens = _active_commits.get(commit_owner)
+                    if tokens is not None:
+                        tokens.discard(cancelled)
+                        if not tokens:
+                            _active_commits.pop(commit_owner, None)
         completed, _unused = cancelled.complete()
         if completed:
             send(response)
@@ -304,8 +321,22 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
                 continue
             if message.get("method") == "tools/call" and message.get("id") is not None:
                 cancelled = Cancellation()
+                commit_owner = None
+                params = message.get("params") or {}
+                if params.get("name") == TOOL["name"]:
+                    arguments = params.get("arguments") or {}
+                    if isinstance(arguments, dict):
+                        commit_owner = state.commit_ticket_session(arguments.get("review_token"))
+                    if commit_owner is None:
+                        send(_error(message["id"], -32602,
+                                    "Missing, invalid, or expired commit ticket; retry the shell request."))
+                        continue
+                    # Register in reader order before starting the worker. A
+                    # subsequent Interrupt must also reach a not-yet-started call.
+                    with _active_stops_lock:
+                        _active_commits.setdefault(commit_owner, set()).add(cancelled)
                 worker = threading.Thread(
-                    target=run_call, args=(message, cancelled), daemon=True
+                    target=run_call, args=(message, cancelled, commit_owner), daemon=True
                 )
                 with active_lock:
                     active[message["id"]] = (cancelled, worker)

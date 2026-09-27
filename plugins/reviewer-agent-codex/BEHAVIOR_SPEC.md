@@ -9,7 +9,15 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   queried root. Linked worktrees share state; unrelated repositories have separate state.
 - Enablement requires a readable, nonempty project brief with the known template placeholder
   replaced. Setup instructions live outside the model-facing template.
-- Intercepts only `git commit` commands.
+- Detects visible commit-producing Git commands at executable shell positions, including
+  wrappers, nested shells, substitutions, aliases and literal command variables. Inert quoted
+  examples and data heredocs are not intercepted. Earlier inactive targets cannot hide later
+  protected targets. Only the supported plain commit form can receive a review ticket;
+  other detected commit-producing forms are refused.
+- Detection is bounded: external script files, sourced code, dynamically assembled commands,
+  rebase and other plumbing can remain outside its scope. Inline interpreter inspection requires
+  both a Git producer mention and a spawning primitive; unrelated spawning plus inert commit
+  text can still be refused. This is not a complete execution sandbox.
 - Records the live staged set's `write-tree` digest (content, modes, names, and structure) before
   review, then compares it immediately before ordinary `git commit`. A changed digest requires
   a fresh review. Git reads use the real repository; no private snapshot is injected.
@@ -75,6 +83,12 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Handles MCP cancellation while the audit runs, terminates the nested reviewer process tree
   including descendants that created their own process groups or sessions, and emits no late
   result or commit.
+- Also handles the native Interrupt event when the host omits MCP cancellation. Before dispatch,
+  the server registers each commit call under the developer session from its valid one-use ticket.
+  An Interrupt cancels all pending commit calls for that session, including calls targeting another
+  worktree or using a ticket issued in an earlier turn. Other developer sessions are unaffected.
+  Missing, unreadable, or expired ticket ownership fails closed before review dispatch. Registration
+  is removed when the call exits. Cancellation after Git starts can race publication; inspect HEAD.
 - Binds every nested reviewer process group to its MCP server with a lifecycle pipe. Graceful
   cancellation and abrupt host/server death both use kernel descendant enumeration before killing
   parents, preventing nested test commands from escaping cleanup as orphan audits.
@@ -120,11 +134,13 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   30 seconds, and `UserPromptSubmit` clears it before every genuine operator prompt, so a later task
   remains supervised.
 - A native MCP Interrupt handler explicitly cancels active native Stop requests matching the
-  canonical cwd, session ID, and interrupted turn ID. This covers hosts that do not forward MCP
-  cancellation when interrupting lifecycle hooks. An in-memory registry is cleaned up after every
-  outcome; unrelated turns, repositories, and commit reviews are unaffected. The Interrupt handler
-  is silent and bounded to three seconds, and cannot restart or prevent interruption.
-- Fails open on reviewer errors or empty output, with a failure message rather than an approval.
+  canonical cwd, session ID, and interrupted turn ID, as well as pending commit calls owned by that
+  developer session (see commit cancellation above). This covers hosts that do not forward MCP
+  cancellation. The registries are cleaned up after every outcome; unrelated Stop requests and
+  other developer sessions are unaffected. The Interrupt handler is silent and bounded to three
+  seconds, and cannot restart or prevent interruption.
+- Fails open on reviewer errors, empty output, or a misplaced commit-gate `APPROVED` verdict,
+  with a failure message rather than an approval or an instruction to execute that verdict.
 - Treats quoted transcripts supplied for diagnosis as evidence, not as assignments to execute.
 - Continues Codex when the reviewer judges the user task incomplete.
 - Stops after a bounded number of hook-generated continuations. The budget survives fresh host

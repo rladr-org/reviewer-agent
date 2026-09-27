@@ -630,7 +630,7 @@ _OPERATORS = ("<<<", "<<-", "&>>", "&&", "||", ";;", "|&", "<<", ">>", "<&", ">&
 _SEGMENT_OPS = _SHELL_OPS | {";;"}
 _LIST_ENDS = {None, ";", ";;", "&"}
 _PIPES = {"|", "|&"}
-_COMPOUND_OPEN = {"if", "while", "until", "for", "case", "select", "{"}
+_COMPOUND_OPEN = {"if", "while", "until", "for", "case", "select", "{", "function"}
 _COMPOUND_CLOSE = {"fi", "done", "esac", "}"}
 _ASSIGNMENT_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]*=")
 # Environment that points git at a repository or configuration the command text does not name.
@@ -638,7 +638,9 @@ _GIT_ENV_RE = re.compile(r"\AGIT_(?:DIR|WORK_TREE|COMMON_DIR|CONFIG[A-Z0-9_]*)="
 _GIT_LOCATION_OPTS = {"--git-dir", "--work-tree", "--config-env"}
 _PREFIX_KEYWORDS = {"!", "{", "then", "do", "else", "elif", "if", "while", "until", "time"}
 _REDIR_OP_RE = re.compile(r"\A[0-9]*(?:[<>]+[&|-]?|&>>?)\Z")
-_HEREDOC_RE = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z0-9_.-]+)\2")
+_HEREDOC_RE = re.compile(
+    r'''<<(-?)[ \t]*((?:[^\s;&|<>()'"\\]+|'[^']*'|"(?:\\.|[^"\\])*"|\\[^\n])+)'''
+)
 # Characters that make a path only the shell can resolve (expansion, glob, brace expansion).
 _PATH_SPECIAL = set("$`*?[]{}")
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
@@ -648,6 +650,8 @@ _INTERPRETER_RE = re.compile(r"\A(?:python[0-9.]*|node|perl|ruby)\Z")
 # text that assembles the command from pieces, at the cost of refusing a script that only
 # talks about both.
 _INLINE_GIT_COMMIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|merge|cherry-pick|revert)\b")
+
+_PIPELINE_GIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)\b")
 # Words by which an inline script of each interpreter runs a command. A script that mentions git
 # and a producer WITHOUT one of these only carries the text as data. A bounded check, not
 # interpreter analysis: a script that spawns something unrelated and also mentions a commit as
@@ -755,7 +759,12 @@ def _split_script(text):
         elif c == "<" and text.startswith("<<", i) and not text.startswith("<<<", i):
             m = _HEREDOC_RE.match(text, i)
             if m:
-                pending.append((m.group(1) == "-", m.group(3), not m.group(2)))
+                # Quote removal applies to the entire delimiter word, including mixed
+                # E"OF" and backslash-quoted forms. Any quoting makes the body literal.
+                raw_word = m.group(2)
+                word = shlex.split(raw_word)[0]
+                expands = not any(char in raw_word for char in "\\'\"")
+                pending.append((m.group(1) == "-", word, expands))
                 current.append(text[i:m.end()])
                 i = m.end()
                 continue
@@ -976,7 +985,11 @@ def _strip_prefixes(words, here, home):
     while k < len(words):
         w = words[k]
         name = os.path.basename(w)
-        if _ASSIGNMENT_RE.match(w) or w in _PREFIX_KEYWORDS:
+        if w == "function" and k + 1 < len(words):
+            # Bash permits `function name { ...; }` without parentheses. Inspect
+            # its visible body conservatively, as for the name() spelling.
+            k += 2
+        elif _ASSIGNMENT_RE.match(w) or w in _PREFIX_KEYWORDS:
             if _GIT_ENV_RE.match(w):
                 here = None
             k += 1
@@ -1627,7 +1640,12 @@ def commit_intent(command, cwd, _depth=0, _known=None):
                     # `... | bash`: the shell runs whatever the pipeline feeds it, which is only
                     # knowable from the text upstream. Judge it conservatively, as the regex
                     # fallback does: a mention of a commit there counts.
-                    found = _regex_fallback("\n".join(upstream), here)
+                    text = "\n".join(upstream)
+                    # Pipeline output can name an absolute/quoted Git executable or
+                    # another producer. Its target need not be this shell's cwd.
+                    found = _regex_fallback(text, None)
+                    if not found.kind and _PIPELINE_GIT_RE.search(text):
+                        found = CommitIntent("other", None, _INLINE_REASON)
                     if found.kind:
                         return found
             if item:

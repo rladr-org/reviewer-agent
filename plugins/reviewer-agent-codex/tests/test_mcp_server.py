@@ -5,7 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
-from reviewer_codex import mcp_server
+from reviewer_codex import mcp_server, state
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -177,12 +177,13 @@ def test_server_advertises_review_tools_and_native_stop_hook():
     assert tools[0]["inputSchema"]["required"] == ["cwd", "message", "review_token"]
 
 
-def test_stdio_cancellation_interrupts_running_tool_without_late_response():
+def test_stdio_cancellation_interrupts_running_tool_without_late_response(git_repo, isolated_state):
     import io
     import queue
 
     started = threading.Event()
     received_cancel = threading.Event()
+    ticket = state.create_commit_ticket(git_repo, "owner")
 
     class Input:
         def __init__(self):
@@ -217,9 +218,9 @@ def test_stdio_cancellation_interrupts_running_tool_without_late_response():
                 {
                     "name": "review_commit",
                     "arguments": {
-                        "cwd": "/repo",
+                        "cwd": str(git_repo),
                         "message": "test",
-                        "review_token": "token",
+                        "review_token": ticket,
                     },
                 },
                 41,
