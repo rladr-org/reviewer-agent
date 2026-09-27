@@ -88,9 +88,10 @@ def _show(proj, sid):
         if other_supervisor:
             print("reviewerSession: also holds a {} stopContinue supervisor session {}".format(
                 other_backend, other_supervisor))
-    print("reviewerSession: /reviewerSession rotate retires all of these role sessions FOR "
-          "THIS PROJECT; each next gated action briefs a fresh one with the current standing "
-          "brief. Reviewer sessions in other repositories are untouched.")
+    print("reviewerSession: /reviewerSession rotate retires these role sessions for THIS "
+          "project in THIS Claude session; each next gated action briefs a fresh one with the "
+          "current standing brief. Other Claude sessions and other repositories keep their own "
+          "reviewers.")
     return 0
 
 

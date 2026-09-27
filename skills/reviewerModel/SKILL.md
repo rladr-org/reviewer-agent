@@ -25,7 +25,11 @@ effort; `clear` drops the model override and leaves the rest; each subcommand's 
 **Everything here is scoped to the project's backend**, which the command resolves for itself and
 names in its output. On a `pi` project, `<model>`, `effort` and `clear` act on pi's own slots and
 the display reports pi's values; on a `codex` or `claude` project they act on that backend's.
-Nothing writes a slot the running reviewer would never read.
+Nothing writes a slot the running reviewer would never read. The model and effort are global per
+backend: they apply to every project that uses that backend, not only this one, from each
+session's next reviewer call. A change also retires this project's reviewer sessions for this
+Claude session, because codex warns that a session resumed on a different model may behave
+worse; other sessions keep resuming theirs, on the new setting.
 
 `timeout` is shared: one setting, applied by every backend. `firstOutputTimeout` and
 `idleTimeout` tune only the codex commit audit's `--json` hang detection -- N1 kills a reviewer

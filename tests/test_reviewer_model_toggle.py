@@ -39,8 +39,8 @@ def _effective(home, monkeypatch):
 
 
 def test_changing_the_model_retires_this_sessions_reviewers(tmp_path, monkeypatch):
-    # Task 12: a resumed session keeps the model it started with, so a new setting reached
-    # neither reviewer until something else rotated them.
+    # Task 12: codex warns on every turn of a session resumed on a different model than it began
+    # with, so a change retires this Claude session's reviewers for the project.
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     proj = str(tmp_path)

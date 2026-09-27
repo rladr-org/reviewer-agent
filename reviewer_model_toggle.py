@@ -73,14 +73,16 @@ def _effort_line():
 
 
 def _retire_this_sessions_reviewers():
-    """A resumed reviewer session keeps the model and effort it started with, so a new setting
-    reached neither role until something else rotated it. Retire this project's reviewers for
-    THIS Claude session; other sessions pick the setting up at their next rotation."""
+    """Every reviewer call already passes the current model and effort, so the setting applies
+    from the next call either way. But codex warns on every turn of a session RESUMED on a
+    different model than it began with, and reports possibly degraded behaviour. Retire this
+    project's reviewers for THIS Claude session so its next call starts fresh on the new setting;
+    other sessions keep resuming theirs."""
     sid = rl.claude_session_id_from_env()
     if sid and rl.rotate_session(rl.project_dir(), sid):
-        print("reviewerModel: retired this project's reviewer sessions for this Claude session "
-              "so the new setting starts fresh; other sessions pick it up at their next "
-              "rotation.")
+        print("reviewerModel: retired this project's reviewer sessions for this Claude session, "
+              "so the next call starts a fresh session on the new setting instead of resuming "
+              "one begun on the old. Other sessions use the new setting from their next call.")
 
 
 def _set_effort(token):
