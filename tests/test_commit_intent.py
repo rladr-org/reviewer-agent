@@ -311,6 +311,9 @@ def test_code_the_text_cannot_show_is_refused(command):
     'eval "$UNSET_ELSEWHERE"',                    # a whole command the text does not show
     "$GIT_CMD -m x",                              # the environment may hold `git commit`
     'bash -c "$(curl -s https://example.com/x)"',  # code produced at run time
+    # Inline code that only carries "git commit" as data.
+    "\"$PYTHON\" -c 'print(\"run git commit after review\")'",
+    "\"$PYTHON\" - <<'EOF'\nopen('report.md', 'w').write('Next: run git commit once approved')\nEOF",
 ])
 def test_an_unresolved_command_word_without_a_commit_producer_is_not_refused(command):
     assert _kind(command) is None, command
@@ -330,6 +333,10 @@ def test_a_command_assigned_earlier_in_the_call_is_resolved(command):
     "cmd=git; (cmd=echo); $cmd commit -m x",          # a subshell's assignment does not persist
     "$GIT_BIN commit -m x",                           # a producer the text does show
     "git $SUBCOMMAND -m x",                           # git itself is visible
+    # The expansion may be an interpreter or a shell running code the text does show.
+    "\"$PYTHON\" -c 'import os; os.system(\"git commit -m x\")'",
+    "\"$SHELL\" -c 'git commit -m x'",
+    "\"$PYTHON\" - <<'EOF'\nimport os; os.system('git commit -m x')\nEOF",
 ])
 def test_a_command_word_the_call_cannot_pin_down_is_refused(command):
     assert rl.commit_intent(command, CWD).kind == "other", command

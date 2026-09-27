@@ -191,9 +191,10 @@ The gate reads the agent's Bash command before it runs. It follows real command 
 `cd` it cannot be sure ran makes the target unknown, which it refuses while any project has the
 reviewer on), `bash -c`/`sh -c`/`eval`, a heredoc, here-string or pipe feeding a shell, wrappers
 such as `env`, `sudo`, `nohup`, `timeout` and `xargs`, variables assigned earlier in the same
-command, `git -c alias.*` and repository aliases. A command it cannot read at all — one held in
-a variable set outside the command, or printed by another command and run with `eval` — is
-refused while the repository is gated. It refuses a `merge`, `cherry-pick`, `revert`, `am` or
+command, `git -c alias.*` and repository aliases. A command whose name is a variable it cannot
+resolve is refused while the repository is gated only when the visible text names a
+commit-producing subcommand (`$GIT_BIN commit -m x`); `"$PYTHON" -m pytest` runs normally. It
+refuses a `merge`, `cherry-pick`, `revert`, `am` or
 `pull` that would commit, judging the options the way git does (the last of
 `--commit`/`--no-commit` wins, and a `pull` in rebase mode, whether from the command line or from
 `pull.rebase`/`branch.<name>.rebase`, is refused — except `pull --ff-only` under a configured
@@ -205,6 +206,8 @@ refused too. It cannot see:
 
 - a script file (`./release.sh`, `make`, `npm run …`), a sourced one (`source`/`.`), or a script
   a shell reads from a file or a download, that commits or changes directory;
+- a commit held entirely in a variable or in command output set outside the command, such as
+  `$CMD` with `CMD='git commit -m x'` in the environment, or `eval "$(…)"`;
 - git reached through a symlink with another name;
 - an inline script that assembles `git` or `commit` from smaller pieces at run time;
 - `git rebase`, which replays existing commits;

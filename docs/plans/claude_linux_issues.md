@@ -2417,7 +2417,7 @@ resolved.
 |---|---|
 | python | `subprocess`, `system`, `popen`, `exec[lv]p?e?`, `spawn[lv]?p?e?`, `posix_spawnp?`, `pty` |
 | node | `child_process`, `exec`, `execSync`, `execFile`, `execFileSync`, `spawn`, `spawnSync`, `fork` |
-| perl | `system`, `exec`, `qx`, `open`, or a backtick |
+| perl | `system`, `exec`, `qx`, a backtick, or `open` with a pipe (plain `open` would match Python's file `open(`) |
 | ruby | `system`, `exec`, `spawn`, `popen\w*`, `Open3`, `capture\w*`, a backtick, or `%x` |
 
 Backticks count only for perl and ruby, where they run a command. In Python they are text, and a
@@ -2426,9 +2426,16 @@ and documented: a script that spawns something unrelated AND mentions "git commi
 refused. Tying the match to the spawn call's own argument would need real interpreter analysis,
 which stays deferred.
 
+Landed early in C2.2's green commit (the gate required it there): the table as `_INLINE_SPAWN`,
+and its union `_ANY_SPAWN_RE`, used for an unresolved command name. That name may be any
+interpreter, so a mention refuses only with a spawn primitive of some family, or when the text is
+itself a shell command line that commits. Residual: under an unresolved name, inline data that
+quotes a commit in backticks is still refused, because backticks are a spawn in perl and ruby and
+a command substitution to the shell. C2.3 applies the per-family table to named interpreters.
+
 **Files:**
-- Modify: `reviewer_git.py` (new `_INLINE_SPAWN_RE` keyed by interpreter family; the
-  `_INTERPRETER_RE` branch in `_classify_segment` requires both matches)
+- Modify: `reviewer_git.py` (the `_INTERPRETER_RE` branch in `_classify_segment` requires both
+  `_INLINE_GIT_COMMIT_RE` and the interpreter's own `_INLINE_SPAWN` entry)
 - Modify: `README.md` (the inline-script sentence says "that run a command and mention `git`
   and a commit-producing subcommand")
 - Test: `tests/test_commit_intent.py`

@@ -648,6 +648,18 @@ _INTERPRETER_RE = re.compile(r"\A(?:python[0-9.]*|node|perl|ruby)\Z")
 # text that assembles the command from pieces, at the cost of refusing a script that only
 # talks about both.
 _INLINE_GIT_COMMIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|merge|cherry-pick|revert)\b")
+# Words by which an inline script of each interpreter runs a command. A script that mentions git
+# and a producer WITHOUT one of these only carries the text as data. A bounded check, not
+# interpreter analysis: a script that spawns something unrelated and also mentions a commit as
+# text is still treated as committing. Backticks run a command only in perl and ruby.
+_INLINE_SPAWN = {
+    "python": r"\b(?:subprocess|system|popen|exec[lv]p?e?|spawn[lv]?p?e?|posix_spawnp?|pty)\b",
+    "node": r"\b(?:child_process|exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\b",
+    "perl": r"\b(?:system|exec|qx)\b|`|\bopen\b[^;\n]*\|",  # `open` runs a command only piped
+    "ruby": r"\b(?:system|exec|spawn|popen\w*|Open3|capture\w*)\b|`|%x",
+}
+# An unresolved command name may be any of them.
+_ANY_SPAWN_RE = re.compile("|".join("(?:{})".format(p) for p in _INLINE_SPAWN.values()))
 # wrapper -> (options that take a value, options whose value is the directory the command runs
 #             in, options whose value is a command line the wrapper splits and runs)
 _WRAPPERS = {
@@ -1458,11 +1470,25 @@ def _classify_segment(words, here, body, depth, home):
             return _NO_INTENT, None
         return _NO_INTENT, _cd(inner, words[1:], home, pushd=head == "pushd")
     if _UNRESOLVABLE_C_RE.search(head):
-        # The command word is an expansion this call did not assign (`$GIT_CMD -m x` with
-        # GIT_CMD='git commit' in the environment): any command at all may run.
+        # The command word is an expansion this call did not assign. Refused only when the
+        # visible text names a commit producer (`$GIT_BIN commit -m x`). Otherwise
+        # (`"$PYTHON" -m pytest`, `eval "$(ssh-agent -s)"`) it is not treated as a commit: a
+        # commit held entirely in a variable set outside the call is a documented limit, like a
+        # script file, and refusing every such command broke everyday work (Task C2.2). The
+        # expansion may also be a shell or interpreter (`"$PYTHON" -c '...'`, `$SHELL <<EOF`),
+        # so code the text does show -- an argument or a heredoc body mentioning git and a
+        # producer -- is refused too.
+        # Data that only mentions a commit (`"$PYTHON" -c 'print("git commit")'`) is not code:
+        # a mention counts only with a spawn primitive of some interpreter, or when the text is
+        # itself a shell command line that commits.
         if any(w in _PRODUCER_WORDS for w in words[1:]):
             return CommitIntent("other", inner, _UNRESOLVABLE_HEAD_REASON), here
-        return CommitIntent("other", inner, _RUNTIME_CODE_REASON), here
+        for code in words[1:] + [body or ""]:
+            if _INLINE_GIT_COMMIT_RE.search(code) and (
+                    _ANY_SPAWN_RE.search(code)
+                    or commit_intent(code, inner, depth + 1).kind is not None):
+                return CommitIntent("other", inner, _RUNTIME_CODE_REASON), here
+        return _NO_INTENT, here
     here, outer = inner, here  # everything below acts on `inner` and leaves `outer` in place
     if name == "git":
         return _classify_git(words[1:], here, depth, home), outer
