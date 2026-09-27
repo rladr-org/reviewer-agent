@@ -75,6 +75,12 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - Handles MCP cancellation while the audit runs, terminates the nested reviewer process tree
   including descendants that created their own process groups or sessions, and emits no late
   result or commit.
+- Also handles the native Interrupt event when the host omits MCP cancellation. Before dispatch,
+  the server registers each commit call under the developer session from its valid one-use ticket.
+  An Interrupt cancels all pending commit calls for that session, including calls targeting another
+  worktree or using a ticket issued in an earlier turn. Other developer sessions are unaffected.
+  Missing, unreadable, or expired ticket ownership fails closed before review dispatch. Registration
+  is removed when the call exits. Cancellation after Git starts can race publication; inspect HEAD.
 - Binds every nested reviewer process group to its MCP server with a lifecycle pipe. Graceful
   cancellation and abrupt host/server death both use kernel descendant enumeration before killing
   parents, preventing nested test commands from escaping cleanup as orphan audits.
@@ -120,10 +126,11 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   30 seconds, and `UserPromptSubmit` clears it before every genuine operator prompt, so a later task
   remains supervised.
 - A native MCP Interrupt handler explicitly cancels active native Stop requests matching the
-  canonical cwd, session ID, and interrupted turn ID. This covers hosts that do not forward MCP
-  cancellation when interrupting lifecycle hooks. An in-memory registry is cleaned up after every
-  outcome; unrelated turns, repositories, and commit reviews are unaffected. The Interrupt handler
-  is silent and bounded to three seconds, and cannot restart or prevent interruption.
+  canonical cwd, session ID, and interrupted turn ID, as well as pending commit calls owned by that
+  developer session (see commit cancellation above). This covers hosts that do not forward MCP
+  cancellation. The registries are cleaned up after every outcome; unrelated Stop requests and
+  other developer sessions are unaffected. The Interrupt handler is silent and bounded to three
+  seconds, and cannot restart or prevent interruption.
 - Fails open on reviewer errors or empty output, with a failure message rather than an approval.
 - Treats quoted transcripts supplied for diagnosis as evidence, not as assignments to execute.
 - Continues Codex when the reviewer judges the user task incomplete.

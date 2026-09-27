@@ -246,7 +246,7 @@ def test_native_stdio_cancellation_has_no_late_response(git_repo, review, monkey
 
     def incoming():
         while True:
-            line = source.get(timeout=5)
+            line = source.get(timeout=15)
             if line is None:
                 return
             yield line
@@ -260,7 +260,9 @@ def test_native_stdio_cancellation_has_no_late_response(git_repo, review, monkey
         source.put(json.dumps({"jsonrpc": "2.0", "id": 41, "method": "tools/call", "params": {
             "name": "stop_hook", "arguments": event(git_repo),
         }}) + "\n")
-        assert started.wait(2)
+        # Ticket/permit setup performs real Git calls; cancellation timing starts
+        # only after the reviewer has entered its controlled wait below.
+        assert started.wait(10)
         assert output.getvalue() == ""
         source.put(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
                                "params": {"requestId": 41, "reason": "Escape"}}) + "\n")

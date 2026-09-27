@@ -521,10 +521,15 @@ without starting a second stop review. The bypass expires after 30 seconds and a
 prompt clears it before that prompt runs. This is not completion approval and cannot bypass
 supervision for a later task. Escape likewise cancels `review_commit` without committing.
 
-The native Interrupt hook cancels matching active Stop reviews explicitly. This is needed on
-hosts that do not forward ordinary MCP cancellation to lifecycle tool calls. Matching uses the
-canonical working directory, session ID, and interrupted turn ID; it does not cancel commit
-reviews or work in other turns. The handler returns silently within a three-second hook budget.
+The native Interrupt hook also cancels reviews on hosts that do not forward ordinary MCP
+cancellation. Stop reviews match the canonical working directory, session ID, and interrupted
+turn ID. Pending commit calls match the owning developer session recorded in their one-use
+tickets: the commit target may be another worktree, and a ticket may have been issued in an
+earlier turn. All pending commit calls from that session are cancelled; other developer sessions
+are unaffected. The server registers ownership before starting the worker, fails closed when
+ticket ownership cannot be read, and suppresses late results after cancellation. The handler
+returns silently within a three-second hook budget. Cancellation during the audit prevents the
+commit; once Git has started, publication may already have occurred and HEAD must be inspected.
 
 One developer session reuses its commit-reviewer thread across attempts. After every completed
 verdict the plugin records the staged path/blob set. A retry on the same HEAD tells that same

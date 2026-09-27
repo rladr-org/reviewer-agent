@@ -618,6 +618,29 @@ def claim_commit_ticket(token, path, max_age=3600):
     return _claim_ticket(_commit_ticket_file(token), path, max_age)
 
 
+def commit_ticket_session(token, max_age=3600):
+    """Read the owner for cancellation routing; this does not authorize a commit.
+
+    The worker still claims the ticket and validates its target atomically. Read
+    ownership before dispatch so an Interrupt cannot overtake worker startup.
+    """
+    target = _commit_ticket_file(token)
+    if target is None:
+        return None
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            return None
+        owner = value.get("session_id")
+        if not isinstance(owner, str) or not owner.strip():
+            return None
+        if not 0 <= time.time() - float(value.get("created")) <= max_age:
+            return None
+        return owner
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def claim_stop_ticket(token, path, max_age=3600):
     return _claim_ticket(_stop_ticket_file(token), path, max_age)
 

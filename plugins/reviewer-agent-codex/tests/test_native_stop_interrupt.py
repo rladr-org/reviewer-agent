@@ -55,7 +55,8 @@ def test_interrupt_only_cancels_the_matching_active_stop(git_repo, isolated_stat
                               kwargs={"cancel_event": token})
     worker.start()
     try:
-        assert started.wait(3)
+        # Real Git-backed setup can exceed three seconds on a busy runner.
+        assert started.wait(10)
         interrupt(git_repo, **mismatch)
         assert not token.is_set()
         assert calls == [True]
@@ -84,7 +85,7 @@ def test_interrupt_canonicalizes_cwd_and_cancels_all_matching_requests(git_repo,
     def review(*args, **kwargs):
         token = kwargs["cancel_event"]
         started[tokens.index(token)].set()
-        assert token.wait(6)
+        assert token.wait(15)
         return backend.CANCELLED_EXIT, "", ""
 
     monkeypatch.setattr(backend, "review_turn", review)
@@ -97,7 +98,7 @@ def test_interrupt_canonicalizes_cwd_and_cancels_all_matching_requests(git_repo,
         workers.append(worker)
         worker.start()
     try:
-        assert all(item.wait(3) for item in started)
+        assert all(item.wait(10) for item in started)
         interrupt(alias)
         assert tokens[0].is_set() and tokens[1].is_set()
         assert not tokens[2].is_set()
@@ -134,7 +135,9 @@ def test_finished_requests_release_their_cancellation_tokens(git_repo, isolated_
     assert calls == [True]
 
 
-def test_interrupt_does_not_cancel_commit_reviews(git_repo, isolated_state):
+def test_interrupt_does_not_cancel_unregistered_direct_calls(git_repo, isolated_state):
+    # Real commit calls are registered by the stdio reader using a valid ticket.
+    # This direct helper call has no ticket owner and must not enter that registry.
     token, started, release = Cancellation(), threading.Event(), threading.Event()
     results = []
 
@@ -182,7 +185,7 @@ def test_native_interrupt_suppresses_late_stdio_stop_response(git_repo, isolated
 
     def incoming():
         while True:
-            line = lines.get(timeout=6)
+            line = lines.get(timeout=15)
             if line is None:
                 return
             yield line
@@ -192,7 +195,7 @@ def test_native_interrupt_suppresses_late_stdio_stop_response(git_repo, isolated
     server.start()
     try:
         lines.put(json.dumps(request("stop_hook", event(git_repo), 41)) + "\n")
-        assert started.wait(3)
+        assert started.wait(10)
         lines.put(json.dumps(request("interrupt_stop", dict(cwd=str(git_repo), session_id="session",
                             turn_id="turn", hook_event_name="Interrupt"), 42)) + "\n")
         assert cancelled.wait(3)
