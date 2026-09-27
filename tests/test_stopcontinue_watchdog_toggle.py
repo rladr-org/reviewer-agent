@@ -3,7 +3,8 @@
 
 The watchdog REQUIRES stopContinue active (its tick relies on the Stop hook, inert otherwise),
 so `on` errors until stopContinue is enabled. The flag file's content is the interval; `on N`
-after `on M` re-writes it. `status` prints ACTIVE/INACTIVE for the tick's self-cancel check.
+after `on M` re-writes it. `status` is for the operator, labelled like every other watchdog command;
+the tick checks the flag files with Read, not `status`.
 """
 import json
 import os
@@ -148,13 +149,16 @@ def test_off_clears_flag(tmp_path, monkeypatch):
     assert "OFF" in p.stdout
 
 
-def test_status_prints_active_inactive(tmp_path, monkeypatch):
+def test_status_speaks_the_skill_contract(tmp_path, monkeypatch):
+    # #20: the skill relays one line quoted verbatim, `stopContinueWatchdog: ON ...` or
+    # `... OFF ...`; a bare ACTIVE/INACTIVE left the agent nothing it could quote.
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     enable_stopcontinue(proj, home)
-    assert run("status", proj, home).stdout.strip() == "INACTIVE"
-    run("on", proj, home)
-    assert run("status", proj, home).stdout.strip() == "ACTIVE"
+    assert run("status", proj, home).stdout.strip().startswith("stopContinueWatchdog: OFF for ")
+    run(["on", "5"], proj, home)
+    out = run("status", proj, home).stdout.strip()
+    assert out.startswith("stopContinueWatchdog: ON for ") and "(interval 5 min)" in out
 
 
 def test_on_fails_when_not_a_git_repo(tmp_path, monkeypatch):
@@ -232,17 +236,20 @@ def test_sessionstart_injects_nothing_when_flag_off(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------
 # Regression: `/stopContinue off` clears only the stopContinue flag, leaving the watchdog flag
 # set. Because the tick relies on the (now inert) Stop hook, the watchdog must go dormant:
-# `status` reports INACTIVE so the tick self-cancels, and SessionStart stops re-arming.
+# `status` reports it OFF (dormant), the tick self-cancels on the missing stopContinue flag, and
+# SessionStart stops re-arming.
 # --------------------------------------------------------------------------
 def test_status_inactive_when_stopcontinue_turned_off_after_arming(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     proj = make_repo(tmp_path)
     enable_stopcontinue(proj, home)
     run("on", proj, home)
-    assert run("status", proj, home).stdout.strip() == "ACTIVE"
+    assert run("status", proj, home).stdout.strip().startswith("stopContinueWatchdog: ON")
     disable_stopcontinue(proj, home)
     assert wd_active(home, proj, monkeypatch)  # the watchdog flag itself is still set...
-    assert run("status", proj, home).stdout.strip() == "INACTIVE"  # ...but it is not effective
+    out = run("status", proj, home).stdout.strip()  # ...but it is not effective
+    assert out.startswith("stopContinueWatchdog: OFF")
+    assert "dormant because /stopContinue is off" in out
 
 
 def test_sessionstart_injects_nothing_when_stopcontinue_off_even_if_flag_on(tmp_path, monkeypatch):
