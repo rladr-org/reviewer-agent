@@ -88,6 +88,20 @@ def test_active_non_commit_command_passes_through(tmp_path, monkeypatch):
     assert p.stdout.strip() == ""
 
 
+def test_an_unresolved_command_word_without_a_commit_passes_through_a_gated_repo(
+    tmp_path, monkeypatch
+):
+    # Task C2.2: everyday commands that start with a variable are not commits.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_staged_repo(tmp_path)
+    rl.set_active(repo)
+    p = run_hook(_input('"$PYTHON" -m pytest -q', cwd=repo),
+                 {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE})
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""
+
+
 def test_active_commit_nothing_staged_tells_claude_to_stage_without_calling_codex(
     tmp_path, monkeypatch
 ):

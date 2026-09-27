@@ -295,12 +295,25 @@ def test_a_cd_run_through_an_external_wrapper_does_not_move_the_shell():
 
 @pytest.mark.parametrize("command", [
     "$GIT_BIN --no-pager -C /tmp commit -m x",   # a producer after global options
-    'eval "$UNSET_ELSEWHERE"',                    # a whole command the text does not show
-    'bash -c "$(curl -s https://example.com/x)"',  # code produced at run time
 ])
 def test_code_the_text_cannot_show_is_refused(command):
     intent = rl.commit_intent(command, CWD)
     assert intent.kind == "other" and intent.reason, command
+
+
+# Task C2.2: an unresolved command word is refused only when the visible text names a
+# commit-producing git subcommand. A commit held entirely in a variable or in command output
+# set outside the call is a documented limit, like a script file.
+@pytest.mark.parametrize("command", [
+    '"$PYTHON" -m pytest -q',
+    "$HOME/bin/tool --flag",
+    'eval "$(ssh-agent -s)"',
+    'eval "$UNSET_ELSEWHERE"',                    # a whole command the text does not show
+    "$GIT_CMD -m x",                              # the environment may hold `git commit`
+    'bash -c "$(curl -s https://example.com/x)"',  # code produced at run time
+])
+def test_an_unresolved_command_word_without_a_commit_producer_is_not_refused(command):
+    assert _kind(command) is None, command
 
 
 @pytest.mark.parametrize("command", [
@@ -315,8 +328,8 @@ def test_a_command_assigned_earlier_in_the_call_is_resolved(command):
 @pytest.mark.parametrize("command", [
     "cmd=git; false && cmd=echo; $cmd commit -m x",  # the second assignment may not run
     "cmd=git; (cmd=echo); $cmd commit -m x",          # a subshell's assignment does not persist
-    "$GIT_CMD -m x",                                  # the environment may hold `git commit`
-    "git $SUBCOMMAND -m x",
+    "$GIT_BIN commit -m x",                           # a producer the text does show
+    "git $SUBCOMMAND -m x",                           # git itself is visible
 ])
 def test_a_command_word_the_call_cannot_pin_down_is_refused(command):
     assert rl.commit_intent(command, CWD).kind == "other", command
