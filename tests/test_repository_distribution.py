@@ -18,6 +18,9 @@ are ordinary prose obligations, kept by reading rather than by CI.
 """
 import json
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
 
 
 ROOT = Path(__file__).resolve().parents[1]

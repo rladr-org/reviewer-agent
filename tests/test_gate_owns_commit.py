@@ -25,6 +25,9 @@ sys.path.insert(0, str(ROOT))
 
 import reviewer_lib as rl  # noqa: E402
 import commit_hook  # noqa: E402
+import pytest
+
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
 
 
 def _git(repo, *args, check=True):

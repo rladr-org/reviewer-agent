@@ -19,6 +19,8 @@ ROOT = _BASE / "scripts" if (_BASE / "scripts").is_dir() else _BASE
 sys.path.insert(0, str(ROOT))
 import reviewer_lib as rl  # noqa: E402
 
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
+
 UPS = str(ROOT / "userpromptsubmit_hook.py")
 REVIEWER_CMD = str(ROOT / "reviewer_cmd.py")
 SKILLS = _BASE / "skills"

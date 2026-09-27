@@ -22,6 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 import host_versions as hv  # noqa: E402
 
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
+
 
 # --------------------------------------------------------------------------
 # parsing real version output

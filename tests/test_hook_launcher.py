@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
+
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = str(ROOT / "hooks" / "run_hook.sh")
 # /bin/sh is dash on Debian/Ubuntu and bash-as-sh on macOS; run under every one present.

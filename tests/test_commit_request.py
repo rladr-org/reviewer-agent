@@ -19,6 +19,8 @@ import pytest
 
 import reviewer_lib as rl
 
+pytestmark = pytest.mark.smoke  # install-time subset (tests/test_smoke_subset.py)
+
 
 def _request(command):
     request, error = rl.parse_commit_request(command)
