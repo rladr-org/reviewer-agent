@@ -97,7 +97,8 @@ def _main(data):
     flag_active = rl.is_stopcontinue_active(cwd)
     stop_active = bool(data.get("stop_hook_active"))
     try:
-        text = rl.last_assistant_text(data.get("transcript_path"))
+        text = rl.last_assistant_text(data.get("transcript_path"),
+                                      final_message=data.get("last_assistant_message"))
     except Exception:
         text = ""
     # Did the agent END ITS TURN parked on a still-running harness-tracked background task

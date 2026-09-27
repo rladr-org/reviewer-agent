@@ -98,28 +98,65 @@ def _final_turn_text(lines):
     return "\n".join(reversed(collected)).strip()
 
 
-def last_assistant_text(transcript_path, retries=3, retry_delay=0.3):
+def _ends_with_text(lines):
+    """True when the newest assistant-side event carries text, i.e. the closing message has
+    landed. A trailing thinking/tool_use event, or a tool result after the last text, means the
+    turn's final text may still be in flight."""
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "assistant":
+            return bool(_assistant_event_text(ev))
+        if ev.get("type") == "user":
+            return False
+    return False
+
+
+def last_assistant_text(transcript_path, retries=3, retry_delay=0.3, final_message=None):
     """Concatenated text of the final TURN's assistant messages in a Claude Code transcript
     (JSONL), or '' if none / unreadable / the final turn is genuinely tool-only.
 
-    2026-07-21 hardening (premature stops were slipping through unreviewed):
-    - TURN-scoped, not last-event-scoped: a turn that ends with a tool call no longer
-      reads as empty when it said something earlier in the same turn.
-    - Flush-race retry: the Stop event can fire before the final text event is written
-      (observed: text_len=0 on a turn that ended with a long summary); on an empty read
-      the reader waits briefly and re-reads, up to `retries` attempts total."""
+    - TURN-scoped, not last-event-scoped (2026-07-21): a turn that ends with a tool call no
+      longer reads as empty when it said something earlier in the same turn.
+    - Flush race: the Stop event can fire before the closing text is written. "Non-empty" is not
+      "complete" (2026-09-24: the supervisor judged a turn by its opening paragraph and ordered
+      finished work redone). When Claude Code supplies `last_assistant_message` in the Stop
+      payload (`final_message`), the read is settled once the transcript ENDS with that text.
+      Without it, the read is settled once the newest assistant event carries text. Otherwise
+      wait and re-read, up to `retries` attempts, then append the payload's final message if it
+      never landed. A SUPPLIED but empty `final_message` says the closing message carried no
+      text, so a transcript ending in text is stale by definition: it never settles early, and
+      the reader waits out its retries before returning what the turn said."""
+    supplied = final_message is not None
+    final = (final_message or "").strip()
+    text = ""
     for attempt in range(max(1, retries)):
         try:
             with open(transcript_path, "r", encoding="utf-8") as fh:
                 lines = fh.readlines()
         except (OSError, TypeError):
-            return ""
+            return final
         text = _final_turn_text(lines)
-        if text:
+        # A TERMINAL match, not membership: the final phrase may also have appeared earlier in
+        # the turn while the transcript still ends with stale output.
+        if final:
+            settled = text.rstrip().endswith(final)
+        else:
+            settled = not supplied and bool(text) and _ends_with_text(lines)
+        if settled:
             return text
         if attempt < retries - 1:
             _sleep(retry_delay)
-    return ""
+    if final and not text.rstrip().endswith(final):
+        return (text + "\n" + final).strip()
+    return text
 
 
 # The sentinel as a whole line: STOP_OK alone, tolerating only markdown emphasis / backticks

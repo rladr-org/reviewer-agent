@@ -1476,6 +1476,17 @@ def test_a_flushed_final_message_needs_no_wait(tmp_path, monkeypatch):
     assert rl.last_assistant_text(path).endswith("Summary: done")
 
 
+def test_an_explicitly_empty_final_message_does_not_settle_on_a_text_ending(
+        tmp_path, monkeypatch):
+    # The payload says the closing message carried no text, so text at the end of the
+    # transcript is stale: the reader must not settle on its first read.
+    path = _transcript(tmp_path, _text_event("Opening paragraph"))
+    waits = []
+    monkeypatch.setattr(reviewer_stopcontinue, "_sleep", waits.append)
+    assert rl.last_assistant_text(path, final_message="") == "Opening paragraph"
+    assert len(waits) == 2, waits  # every retry was spent before giving up
+
+
 def test_a_final_phrase_seen_earlier_in_the_turn_does_not_settle_a_stale_read(
         tmp_path, monkeypatch):
     # The phrase appeared mid-turn; the transcript still ends with stale output. Membership would
