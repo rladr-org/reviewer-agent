@@ -275,6 +275,44 @@ def test_history_clear_purges_only_this_project(home, tmp_path):
     assert rl.last_review_file(keep, "s").exists()
 
 
+def test_history_clear_purges_the_audit_log_and_only_unshared_prompt_parts(home, tmp_path):
+    # #21: a prompt part can hold a unified diff of reviewed code, and the audit log indexes
+    # every reviewed commit; `clear` promised to purge that content and left both behind.
+    import reviewer_audit as ra
+    a, b = make_repo(tmp_path, "a"), make_repo(tmp_path, "b")
+    only_a = ra.store_prompt_part("diff only A reviewed")
+    shared = ra.store_prompt_part("standing brief both use")
+    ra.append_audit_record(a, {"brief_sha256": shared, "static": {"capsule_sha256": only_a}})
+    ra.append_audit_record(b, {"brief_sha256": shared})
+
+    result = run_history_cli(["clear"], a)
+
+    assert result.returncode == 0, result.stderr
+    assert not ra.audit_log_file(a).exists()
+    assert ra.load_prompt_part(only_a) is None
+    assert ra.load_prompt_part(shared) == "standing brief both use"  # B still uses it
+    assert ra.audit_log_file(b).exists()
+
+
+def test_history_clear_keeps_every_prompt_part_when_a_sibling_log_is_unparseable(
+        home, tmp_path):
+    # An unreadable or corrupt sibling log is unknown data, not "references nothing".
+    import reviewer_audit as ra
+    a, b = make_repo(tmp_path, "a"), make_repo(tmp_path, "b")
+    part = ra.store_prompt_part("capsule B may also use")
+    ra.append_audit_record(a, {"static": {"capsule_sha256": part}})
+    ra.append_audit_record(b, {"brief_sha256": "0" * 64})  # creates B's log...
+    # ...then leaves it wholly unparseable: no readable line can name `part`, so only the
+    # "unknown data keeps everything" rule preserves it.
+    ra.audit_log_file(b).write_text("{not json\n", encoding="utf-8")
+
+    result = run_history_cli(["clear"], a)
+
+    assert result.returncode == 0, result.stderr
+    assert not ra.audit_log_file(a).exists()
+    assert ra.load_prompt_part(part) == "capsule B may also use"
+
+
 def test_history_clear_reports_when_there_is_nothing_to_purge(home, tmp_path):
     repo = make_repo(tmp_path)
 
