@@ -1,4 +1,4 @@
 # SPDX-License-Identifier: MPL-2.0
 """Codex-native reviewer agent."""
 
-__version__ = "1.3.1"
+__version__ = "1.3.2b1"

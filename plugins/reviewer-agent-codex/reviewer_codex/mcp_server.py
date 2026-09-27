@@ -12,7 +12,7 @@ from .supervisor import supervise_hook
 
 
 SERVER_NAME = "reviewer-agent-codex"
-SERVER_VERSION = "1.3.1"
+SERVER_VERSION = "1.3.2-beta.1"
 PROTOCOL_VERSION = "2025-06-18"
 
 TOOL = {

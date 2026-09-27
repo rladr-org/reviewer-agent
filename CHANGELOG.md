@@ -5,9 +5,31 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
-## [Unreleased]
+## [1.3.2-beta.1] — unreleased
+
+### Changed
+
+- The commit gate finds a commit by reading the command the way a shell does: real command
+  positions, `cd` it can be sure ran, wrappers (`env`, `sudo`, `nohup`, `timeout`, `xargs`), `bash
+  -c`, `eval`, heredocs, aliases and variables assigned earlier in the same command. `merge`,
+  `cherry-pick`, `revert`, `am`, `pull` and `commit-tree` are refused when they would commit. The
+  README's new "What the gate cannot see" section lists what reading a command's text cannot catch.
+- A command whose name is a variable the gate cannot resolve (`"$PYTHON" -m pytest`) is refused
+  only when its visible text names a commit-producing subcommand or code that runs one.
+- An inline `python -c`/`node -e`/perl/ruby script is refused only when it can run a command and
+  mentions a commit; one that only prints or writes the words is not.
 
 ### Fixed
+
+- The stop supervisor no longer gets the commit reviewer's standing reminder. Framed as the commit
+  auditor, it had answered `APPROVED`, and each answer was relayed as a keep-working directive. A
+  commit-gate `APPROVED` reply now allows the stop and says why.
+- Hooks start through a POSIX launcher that finds `python3`; without it the gate fails closed.
+  A crash in the commit gate now denies the commit instead of letting it run.
+- `git add … && git commit` is refused with the real reason (staging in the same call).
+- Tests no longer need git newer than 2.25 or a host with less than 1 PB free; CI runs both suites
+  on git 2.25.
+- Codex plugin: fixes for the locally reproducible issues in the Codex Linux report.
 
 - `AGENT_INSTALL.md`: the documented allow rule for the manual commands never matched. It mixed a
   mid-rule `*` (the version segment) with the legacy trailing `:*`, and Claude Code matches
