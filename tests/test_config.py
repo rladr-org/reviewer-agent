@@ -264,3 +264,35 @@ def test_config_lives_in_the_state_dir_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     monkeypatch.delenv("REVIEWER_CONFIG_FILE", raising=False)
     assert rl.config_file() == rl.reviewer_state_home() / "config.json"
+
+
+# #4 (Linux): an npm-global codex lives in /usr/local/bin, not ~/.local/bin, and was never found.
+def test_codex_is_found_on_path_when_not_in_local_bin(tmp_path, monkeypatch):
+    monkeypatch.delenv("REVIEWER_CODEX_BIN", raising=False)
+    monkeypatch.delenv("REVIEWER_CONFIG_FILE", raising=False)
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))  # no ~/.local/bin/codex
+    bindir = tmp_path / "npm-global"
+    bindir.mkdir()
+    codex = bindir / "codex"
+    codex.write_text("#!/bin/sh\n")
+    codex.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    assert rl.codex_bin() == str(codex)
+
+
+def test_local_bin_still_wins_when_present(tmp_path, monkeypatch):
+    monkeypatch.delenv("REVIEWER_CODEX_BIN", raising=False)
+    monkeypatch.delenv("REVIEWER_CONFIG_FILE", raising=False)
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    local = home / ".local" / "bin" / "codex"
+    local.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("HOME", str(home))
+    bindir = tmp_path / "npm-global"  # a second codex on PATH must not win
+    bindir.mkdir()
+    (bindir / "codex").write_text("#!/bin/sh\n")
+    (bindir / "codex").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bindir))
+    assert rl.codex_bin() == str(local)
