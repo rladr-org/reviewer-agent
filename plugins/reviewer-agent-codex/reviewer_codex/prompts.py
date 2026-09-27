@@ -171,9 +171,32 @@ def session_revision(role):
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
+def _main_checkout(root):
+    """The repository's main working tree: the first `git worktree list --porcelain` entry. None
+    when git cannot say, or the repository is bare."""
+    listing = state._git(root, "worktree", "list", "--porcelain") or ""
+    first = listing.split("\n\n", 1)[0].splitlines()
+    if not first or not first[0].startswith("worktree ") or "bare" in first[1:]:
+        return None
+    return Path(first[0][len("worktree "):])
+
+
+def brief_path(cwd):
+    """This checkout's reviewerAgent.md, else the main checkout's. A brief is often untracked, so
+    a linked worktree does not get a copy; without the fallback its reviewer ran on the default
+    brief (2026-09-27). The Claude Code plugin likewise reads the canonical project's brief."""
+    root = Path(state.project_root(cwd) or cwd).resolve()
+    own = root / "reviewerAgent.md"
+    if own.is_file():
+        return own
+    main = _main_checkout(root)
+    if main is not None and (main / "reviewerAgent.md").is_file():
+        return (main / "reviewerAgent.md").resolve()
+    return own
+
+
 def project_brief(cwd):
-    root = state.project_root(cwd)
-    path = Path(root or cwd) / "reviewerAgent.md"
+    path = brief_path(cwd)
     try:
         text = path.read_text(encoding="utf-8").strip()
     except OSError:
@@ -190,7 +213,7 @@ def reviewer_brief(cwd, role):
 def commit_capsule(cwd, session_id, include_previous=True):
     """Return the current standing reminder sent on every commit-review turn."""
     root = Path(state.project_root(cwd) or cwd).resolve()
-    brief = root / "reviewerAgent.md"
+    brief = brief_path(cwd)
     if brief.is_file():
         text = _CAPSULE_UNIVERSAL + (
             "- This repository's standing brief is at {}. Read that file if you need its detail "
