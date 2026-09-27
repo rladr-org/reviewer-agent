@@ -1,16 +1,3 @@
-# Reviewer brief (template)
-
-Copy this file to the root of a project as `reviewerAgent.md`, then run `/reviewerAgent on`.
-Its contents become the reviewer's standing brief once per Claude session (at session start, or
-lazily on the first commit/question), establishing the reviewer session that is then resumed by id for
-every commit/question. Codex receives it as the briefing turn; pi receives it as an appended system
-prompt on its first turn. Read from the project's canonical (main worktree) root, so it covers every linked
-worktree. `/reviewerAgent on` requires this file and refuses to enable without it; the generic built-in
-brief is only a review-time fallback for one that has become empty or unreadable, so that a corrupt
-brief cannot block every commit in a fail-closed repo. Edit it to fit the project.
-
----
-
 You are the REVIEWER for this repository. Another AI coding agent (Claude) is doing the implementation;
 you are the gate. Hold a high bar.
 

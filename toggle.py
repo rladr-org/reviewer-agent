@@ -74,9 +74,27 @@ def _on(proj, accept_risk=False):
         "reviewerAgent: ON for {} - the reviewer is briefed on first use, so the first "
         "commit it gates will take a moment.".format(root)
     )
+    _warn_about_template_leftovers(brief)
     _warn_about_an_old_host()
     _state_the_risk(root)
     return 0
+
+
+def _warn_about_template_leftovers(brief):
+    """The brief is sent to the reviewer verbatim (#13), so template text left in it reaches the
+    reviewer as instructions. Warn, never refuse: the operator may mean it."""
+    try:
+        text = brief.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if "(edit me)" in text:
+        print("reviewerAgent: WARNING - reviewerAgent.md still contains the template's "
+              "`Project-specific guidance (edit me)` placeholder; the reviewer receives it "
+              "verbatim. Replace it with this project's standards and test command.")
+    if "Copy this file to the root of a project" in text:
+        print("reviewerAgent: WARNING - reviewerAgent.md begins with the old template's setup "
+              "instructions, which are sent to the reviewer. Delete everything above "
+              "\"You are the REVIEWER\".")
 
 
 # Shown when gating starts so the operator sees the principal risks at the point of enablement.
