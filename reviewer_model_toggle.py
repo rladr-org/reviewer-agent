@@ -72,6 +72,17 @@ def _effort_line():
     )
 
 
+def _retire_this_sessions_reviewers():
+    """A resumed reviewer session keeps the model and effort it started with, so a new setting
+    reached neither role until something else rotated it. Retire this project's reviewers for
+    THIS Claude session; other sessions pick the setting up at their next rotation."""
+    sid = rl.claude_session_id_from_env()
+    if sid and rl.rotate_session(rl.project_dir(), sid):
+        print("reviewerModel: retired this project's reviewer sessions for this Claude session "
+              "so the new setting starts fresh; other sessions pick it up at their next "
+              "rotation.")
+
+
 def _set_effort(token):
     backend = _backend()
     if token.lower() == "clear":
@@ -88,6 +99,7 @@ def _set_effort(token):
             tail = "inherit the codex CLI default from ~/.codex/config.toml"
         print("reviewerModel: reasoning effort slot cleared (backend {}) -> {}".format(
             backend, tail))
+        _retire_this_sessions_reviewers()
         return 0
     if not rl.is_valid_backend_effort(backend, token):
         # Rejected rather than passed through: an unrecognised level is not tolerated the way
@@ -106,6 +118,7 @@ def _set_effort(token):
         "reviewerModel: reasoning effort {} (backend {}) -- applies from the next hook "
         "invocation. /reviewerModel effort clear reverts.".format(token, backend)
     )
+    _retire_this_sessions_reviewers()
     return 0
 
 
@@ -408,6 +421,7 @@ def main(argv):
         tail = ("now {} (from {})".format(model, source) if model
                 else _inherit_phrase(backend))
         print("reviewerModel: model slot cleared (backend {}) -> {}".format(backend, tail))
+        _retire_this_sessions_reviewers()
         return 0
 
     # Validate EVERYTHING before writing ANYTHING: a rejected command must not leave the
@@ -440,6 +454,7 @@ def main(argv):
         rl.log("[model] commit timeout set {}s".format(secs))
         print("reviewerModel: commit-audit timeout {}s -- applies from the next "
               "commit.".format(secs))
+    _retire_this_sessions_reviewers()
     return 0
 
 

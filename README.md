@@ -984,6 +984,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_DELTA_INLINE_TOTAL_MAX` | `96000` | Re-attempt diff bytes inlined in total; `0` disables. |
 | `REVIEWER_STOPCONTINUE_EFFORT` | `low` | Stop-supervisor reasoning effort. |
 | `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `10` | Maximum forced continuations per user turn. |
+| `REVIEWER_STOP_ROTATE_EVERY` | `6` | Retire the stop supervisor's session after this many completed reviews, bounding the context each resumed review re-sends; `0` never retires it. Also `stopRotateEvery` in `config.json`. Changing the model or effort with `/reviewerModel` also retires this project's reviewer sessions for the current Claude session. |
 | `REVIEWER_STOPCONTINUE_DELAY_SECS` | `0` (max 300) | Seconds to pause before enacting either stopContinue verdict — a continue directive or a stop approval — giving you a window to intervene (Escape). Announced on stderr first, then capped against the remaining Stop-hook budget. Also `stopContinueDelaySecs` in `config.json`. |
 | `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |
 | `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |

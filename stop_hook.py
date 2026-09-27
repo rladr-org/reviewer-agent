@@ -261,6 +261,15 @@ def _main(data):
         )
     )
 
+    # Bound the supervisor's cost: every stop resends the operator transcript into one RESUMED
+    # stop session, so its context grows with each review (observed 2.5k -> 152k tokens). The
+    # per-call prompt is self-contained, so retiring it every N completed reviews loses nothing.
+    if code == 0 and out.strip():
+        every = rl.stop_rotate_every()
+        if every and rl.record_stop_review(cwd, claude_sid) >= every:
+            rl.retire_stop_session(cwd, claude_sid)
+            rl.log("[stop] key={} stop session retired after {} reviews".format(key, every))
+
     # A directive that restates the previous one in this stop chain was already answered by the
     # agent; re-issuing it only loops (#19). Let the stop through so the operator can respond.
     if keep_going and stop_active and rl.directive_repeats(cwd, claude_sid, out):

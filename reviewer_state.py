@@ -1750,6 +1750,51 @@ def retire_commit_reviewer_session(
     return True
 
 
+def stop_rotate_every():
+    """Retire the stopContinue supervisor after this many reviews (0 = never). Each stop resends
+    the operator transcript into one RESUMED session, so its context -- and cost -- grows with
+    every stop (observed 2.5k -> 152k tokens); the per-call prompt is self-contained, so a fresh
+    session loses nothing."""
+    return _tunable_int("REVIEWER_STOP_ROTATE_EVERY", "stopRotateEvery", 6, 0)
+
+
+def _stop_review_count_file(proj, claude_session_id):
+    stem = _project_session_stem(proj, claude_session_id)
+    return None if stem is None else reviewer_home() / "state" / (stem + ".stop-reviews")
+
+
+def record_stop_review(proj, claude_session_id):
+    """Count one completed stop review for this (project, session); returns the new count."""
+    f = _stop_review_count_file(proj, claude_session_id)
+    if f is None:
+        return 0
+    try:
+        n = int(f.read_text().strip() or "0") + 1
+    except (OSError, ValueError):
+        n = 1
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(n) + "\n")
+    return n
+
+
+def retire_stop_session(proj, claude_session_id):
+    """Retire only the stopContinue supervisor, preserving the commit reviewer. Returns the state
+    paths cleared, the review count among them, so the count restarts with the new session."""
+    sid = (claude_session_id or "").strip()
+    if not sid or not str(proj or "").strip():
+        return []
+    cleared = []
+    for f in (session_id_file(proj, sid, ROLE_STOP), pi_session_file(proj, sid, ROLE_STOP),
+              claude_session_file(proj, sid, ROLE_STOP), _stop_review_count_file(proj, sid)):
+        if f is not None and f.exists():
+            try:
+                f.unlink()
+            except OSError:
+                continue
+            cleared.append(str(f))
+    return cleared
+
+
 def record_completed_reviewer_audit(
     proj, claude_session_id, reviewer_session_id, preserve_last_review=False
 ):
