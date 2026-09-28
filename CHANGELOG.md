@@ -9,6 +9,10 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
+- The Codex installer selects and remembers a compatible Python for both hooks and MCP, so
+  Codex can start with a different PATH. It checks MCP startup before writing configuration.
+- The Ubuntu 20.04 CI runner puts its Python 3.9 virtual environment on PATH for child commands.
+
 - The commit gate finds a commit by reading the command the way a shell does: real command
   positions, `cd` it can be sure ran, wrappers (`env`, `sudo`, `nohup`, `timeout`, `xargs`), `bash
   -c`, `eval`, heredocs, aliases and variables assigned earlier in the same command. `merge`,

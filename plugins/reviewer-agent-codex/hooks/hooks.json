@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_prompt.py\"",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_prompt.py\"",
             "timeout": 5
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\" || { printf '%s\\n' 'reviewer-agent-codex: PreToolUse launcher failed; tool call blocked. Check python3 and the plugin installation.' >&2; exit 2; }",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_pre_tool.py\" || { printf '%s\\n' 'reviewer-agent-codex: PreToolUse launcher failed; tool call blocked. Check the saved Python interpreter; rerun the plugin installer if it moved.' >&2; exit 2; }",
             "timeout": 10,
             "statusMessage": "Routing reviewer-agent request"
           }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_post_tool.py\"",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_post_tool.py\"",
             "timeout": 5
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" start",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" start",
             "timeout": 5
           }
         ]
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" stop",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_subagent.py\" stop",
             "timeout": 5
           }
         ]
@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_session_end.py\"",
+            "command": "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; \"$reviewer_python\" -c 'import os,pathlib,sys;r=pathlib.Path(sys.argv[1]);p=r.parent;q=sys.argv[2];c=[r]+(sorted((x for x in p.iterdir() if x.is_dir()),key=lambda x:x.name,reverse=True) if p.is_dir() else [])+[pathlib.Path.home()/\"plugins\"/p.name];s=next(x/q for x in c if (x/q).is_file());os.execv(sys.executable,[sys.executable,str(s)]+sys.argv[3:])' \"${PLUGIN_ROOT}\" \"scripts/hook_session_end.py\"",
             "timeout": 3
           }
         ]

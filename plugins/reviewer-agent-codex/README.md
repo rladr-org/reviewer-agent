@@ -174,9 +174,15 @@ makes the agent's `review_commit` call a blocking direct call instead of a yield
 operation. Completion review is invoked automatically by the Stop lifecycle hook. Use this
 installer for updates rather than invoking `codex plugin add` directly.
 
-Before writing configuration, the installer checks that `python3` on its PATH runs Python 3.9+.
-Launch Codex with a PATH that resolves an appropriate `python3` too; a check in the installer
-shell does not establish the environment of an already running GUI. PreToolUse converts input,
+Before writing configuration, the installer selects a working Python 3.9+ interpreter and checks
+that the MCP server initializes with it. It prefers the interpreter running the installer, then
+checks `python3` and versioned Python commands on PATH. It saves the absolute executable path in
+`~/.codex/reviewer-agent-codex/python-path`; hooks and the MCP server both use this selection,
+including when Codex starts with a different PATH. No system Python or shell configuration is
+changed. You can run the installer with a specific interpreter, such as `python3.9`, to select it.
+Keep that interpreter installed; if it is removed or moved, rerun the installer with a compatible
+Python. Uninstall removes this selection. Direct marketplace installs without the local installer
+still require a compatible `python3` on Codex's PATH. PreToolUse converts input,
 import, and gate errors to an explicit deny. Its shell launcher exits with blocking status 2
 if Python or the hook script cannot run. These responses do not cover an untrusted/missing hook
 registration or a host that kills the whole launcher on timeout; verify actual host interception.
@@ -628,7 +634,7 @@ See `BEHAVIOR_SPEC.md` for the complete behavioral contract.
 ## Host versions it has been run against
 
 The installer warns when Codex CLI is below 0.154.0, then continues. It refuses installation
-when the hook command `python3` is missing, cannot run, or reports a version below Python 3.9.
+when no working Python 3.9+ can be found, or the MCP server fails its startup check.
 Codex 0.154.0 is the exercised native-host baseline, including Stop and Interrupt hooks.
 The independent Claude package's Codex reviewer-backend baseline is separate.
 Reviewed commits use the installed Git's ordinary commit behavior, without private reference

@@ -220,6 +220,14 @@ def uninstall_local(
     _remove_marketplace_entry(marketplace_path, plugin_name, result)
     _remove_source_link(home / "plugins" / plugin_name, source, result)
 
+    python_path = home / ".codex" / "reviewer-agent-codex" / "python-path"
+    try:
+        if python_path.exists() or python_path.is_symlink():
+            python_path.unlink()
+            result.removed.append("Python interpreter selection {}".format(python_path))
+    except OSError as error:
+        result.warnings.append("could not remove {}: {}".format(python_path, error))
+
     if purge_state:
         state = state_home()
         if state.exists():

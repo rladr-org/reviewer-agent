@@ -17,8 +17,8 @@ def test_manifest_and_hook_contract():
     assert manifest["mcpServers"] == "./.mcp.json"
     mcp = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
     server = mcp["mcpServers"]["reviewer-agent"]
-    assert server["command"] == "python3"
-    assert server["args"] == ["scripts/mcp_server.py"]
+    assert server["command"] == "/bin/sh"
+    assert server["args"][-1] == "scripts/mcp_server.py"
     assert server["cwd"] == "."
     assert server["tool_timeout_sec"] > backend.MAX_COMMIT_REVIEW_TIMEOUT
     assert set(("UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")) <= set(hooks)

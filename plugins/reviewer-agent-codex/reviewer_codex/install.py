@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,25 +36,56 @@ def _run_command(command: List[str]) -> None:
 
 
 def verify_hook_python() -> str:
-    """Check the interpreter command used by hooks, not just the installer Python."""
-    executable = shutil.which("python3")
-    message = "Hooks require Python 3.9+ as python3 on the Codex launch PATH."
-    if not executable:
-        raise InstallError(message)
+    """Find a tested interpreter to pin for both hooks and the MCP server."""
+    candidates = [sys.executable, shutil.which("python3")]
+    candidates.extend(shutil.which("python3.{}".format(minor)) for minor in range(15, 8, -1))
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        executable = os.path.abspath(candidate)
+        if executable in seen or "\n" in executable or "\r" in executable:
+            continue
+        seen.add(executable)
+        try:
+            result = subprocess.run(
+                [executable, "-c", "import sys; print('.'.join(str(part) for part in sys.version_info[:3]))"],
+                capture_output=True, text=True, timeout=10,
+            )
+            version = tuple(int(part) for part in result.stdout.strip().split("."))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        if result.returncode == 0 and len(version) == 3 and version >= (3, 9, 0):
+            return executable
+    raise InstallError("Python 3.9+ is required. Install it, then rerun this installer with that interpreter.")
+
+
+def _verify_server_startup(source: Path, executable: str) -> None:
+    script = source / "scripts" / "mcp_server.py"
     try:
         result = subprocess.run(
-            [executable, "-c", "import sys; print('.'.join(str(part) for part in sys.version_info[:3]))"],
+            [executable, str(script)], cwd=source,
+            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n",
             capture_output=True, text=True, timeout=10,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise InstallError(message) from exc
+        response = json.loads(result.stdout)
+        if (result.returncode != 0 or response.get("id") != 1
+                or response.get("result", {}).get("serverInfo", {}).get("name") != "reviewer-agent-codex"):
+            raise ValueError("server did not initialize")
+    except (OSError, subprocess.SubprocessError, ValueError, AttributeError) as exc:
+        raise InstallError("MCP server startup check failed with {}: {}".format(executable, exc)) from exc
+
+
+def _save_python(home: Path, executable: str) -> None:
+    path = home / ".codex" / "reviewer-agent-codex" / "python-path"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(".python-path-{}".format(uuid.uuid4().hex))
     try:
-        version = tuple(int(part) for part in result.stdout.strip().split("."))
-    except ValueError:
-        version = ()
-    if result.returncode != 0 or len(version) != 3 or version < (3, 9, 0):
-        raise InstallError(message + " Check " + executable)
-    return executable
+        with temporary.open("x", encoding="utf-8") as stream:
+            stream.write(executable + "\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _read_plugin_name(source: Path) -> str:
@@ -194,11 +227,13 @@ def install_local(
     source = source.expanduser().resolve()
     home = (home or Path.home()).expanduser().resolve()
     plugin_name = _read_plugin_name(source)
-    verify_hook_python()
+    executable = verify_hook_python()
+    _verify_server_startup(source, executable)
     source_link = home / "plugins" / plugin_name
     marketplace_path = home / ".agents" / "plugins" / "marketplace.json"
 
     _ensure_source_link(source, source_link)
+    _save_python(home, executable)
     marketplace = _load_marketplace(marketplace_path)
     _write_marketplace(marketplace_path, marketplace, plugin_name)
 

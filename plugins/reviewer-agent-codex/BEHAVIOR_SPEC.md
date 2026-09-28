@@ -28,9 +28,11 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
 - The PreToolUse entrypoint emits JSON deny on input, import, or gate exceptions. Its shell
   launcher returns blocking exit 2 if the Python command fails. Missing/untrusted host hook
   registration and host-enforced launcher timeouts remain outside that failure boundary.
-  Stop liveness/plan storage failures remain best effort. Installation checks Python 3.9+
-  through the same `python3` PATH command as the hooks before writing configuration; the
-  operator must also ensure that command resolves in the actual Codex launch environment.
+  Stop liveness/plan storage failures remain best effort. Before writing configuration, installation
+  selects Python 3.9+ and verifies an MCP initialize response. It saves the absolute interpreter
+  path for both command hooks and MCP; Codex does not need the installer shell's PATH. Without
+  an installer selection, launchers retain the `python3` PATH default. A broken saved selection
+  does not silently fall back; PreToolUse remains blocking. Uninstall removes only our selection.
 - On timeout, compare-safely retires only the reviewer thread that was actually invoked and clears
   only its matching staged-index cursor. A concurrent replacement survives, and the next commit
   retry starts a fresh reviewer with the full brief rather than resuming the timed-out thread.

@@ -64,6 +64,12 @@ def make_plugin(source: Path) -> None:
         encoding="utf-8",
     )
 
+    (source / "scripts").mkdir(exist_ok=True)
+    (source / "scripts/mcp_server.py").write_text(
+        "import json\nprint(json.dumps({'id': 1, 'result': {'serverInfo': "
+        "{'name': 'reviewer-agent-codex'}}}))\n"
+    )
+
 
 @pytest.mark.parametrize("failure", ["missing", "old"])
 def test_install_checks_hook_python_before_writing(tmp_path, monkeypatch, failure):
@@ -77,6 +83,7 @@ def test_install_checks_hook_python_before_writing(tmp_path, monkeypatch, failur
         executable.write_text("#!/bin/sh\nprintf '3.8.10\\n'\nexit 0\n")
         executable.chmod(0o755)
     monkeypatch.setenv("PATH", str(binaries))
+    monkeypatch.setattr(sys, "executable", str(binaries / "python3"))
     with pytest.raises(InstallError, match="Python 3.9"):
         install_local(source, home=home, install=False)
     assert not home.exists()

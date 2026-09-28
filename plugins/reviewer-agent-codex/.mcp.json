@@ -1,8 +1,13 @@
 {
   "mcpServers": {
     "reviewer-agent": {
-      "command": "python3",
-      "args": ["scripts/mcp_server.py"],
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "reviewer_python=python3; if [ -e \"$HOME/.codex/reviewer-agent-codex/python-path\" ] || [ -L \"$HOME/.codex/reviewer-agent-codex/python-path\" ]; then IFS= read -r reviewer_python < \"$HOME/.codex/reviewer-agent-codex/python-path\" || reviewer_python=; fi; exec \"$reviewer_python\" \"$@\"",
+        "reviewer-agent",
+        "scripts/mcp_server.py"
+      ],
       "cwd": ".",
       "startup_timeout_sec": 10,
       "tool_timeout_sec": 7260

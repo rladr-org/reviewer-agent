@@ -38,6 +38,11 @@ def source(tmp_path):
         json.dumps({"name": PLUGIN, "version": "1.2.0-beta.1+codex.1"}) + "\n",
         encoding="utf-8",
     )
+    (root / "scripts").mkdir(exist_ok=True)
+    (root / "scripts/mcp_server.py").write_text(
+        "import json\nprint(json.dumps({'id': 1, 'result': {'serverInfo': "
+        "{'name': 'reviewer-agent-codex'}}}))\n"
+    )
     return root
 
 
