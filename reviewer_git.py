@@ -649,9 +649,12 @@ _INTERPRETER_RE = re.compile(r"\A(?:python[0-9.]*|node|perl|ruby)\Z")
 # lists with global options between them (`['git', '-C', d, 'commit']`) count, and so does
 # text that assembles the command from pieces, at the cost of refusing a script that only
 # talks about both.
-_INLINE_GIT_COMMIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|merge|cherry-pick|revert)\b")
+# Hyphens belong to Git subcommands: merge-base and commit-graph are not producers.
+_INLINE_GIT_COMMIT_RE = re.compile(
+    r"\bgit\b[\s\S]*?(?<![\w-])(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)(?![\w-])"
+)
 
-_PIPELINE_GIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)\b")
+_PIPELINE_GIT_RE = _INLINE_GIT_COMMIT_RE
 # Words by which an inline script of each interpreter runs a command. A script that mentions git
 # and a producer WITHOUT one of these only carries the text as data. A bounded check, not
 # interpreter analysis: a script that spawns something unrelated and also mentions a commit as

@@ -9,6 +9,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
+- Inline-script and pipeline checks distinguish `merge-base` and `commit-graph` from
+  commit-producing commands; the Claude inline-script check also covers `am` and `pull`.
 - The Codex installer selects and remembers a compatible Python for both hooks and MCP, so
   Codex can start with a different PATH. It checks MCP startup before writing configuration.
 - The Ubuntu 20.04 CI runner puts its Python 3.9 virtual environment on PATH for child commands.

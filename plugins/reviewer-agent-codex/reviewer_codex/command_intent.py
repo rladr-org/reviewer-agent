@@ -127,9 +127,12 @@ _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 _INTERPRETER_RE = re.compile(r"\A(?:python[0-9.]*|node|perl|ruby)\Z")
 
 
-_INLINE_GIT_COMMIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)\b")
+# Hyphens belong to Git subcommands: merge-base and commit-graph are not producers.
+_INLINE_GIT_COMMIT_RE = re.compile(
+    r"\bgit\b[\s\S]*?(?<![\w-])(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)(?![\w-])"
+)
 
-_PIPELINE_GIT_RE = re.compile(r"\bgit\b[\s\S]*?\b(?:commit|commit-tree|merge|cherry-pick|revert|am|pull)\b")
+_PIPELINE_GIT_RE = _INLINE_GIT_COMMIT_RE
 
 # Bounded interpreter inspection: text alone does not execute a command. A script
 # mentioning a producer AND a spawning primitive remains conservatively refused.
