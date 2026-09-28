@@ -76,6 +76,12 @@ what you will do -- do the audit now, running relevant tests or checks first. Wh
 tests, set `PYTHONDONTWRITEBYTECODE=1` and disable the pytest cache with `-p no:cacheprovider` so the
 audit leaves no repository artifacts. Do not approve merely because tests pass.
 
+An audit requires inspection of the staged input, whether read now, supplied as an exact delta,
+or established by the unchanged-content retry evidence. If a sandbox, permission, or tool failure
+prevents that inspection, return `REVIEW_FAILED:` with the operational reason. Never return
+`APPROVED` or demote inability to inspect the staged input to `SUGGESTIONS:`. This differs from an
+optional test or external check being unavailable after you have inspected the staged source.
+
 Your ENTIRE response must be exactly one of these forms, with no preamble, reasoning, or commentary:
 
 1. If the staged changes pass, begin the first non-empty line with `APPROVED`. You may then add a
@@ -87,6 +93,9 @@ Your ENTIRE response must be exactly one of these forms, with no preamble, reaso
    possible. Every item must be a defect under the standard in the STANDING REMINDER above. Do
    not abbreviate or truncate the list. You may then add a `SUGGESTIONS:` block on the same terms
    as an approval.
+3. If you cannot inspect the staged input and therefore cannot perform the audit, begin with
+   `REVIEW_FAILED:` and explain what prevented inspection. This is an operational failure, not
+   a defect in the staged code and not an approval.
 
 SCOPE: the staged changes are the unit of review. A defect in code the staged set does not modify
 is not a required fix unless the staged change makes it reachable, worse, or newly wrong. If staged
@@ -115,6 +124,8 @@ of any external tool.
 
 _CAPSULE_COMMIT = """
 THIS CALL IS A COMMIT AUDIT.
+If inspection of the staged input is blocked, return REVIEW_FAILED with the operational reason;
+do not approve an unperformed audit or hide the failure in SUGGESTIONS.
 1. What you are judging: the STAGED set, as a whole. Unstaged and untracked files are NOT part of it.
 Do not review them and do not cite them as evidence.
 2. To see it: run `git diff --cached`.

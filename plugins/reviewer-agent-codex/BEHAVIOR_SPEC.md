@@ -25,6 +25,11 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   the `-m`/`--message` text. Rejects all other commit options, pathspecs, alternate Git configuration,
   and compound shell commands before creating a ticket, with an explicit unsupported-form error.
 - Fails closed when the reviewer fails, times out, returns empty output, or rejects.
+- `REVIEW_FAILED:` and recognized direct admissions that staged input was not inspected are
+  operational failures, even under an `APPROVED`/`SUGGESTIONS:` heading. Preserve the prior verdict,
+  cursor, and audit count; retain the unapplied response in FAILED history and do not commit.
+  This bounded prose guard does not certify complete inspection of every other approval.
+  Unavailable optional checks after source inspection remain nonblocking.
 - The PreToolUse entrypoint emits JSON deny on input, import, or gate exceptions. Its shell
   launcher returns blocking exit 2 if the Python command fails. Missing/untrusted host hook
   registration and host-enforced launcher timeouts remain outside that failure boundary.

@@ -20,6 +20,13 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
 
 Both features are off by default.
 
+Commit reviewers must report `REVIEW_FAILED:` when they cannot inspect the staged input.
+That operational failure blocks publication without replacing the previous verdict or advancing
+the review cursor. The gate also blocks direct admissions of uninspected staged files in an
+otherwise `APPROVED` response, including inside `SUGGESTIONS:`. This prose check covers explicit
+failure reports; it is not proof that every other approval performed a complete audit. Optional
+tests that cannot run after source inspection remain nonblocking suggestions.
+
 > **`stopContinue` is autonomous delegation, not merely a reminder.** Its model output is fed back
 > to the developer agent as a next-step directive. The developer agent may act on that output with
 > its own tools, credentials and permissions, potentially without another human confirmation. The

@@ -37,6 +37,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Fixed
 
+- Codex blocks review responses admitting that staged files could not be inspected, including
+  contradictory `APPROVED` suggestions. Reviewers now have a distinct `REVIEW_FAILED:` outcome;
+  operational failure preserves the previous verdict and review cursor instead of committing.
 - Codex native Interrupt now cancels pending commit reviews owned by the interrupted developer
   session, including reviews targeting another worktree, when the host omits MCP cancellation.
 - The Codex gate now classifies executable commands using its independently packaged shell

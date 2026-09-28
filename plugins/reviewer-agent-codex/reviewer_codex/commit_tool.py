@@ -13,6 +13,27 @@ from .git import git_head, run_commit, staged_files, staged_tree
 _APPROVED = re.compile(r"^APPROVED\b")
 _REJECTED = re.compile(r"\bREJECTED\b")
 _SUGGESTIONS_MARKER = "SUGGESTIONS:"
+# Recognize direct admissions that the audit input was not inspected, including the
+# contradictory APPROVED/SUGGESTIONS response observed with a broken Linux sandbox.
+# Anchor at a clause boundary: discussing a regression *about* this failure is not
+# admitting it happened in this audit. This is a bounded prose guard, not evidence
+# that every otherwise-approved review actually inspected its input.
+_INSPECTION_FAILURE = re.compile(
+    r"(?:^|[.;\n])\s*(?:\d+[.)]\s*)?(?:"
+    r"(?:the\s+)?staged\s+(?:files?|changes?|diff|content|input|set|patch)\s+"
+    r"(?:(?:could|can)\s+not\s+be|(?:was|were|is|are)\s+not)\s+"
+    r"(?:inspected|read|reviewed|accessed)\b"
+    r"|(?:I\s+(?:could\s+not|cannot|can't|was\s+unable\s+to)|unable\s+to)\s+"
+    r"(?:inspect|read|review|access)\s+(?:the\s+)?staged\s+"
+    r"(?:files?|changes?|diff|content|input|set|patch)\b)",
+    re.IGNORECASE,
+)
+
+
+def inspection_failure(output):
+    text = str(output or "").strip()
+    return bool(re.search(r"^\s*REVIEW_FAILED\s*:", text, re.IGNORECASE | re.MULTILINE)
+                or _INSPECTION_FAILURE.search(text))
 
 
 def _suggestion_starts(text):
@@ -45,6 +66,8 @@ def split_suggestions(output):
 
 def approved(output):
     text = str(output or "").strip()
+    if inspection_failure(text):
+        return False
     verdict, suggestions = split_suggestions(text)
     if suggestions is None and _suggestion_starts(text):
         return False
@@ -302,6 +325,15 @@ def _review_staged(root, session_id, message, options, cancel_event):
     # so if the staged set also moved, "the ruling judged a different set" would be a fiction --
     # DISCARDED is only ever for a usable verdict that could not be applied. Checking failure
     # first also gives the operator the actionable half: the reviewer's own error.
+    if inspection_failure(output):
+        detail = (
+            "reviewer could not inspect the staged changes; restore reviewer access and "
+            "retry the review. No commit was made."
+        )
+        state.record_review_outcome(
+            root, session_id, state.OUTCOME_FAILED, detail, verdict=output,
+        )
+        return _result("error", detail, review=output.strip())
     if code != 0 or not output.strip():
         detail = stderr.strip() or "empty verdict"
         # A refused model or effort is a configuration failure with a specific remedy; reporting
