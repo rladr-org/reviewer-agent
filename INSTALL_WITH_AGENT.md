@@ -116,8 +116,12 @@ cd <INSTALLER_REPO>/plugins/reviewer-agent-codex && <TEST_VENV>/bin/python -m py
 These suites can take several minutes. Use the host's background execution support and retain
 the final exit status when its foreground timeout is shorter; do not install until the applicable
 suite finishes successfully. A temporary test environment is fine; the plugin checkout must be
-permanent. Ensure `python3` is Python 3.9+ on the developer host's launch PATH as well: activating
-a test environment in one shell does not configure the hooks of a running GUI or another shell.
+permanent. For Claude Code, ensure `python3` is Python 3.9+ on the developer host's launch PATH:
+activating a test environment in one shell does not configure the hooks of a running GUI or
+another shell. For Codex, run the installer with a permanent Python 3.9+ installation, not the
+temporary test environment. The installer verifies and saves that interpreter for both hooks
+and MCP, so Codex does not need the installer shell's PATH. Keep the selected interpreter
+installed; rerun the installer if it moves or is removed.
 
 ### 4A. Claude Code installation
 
