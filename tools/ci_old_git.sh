@@ -18,6 +18,8 @@ git config --global user.email ci@example.com
 git config --global user.name CI
 # Deliberately NO init.defaultBranch: the suites must not depend on it.
 python3.9 -m venv /tmp/venv
+# Hooks and installer checks resolve python3 on PATH, including in child processes.
+export PATH="/tmp/venv/bin:$PATH"
 /tmp/venv/bin/python -m pip install -q -r requirements-dev.txt
 /tmp/venv/bin/python -m pytest -p no:cacheprovider -q
 cd plugins/reviewer-agent-codex
