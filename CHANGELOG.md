@@ -47,6 +47,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   target cannot hide a later protected target in a compound command.
 - Both parsers detect commits in Bash's `function name { ...; }` form and honor backslash or
   mixed quoting in heredoc delimiters.
+- A heredoc delimiter with an unquoted `$` or backtick (`<<$'EOF'`, `<<$(echo EOF)`) no longer hides
+  a later commit from either gate: Bash ends it at a different line than the parser did, so every
+  line after it had been read as data.
 - Codex Stop supervision treats a misplaced commit-gate `APPROVED` response as a failed review
   and allows the stop, instead of relaying the verdict as a continuation instruction.
 - Codex reviewers in linked worktrees use the main checkout's project brief when the worktree

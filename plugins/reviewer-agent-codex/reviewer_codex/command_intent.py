@@ -113,8 +113,13 @@ _PREFIX_KEYWORDS = {"!", "{", "then", "do", "else", "elif", "if", "while", "unti
 _REDIR_OP_RE = re.compile(r"\A[0-9]*(?:[<>]+[&|-]?|&>>?)\Z")
 
 
+# A delimiter word the parser can read exactly, ending where the shell's word ends. An unquoted
+# `$` or backtick (`$'EOF'`, `$"EOF"`, `$(...)`) is not read: Bash's delimiter would differ from
+# ours, and the mismatch hid every later line as heredoc data. Unread, `<<` stays plain text and
+# the lines below it are parsed as commands, which fails closed.
 _HEREDOC_RE = re.compile(
-    r'''<<(-?)[ \t]*((?:[^\s;&|<>()'"\\]+|'[^']*'|"(?:\\.|[^"\\])*"|\\[^\n])+)'''
+    r'''<<(-?)[ \t]*((?:[^\s;&|<>()'"\\$`]+|'[^']*'|"(?:\\.|[^"\\])*"|\\[^\n])+)'''
+    r'''(?=[\s;&|<>()]|\Z)'''
 )
 
 
