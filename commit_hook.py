@@ -387,7 +387,11 @@ def main(raw=None):
     # A review COUNTS only if it exited cleanly AND returned something. Exit 0 with empty output
     # is not a verdict: a timeout or a crash returns empty or partial output, and so does a wedged
     # session. Both persistent effects below hang off this one condition.
-    completed = code == 0 and bool((out or "").strip())
+    # A response admitting the staged set went uninspected (REVIEW_FAILED:, or an APPROVED whose
+    # suggestion says so) audited nothing: it is an operational failure like a crash, not a verdict,
+    # so it neither replaces the saved ruling nor advances the retry state.
+    inspection_failed = code == 0 and rl.inspection_failure(out)
+    completed = code == 0 and bool((out or "").strip()) and not inspection_failed
 
     approved = code == 0 and rl.is_approved(out)
     review_path = str(rl.last_review_file(cwd, claude_sid))
@@ -434,7 +438,12 @@ def main(raw=None):
         # as OUTCOMES rather than verdicts, so the saved latest ruling -- which the capsule
         # shows the next reviewer as its own prior findings -- is left exactly as it was, and
         # nothing is recorded as audited.
-        if code == rl.TIMEOUT_EXIT:
+        if inspection_failed:
+            outcome, detail = rl.OUTCOME_FAILED, (
+                "the reviewer could not inspect the staged changes; its response:\n"
+                + out.strip()
+            )
+        elif code == rl.TIMEOUT_EXIT:
             outcome, detail = rl.OUTCOME_TIMEOUT, (
                 "the review exceeded the {}s budget and produced no verdict".format(
                     rl.commit_review_timeout())
@@ -541,6 +550,19 @@ def main(raw=None):
                 "[reviewerAgent] ERROR: commit review failed (exit {}). Commit "
                 "blocked.\n{}".format(code, rl.short(err, 300))
             )
+        print(json.dumps(rl.deny_output(reason, msg)))
+    elif inspection_failed:
+        reason = (
+            "reviewerAgent: the reviewer could not inspect the staged changes, so no audit took "
+            "place and nothing was committed (fail-closed). Its response:\n\n{}\n\nThis is an "
+            "operational failure, not a finding in your change: restore the reviewer's access "
+            "(its sandbox, permissions or tools) and retry the identical commit.".format(
+                out.strip())
+        )
+        msg = (
+            "[reviewerAgent] ERROR: the reviewer could not inspect the staged changes. Commit "
+            "blocked. Restore reviewer access and retry."
+        )
         print(json.dumps(rl.deny_output(reason, msg)))
     elif not completed:
         # Exit 0 but nothing came back. Still fail-CLOSED, but it must not fall through to the

@@ -358,6 +358,7 @@ from reviewer_prompts import (  # noqa: F401
     directives_block,
     directives_file,
     info_output,
+    inspection_failure,
     is_approved,
     load_directives,
     operator_context_logging_enabled,

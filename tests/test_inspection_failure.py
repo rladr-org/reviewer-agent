@@ -34,6 +34,11 @@ FAILED_VERDICTS = [
     "REVIEW_FAILED: The sandbox could not start; the staged files were not inspected.",
     "APPROVED\nREVIEW_FAILED: The sandbox could not start.",
     "REVIEW_FAILED:\n1. bwrap: setting up uid map: Permission denied",
+    "APPROVED\nSUGGESTIONS:\n1. I couldn't access the staged diff.",
+    "APPROVED\nSUGGESTIONS:\n1. I couldn’t read the staged patch.",
+    "APPROVED\nSUGGESTIONS:\n1. The staged files couldn't be inspected.",
+    "APPROVED\nSUGGESTIONS:\n1. The staged diff wasn't read.",
+    "APPROVED\nSUGGESTIONS:\n1. I wasn't able to inspect the staged changes.",
 ]
 
 
@@ -74,9 +79,10 @@ def test_a_review_failed_verdict_without_a_reason_fails_closed():
         {"verdict": "REVIEW_FAILED", "findings": [], "suggestions": []})) is None
 
 
-@pytest.mark.parametrize("prompt", ["COMMIT_PROMPT", "PI_COMMIT_PROMPT", "CLAUDE_COMMIT_PROMPT"])
+@pytest.mark.parametrize("prompt", [rl.COMMIT_PROMPT, rl.PI_COMMIT_PROMPT, rl.CLAUDE_COMMIT_PROMPT],
+                         ids=["codex", "pi", "claude"])
 def test_every_commit_prompt_offers_review_failed(prompt):
-    assert "REVIEW_FAILED" in getattr(rl, prompt)
+    assert "REVIEW_FAILED" in prompt
 
 
 def _git(repo, *args):

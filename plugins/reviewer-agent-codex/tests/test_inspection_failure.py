@@ -22,6 +22,11 @@ OBSERVED_VERDICT = (
     "APPROVED\nSUGGESTIONS:\n1. The staged input was not inspected.",
     "REVIEW_FAILED: The sandbox could not start; the staged files were not inspected.",
     "APPROVED\nREVIEW_FAILED: The sandbox could not start.",
+    "APPROVED\nSUGGESTIONS:\n1. I couldn't access the staged diff.",
+    "APPROVED\nSUGGESTIONS:\n1. I couldn’t read the staged patch.",
+    "APPROVED\nSUGGESTIONS:\n1. The staged files couldn't be inspected.",
+    "APPROVED\nSUGGESTIONS:\n1. The staged diff wasn't read.",
+    "APPROVED\nSUGGESTIONS:\n1. I wasn't able to inspect the staged changes.",
 ])
 def test_inspection_failure_never_commits_or_advances_review_state(
     git_repo, isolated_state, monkeypatch, verdict

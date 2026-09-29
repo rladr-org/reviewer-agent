@@ -153,7 +153,11 @@ useful way to judge a change is to see whether it still passes. The current invo
 `workspace-write` sandbox with the working tree and a temporary directory writable and `.git`
 read-only; that configuration is intended to prevent the reviewer from creating the commit. It returns
 one of two answers: `APPROVED` (optionally with non-blocking `SUGGESTIONS:`), or `REJECTED:`
-followed by a numbered list of required fixes with `file:line` evidence. Briefing and stop
+followed by a numbered list of required fixes with `file:line` evidence. A reviewer that could
+not inspect the staged changes (a broken sandbox, a permission error) answers `REVIEW_FAILED:`
+instead, on every backend. The gate blocks the commit and records an operational failure, keeping
+the previous ruling. It does the same for an `APPROVED` that admits the staged files went
+uninspected. Briefing and stop
 supervision (which answers any rerouted `AskUserQuestion`) request read-only operation.
 
 **Pi** — intended as a static review. The current invocation omits shell, write, and edit tools;

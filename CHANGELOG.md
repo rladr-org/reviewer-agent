@@ -40,6 +40,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Codex blocks review responses admitting that staged files could not be inspected, including
   contradictory `APPROVED` suggestions. Reviewers now have a distinct `REVIEW_FAILED:` outcome;
   operational failure preserves the previous verdict and review cursor instead of committing.
+- The Claude Code gate does the same on every backend: a `REVIEW_FAILED:` answer, or an `APPROVED`
+  admitting the staged set went uninspected, blocks the commit as an operational failure and leaves
+  the saved ruling and retry state untouched. The codex verdict schema gains `REVIEW_FAILED`.
 - Codex native Interrupt now cancels pending commit reviews owned by the interrupted developer
   session, including reviews targeting another worktree, when the host omits MCP cancellation.
 - The Codex gate now classifies executable commands using its independently packaged shell

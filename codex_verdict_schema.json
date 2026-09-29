@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "required": ["verdict", "findings", "suggestions"],
   "properties": {
-    "verdict": {"type": "string", "enum": ["APPROVED", "REJECTED"]},
+    "verdict": {"type": "string", "enum": ["APPROVED", "REJECTED", "REVIEW_FAILED"]},
     "findings": {"type": "array", "items": {"type": "string"}},
     "suggestions": {"type": "array", "items": {"type": "string"}}
   }

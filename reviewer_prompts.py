@@ -80,12 +80,16 @@ COMMIT_PROMPT = (
     "Emit ONLY a single JSON object as your final message -- no preamble, no reasoning, no "
     "commentary, no markdown fences, nothing before or after it -- with EXACTLY these three "
     "keys:\n"
-    "  \"verdict\": either \"APPROVED\" (the staged changes pass your audit) or \"REJECTED\" "
-    "(any of them fail).\n"
+    "  \"verdict\": \"APPROVED\" (the staged changes pass your audit), \"REJECTED\" "
+    "(any of them fail), or \"REVIEW_FAILED\" (a sandbox, permission or tool failure kept you "
+    "from inspecting the staged changes at all -- an operational failure, not a defect and not "
+    "an approval; never answer APPROVED or put that failure in suggestions instead, and an "
+    "optional test or check you could not run AFTER inspecting them is not this case).\n"
     "  \"findings\": a JSON array of strings, one string per REQUIRED correction or bug fix, "
     "with file:line evidence whenever possible; every item must be a defect under the standard "
     "in the STANDING REMINDER above. It MUST be [] when the verdict is APPROVED, and MUST list "
-    "at least one item when the verdict is REJECTED. Do not abbreviate or truncate it.\n"
+    "at least one item when the verdict is REJECTED. For REVIEW_FAILED it lists instead what "
+    "prevented the inspection, at least one item. Do not abbreviate or truncate it.\n"
     "  \"suggestions\": a JSON array of strings, one string per non-blocking observation. "
     "Allowed with EITHER verdict; suggestions never block a commit, so put every non-defect "
     "here rather than rejecting; use [] if you have none.\n"
@@ -104,6 +108,17 @@ COMMIT_PROMPT = (
     "SUGGESTION: report what you could not check and do not reject on it. A defect the staged "
     "diff establishes blocks with full force: this narrows what may block, never how hard it "
     "blocks."
+)
+
+
+# The third response form of the plain-text commit prompts (pi, claude). The codex prompt above
+# says the same in its JSON grammar; see inspection_failure for why the gate needs it.
+_REVIEW_FAILED_FORM = (
+    "(3) If a sandbox, permission or tool failure keeps you from inspecting the staged changes at "
+    "all: a first line 'REVIEW_FAILED:' followed by what prevented it. That is an operational "
+    "failure, not a defect and not an approval: never answer APPROVED instead, and never put an "
+    "inability to inspect the staged changes in SUGGESTIONS. An optional test or check you could "
+    "not run AFTER inspecting the staged changes is not this case.\n\n"
 )
 
 
@@ -134,7 +149,8 @@ PI_COMMIT_PROMPT = (
     "(2) A first line 'REJECTED:' followed by a numbered list of ALL required corrections and "
     "bug fixes, with file:line evidence. Every item must be a defect under the standard in the "
     "STANDING REMINDER above. Do not abbreviate or truncate the list. You may then add a "
-    "SUGGESTIONS: block, on the same terms as form (1).\n\n"
+    "SUGGESTIONS: block, on the same terms as form (1).\n"
+    + _REVIEW_FAILED_FORM +
     "SCOPE: the STAGED CHANGES are the unit of review. A defect in code the staged set does "
     "not modify is NOT a required fix -- put it in SUGGESTIONS -- unless the staged change "
     "makes it reachable, worse, or newly wrong. Where the staged text makes a false claim "
@@ -1667,10 +1683,41 @@ _APPROVED_OPENING = re.compile(r"^APPROVED\b")
 _CONTRADICTS_APPROVAL = re.compile(r"\bREJECTED\b")
 
 
+# A reviewer that could not read the staged set has not audited it, whatever its first line says.
+# Observed on Linux with a broken sandbox: `APPROVED` with the suggestion "staged files could not be
+# inspected". Anchored at a clause start, so a suggestion ABOUT this failure ("add a regression for
+# cases where staged files could not be inspected") is not an admission. A bounded prose guard,
+# shared with the Codex plugin's commit_tool, not proof that an approval inspected its input.
+_REVIEW_FAILED = re.compile(r"^\s*REVIEW_FAILED\s*:", re.IGNORECASE | re.MULTILINE)
+# Negations are spelled out or contracted, with a straight or curly apostrophe.
+_INSPECTION_FAILURE = re.compile(
+    r"(?:^|[.;\n])\s*(?:\d+[.)]\s*)?(?:"
+    r"(?:the\s+)?staged\s+(?:files?|changes?|diff|content|input|set|patch)\s+"
+    r"(?:(?:could|can)\s*not\s+be|(?:could|can)n['’]t\s+be"
+    r"|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+"
+    r"(?:inspected|read|reviewed|accessed)\b"
+    r"|(?:I\s+(?:could\s+not|couldn['’]t|cannot|can['’]t"
+    r"|was\s+(?:unable|not\s+able)\s+to|wasn['’]t\s+able\s+to)|unable\s+to)\s+"
+    r"(?:inspect|read|review|access)\s+(?:the\s+)?staged\s+"
+    r"(?:files?|changes?|diff|content|input|set|patch)\b)",
+    re.IGNORECASE,
+)
+
+
+def inspection_failure(codex_out):
+    """True iff the response is a `REVIEW_FAILED:` ruling or admits it could not inspect the
+    staged set. Such a response is an operational failure, never a verdict."""
+    text = str(codex_out or "")
+    return bool(_REVIEW_FAILED.search(text) or _INSPECTION_FAILURE.search(text))
+
+
 def is_approved(codex_out):
     """True iff the verdict APPROVES the staged changes: the first non-empty line, stripped
-    and uppercased, must open with the whole word APPROVED and must not also reject.
+    and uppercased, must open with the whole word APPROVED and must not also reject, and the
+    response must not admit that the staged set went uninspected (see inspection_failure).
     Anything else (REJECTED, prose, empty) is not approved -> the hook denies."""
+    if inspection_failure(codex_out):
+        return False
     for line in (codex_out or "").splitlines():
         stripped = line.strip()
         if not stripped:
@@ -1715,7 +1762,8 @@ CLAUDE_COMMIT_PROMPT = (
     "(2) A first line 'REJECTED:' followed by a numbered list of ALL required corrections and "
     "bug fixes, with file:line evidence. Every item must be a defect under the standard in the "
     "STANDING REMINDER above. Do not abbreviate or truncate the list. You may then add a "
-    "SUGGESTIONS: block, on the same terms as form (1).\n\n"
+    "SUGGESTIONS: block, on the same terms as form (1).\n"
+    + _REVIEW_FAILED_FORM +
     "PROOF: you cannot run anything, so a finding that rests on a fact the staged diff and the "
     "files you read do not establish is a SUGGESTION, not a required fix.\n"
 )

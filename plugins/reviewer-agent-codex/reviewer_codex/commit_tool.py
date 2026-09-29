@@ -18,12 +18,15 @@ _SUGGESTIONS_MARKER = "SUGGESTIONS:"
 # Anchor at a clause boundary: discussing a regression *about* this failure is not
 # admitting it happened in this audit. This is a bounded prose guard, not evidence
 # that every otherwise-approved review actually inspected its input.
+# Negations are spelled out or contracted, with a straight or curly apostrophe.
 _INSPECTION_FAILURE = re.compile(
     r"(?:^|[.;\n])\s*(?:\d+[.)]\s*)?(?:"
     r"(?:the\s+)?staged\s+(?:files?|changes?|diff|content|input|set|patch)\s+"
-    r"(?:(?:could|can)\s+not\s+be|(?:was|were|is|are)\s+not)\s+"
+    r"(?:(?:could|can)\s*not\s+be|(?:could|can)n['’]t\s+be"
+    r"|(?:was|were|is|are)\s+not|(?:was|were|is|are)n['’]t)\s+"
     r"(?:inspected|read|reviewed|accessed)\b"
-    r"|(?:I\s+(?:could\s+not|cannot|can't|was\s+unable\s+to)|unable\s+to)\s+"
+    r"|(?:I\s+(?:could\s+not|couldn['’]t|cannot|can['’]t"
+    r"|was\s+(?:unable|not\s+able)\s+to|wasn['’]t\s+able\s+to)|unable\s+to)\s+"
     r"(?:inspect|read|review|access)\s+(?:the\s+)?staged\s+"
     r"(?:files?|changes?|diff|content|input|set|patch)\b)",
     re.IGNORECASE,

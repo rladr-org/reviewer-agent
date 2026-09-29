@@ -607,7 +607,9 @@ def parse_session_id(stdout):
 # reconstruct the canonical APPROVED/REJECTED text, keeping commit_hook.is_approved and
 # reviewer_audit backend-agnostic and unchanged. Everything here fails CLOSED (-> None / "").
 # --------------------------------------------------------------------------
-_VERDICT_ENUM = ("APPROVED", "REJECTED")
+# REVIEW_FAILED: the reviewer could not inspect the staged set (reviewer_prompts.inspection_failure);
+# its findings name what prevented the inspection.
+_VERDICT_ENUM = ("APPROVED", "REJECTED", "REVIEW_FAILED")
 _VERDICT_KEYS = frozenset({"verdict", "findings", "suggestions"})
 
 
@@ -627,7 +629,7 @@ def _strict_verdict_dict(obj):
     json.loads) and codex_verdict_to_text so BOTH fail closed identically. Strict: exactly the
     three keys {verdict, findings, suggestions}; `verdict` in the enum; `findings`/`suggestions`
     lists of strings; and the prompt-contract CONSISTENCY -- APPROVED has no findings, REJECTED
-    has >=1. Without this, codex_verdict_to_text would reconstruct an inconsistent object (e.g.
+    and REVIEW_FAILED have >=1. Without this, codex_verdict_to_text would reconstruct an inconsistent object (e.g.
     APPROVED with findings) into a bare `APPROVED`, silently dropping the findings and approving
     what should have been refused."""
     if not isinstance(obj, dict) or set(obj.keys()) != _VERDICT_KEYS:
@@ -643,7 +645,7 @@ def _strict_verdict_dict(obj):
     # least one. The contradictory combos fail closed rather than being silently accepted.
     if verdict == "APPROVED" and findings:
         return None
-    if verdict == "REJECTED" and not findings:
+    if verdict in ("REJECTED", "REVIEW_FAILED") and not findings:
         return None
     return {"verdict": verdict, "findings": findings, "suggestions": suggestions}
 
@@ -667,7 +669,7 @@ def _numbered(items):
 def codex_verdict_to_text(obj):
     """Reconstruct the canonical verdict text from a parsed verdict dict, byte-matching what
     is_approved / reviewer_audit and the developer expect: `APPROVED` (+ optional SUGGESTIONS
-    block) or `REJECTED:` + numbered findings (+ optional SUGGESTIONS block). "" when `obj` is
+    block) or `REJECTED:`/`REVIEW_FAILED:` + numbered findings (+ optional SUGGESTIONS block). "" when `obj` is
     None or not a well-formed, self-consistent verdict dict -- it is re-validated through the same
     strict check as parsing, so a malformed or contradictory object fails closed to "" instead of
     becoming reviewer prose."""
@@ -675,7 +677,7 @@ def codex_verdict_to_text(obj):
     if obj is None:
         return ""
     verdict, findings, suggestions = obj["verdict"], obj["findings"], obj["suggestions"]
-    head = "APPROVED" if verdict == "APPROVED" else "REJECTED:\n" + _numbered(findings)
+    head = "APPROVED" if verdict == "APPROVED" else verdict + ":\n" + _numbered(findings)
     if suggestions:
         return head + "\nSUGGESTIONS:\n" + _numbered(suggestions)
     return head
