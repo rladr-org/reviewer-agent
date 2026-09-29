@@ -496,3 +496,16 @@ def test_configured_rebase_makes_a_no_commit_pull_commit(pull_repo, key):
 ])
 def test_an_inline_script_that_only_mentions_a_commit_is_not_refused(command):
     assert _kind(command) is None, command
+
+
+# Bash ends `<<$'EOF'` and `<<$"EOF"` at a plain `EOF` line, and `<<$(echo EOF)` at the literal
+# `$(echo EOF)` line. Reading any of them as the delimiter `$EOF` or `$` swallowed the rest of the
+# script as heredoc data, so a commit after the heredoc went unseen.
+# Each case pairs the delimiter word with the line Bash actually ends the heredoc at.
+@pytest.mark.parametrize("delimiter, end", [
+    ("$'EOF'", "EOF"), ('$"EOF"', "EOF"), ("E$'OF'", "EOF"),
+    ("$(echo EOF)", "$(echo EOF)"), ("`echo EOF`", "`echo EOF`"),
+])
+def test_a_delimiter_the_parser_cannot_read_does_not_hide_a_later_commit(delimiter, end):
+    script = "cat <<" + delimiter + "\nx\n" + end + "\ngit commit -m x\n"
+    assert _kind(script) == "commit"

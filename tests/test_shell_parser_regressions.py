@@ -43,3 +43,16 @@ def test_pipeline_script_absolute_git_is_detected(script):
     command = "printf '%s\\n' " + shlex.quote(script) + " | bash"
     assert rl.commit_intent(command, "/work/repo").kind is not None
     assert rl.commit_intent(command.replace(" | bash", " | cat"), "/work/repo").kind is None
+
+
+# Bash ends `<<$'EOF'` and `<<$"EOF"` at a plain `EOF` line, and `<<$(echo EOF)` at the literal
+# `$(echo EOF)` line. Reading any of them as the delimiter `$EOF` or `$` swallowed the rest of the
+# script as heredoc data, so a commit after the heredoc went unseen.
+# Each case pairs the delimiter word with the line Bash actually ends the heredoc at.
+@pytest.mark.parametrize("delimiter, end", [
+    ("$'EOF'", "EOF"), ('$"EOF"', "EOF"), ("E$'OF'", "EOF"),
+    ("$(echo EOF)", "$(echo EOF)"), ("`echo EOF`", "`echo EOF`"),
+])
+def test_a_delimiter_the_parser_cannot_read_does_not_hide_a_later_commit(delimiter, end):
+    script = "cat <<" + delimiter + "\nx\n" + end + "\ngit commit -m x\n"
+    assert rl.commit_intent(script, "/work/repo").kind == "commit"
