@@ -267,6 +267,71 @@ def test_a_corrupt_record_falls_back_to_a_full_review(repo):
 
 
 # --------------------------------------------------------------------------
+# file modes are part of what was reviewed (claude_exact_reviewed_commit.md, defect 2)
+# --------------------------------------------------------------------------
+def _chmod_x(repo, name):
+    subprocess.run(["git", "-C", repo, "update-index", "--chmod=+x", name], check=True)
+
+
+def test_a_staged_executable_bit_fix_is_not_reported_as_nothing_moved(repo):
+    # A script rejected for not being executable; the agent stages only the mode fix. The blob
+    # is unchanged, so a content-only comparison said NOTHING MOVED and ordered the rejection
+    # repeated.
+    _write(repo, "run.sh", "echo hi\n")
+    _stage(repo, "run.sh")
+    _audit(repo)
+    _chmod_x(repo, "run.sh")
+    block = rl.staged_change_block(repo, "claude-1", SID)
+    assert block
+    assert "NOTHING MOVED" not in block
+    assert "did not stage" not in block.lower()
+    row = next(ln for ln in block.splitlines() if "run.sh" in ln)
+    assert "100644 -> 100755" in row
+    assert "UNCHANGED" not in row
+    assert "content" in row.lower() and "identical" in row.lower()
+
+
+def test_a_mode_only_path_is_not_sent_to_re_read_content_that_did_not_change(repo):
+    _write(repo, "run.sh", "echo hi\n")
+    _write(repo, "a.py", "x = 1\n")
+    _stage(repo, "run.sh", "a.py")
+    _audit(repo)
+    _chmod_x(repo, "run.sh")
+    _write(repo, "a.py", "x = 2\n")
+    _stage(repo, "a.py")
+    block = rl.staged_change_block(repo, "claude-1", SID)
+    assert "----- delta: a.py -----" in block
+    assert "git show :run.sh" not in block
+    assert "----- delta: run.sh -----" not in block
+
+
+def test_a_content_and_mode_change_reports_both(repo):
+    _write(repo, "run.sh", "echo hi\n")
+    _stage(repo, "run.sh")
+    _audit(repo)
+    _write(repo, "run.sh", "echo bye\n")
+    _stage(repo, "run.sh")
+    _chmod_x(repo, "run.sh")
+    block = rl.staged_change_block(repo, "claude-1", SID)
+    row = next(ln for ln in block.splitlines() if ln.strip().startswith("CHANGED") and "run.sh" in ln)
+    assert "100644 -> 100755" in row
+    assert "----- delta: run.sh -----" in block
+
+
+def test_a_record_without_modes_forces_a_full_review(repo):
+    # A record written before modes were kept cannot establish that a mode was reviewed.
+    _write(repo, "run.sh", "echo hi\n")
+    _stage(repo, "run.sh")
+    _audit(repo)
+    f = rl.audited_stage_file(repo, "claude-1")
+    record = json.loads(f.read_text(encoding="utf-8"))
+    record.pop("modes", None)
+    f.write_text(json.dumps(record), encoding="utf-8")
+    _chmod_x(repo, "run.sh")
+    assert rl.staged_change_block(repo, "claude-1", SID) == ""
+
+
+# --------------------------------------------------------------------------
 # The delta itself. Knowing WHICH files moved still left "re-read the whole file" as the only
 # instruction, which is the duplicated effort the annotation exists to remove. The bytes the
 # reviewer already audited are addressable: `git add` wrote them, and record_audited_stage kept
