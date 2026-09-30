@@ -722,20 +722,28 @@ def _chain_transcript(tmp_path, replies, answer=_ASKS_OPERATOR):
     return str(p)
 
 
-def _supervised_repo(tmp_path, monkeypatch):
+def _supervised_repo(tmp_path, monkeypatch, reply="WAITING"):
+    """`reply` is what the fake reviewer answers every call: the fresh waiting check reads it
+    as its verdict, and the supervisor, if it is reached, relays it as a directive."""
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     rl.set_stopcontinue_active(repo)
     rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
-    # A differently worded directive every time, as the supervisor produced it.
     env = {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
-           "FAKE_CODEX_STDOUT": "As already directed, document the gap now."}
+           "FAKE_CODEX_STDOUT": reply,
+           "FAKE_CODEX_ARGV_FILE": str(tmp_path / "argv.jsonl"),
+           "FAKE_CODEX_STDIN_FILE": str(tmp_path / "stdin.txt")}
     return repo, env
 
 
-def test_a_stop_after_two_directives_answered_without_acting_is_allowed(tmp_path, monkeypatch):
-    repo, env = _supervised_repo(tmp_path, monkeypatch)
+def _calls(tmp_path):
+    path = tmp_path / "argv.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_a_stop_the_fresh_check_finds_waiting_on_the_operator_is_allowed(tmp_path, monkeypatch):
+    repo, env = _supervised_repo(tmp_path, monkeypatch, reply="WAITING")
     tr = _chain_transcript(tmp_path, ["text", "text"])
     p = run_hook(_input(repo, tr, stop_hook_active=True), env)
     assert p.returncode == 0, p.stderr
@@ -745,19 +753,52 @@ def test_a_stop_after_two_directives_answered_without_acting_is_allowed(tmp_path
     assert "declined supervisor directives" in _log_text(env["REVIEWER_HOME"])
 
 
-def test_one_directive_answered_without_acting_is_still_pushed(tmp_path, monkeypatch):
-    # "Sure, I'll do that" and stopping is the premature stop the supervisor exists to catch.
-    repo, env = _supervised_repo(tmp_path, monkeypatch)
-    tr = _chain_transcript(tmp_path, ["text"])
+def test_the_waiting_check_is_a_fresh_session_not_the_supervisors(tmp_path, monkeypatch):
+    # The resumed supervisor cited its own earlier directives as the operator's decision; the
+    # check must not inherit them.
+    repo, env = _supervised_repo(tmp_path, monkeypatch, reply="WAITING")
+    tr = _chain_transcript(tmp_path, ["text", "text"])
+    run_hook(_input(repo, tr, stop_hook_active=True), env)
+    calls = _calls(tmp_path)
+    assert len(calls) == 1
+    assert "resume" not in calls[0] and "sid-stop" not in calls[0]
+
+
+def test_the_waiting_check_sees_the_reply_and_the_operator_not_the_directives(
+        tmp_path, monkeypatch):
+    repo, env = _supervised_repo(tmp_path, monkeypatch, reply="WAITING")
+    tr = _chain_transcript(tmp_path, ["text", "text"])
+    run_hook(_input(repo, tr, stop_hook_active=True), env)
+    sent = (tmp_path / "stdin.txt").read_text()
+    assert _ASKS_OPERATOR in sent
+    assert "Finish the handover tasks." in sent
+    assert not any(directive in sent for directive in _REWORDED)
+
+
+def test_replies_the_fresh_check_finds_not_waiting_stay_supervised(tmp_path, monkeypatch):
+    # Two text-only replies that only promise to continue: nothing blocks the agent on the
+    # operator, so the unfinished work stays under supervision.
+    repo, env = _supervised_repo(tmp_path, monkeypatch, reply="NOT_WAITING")
+    tr = _chain_transcript(tmp_path, ["text", "text"], answer="Understood, continuing with that now.")
     out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
     assert out["decision"] == "block"
 
 
-def test_replies_that_only_promise_to_continue_stay_supervised(tmp_path, monkeypatch):
-    # No question for the operator: nothing shows the agent is blocked on operator input, so
-    # the unfinished work stays under supervision however many times it says it will continue.
+def test_a_rhetorical_question_the_fresh_check_finds_not_waiting_stays_supervised(
+        tmp_path, monkeypatch):
+    # A question mark alone proves nothing: "anything else?" after promising to run the
+    # authorized tests is not waiting on an operator decision.
+    repo, env = _supervised_repo(tmp_path, monkeypatch, reply="NOT_WAITING")
+    tr = _chain_transcript(tmp_path, ["text", "text"],
+                           answer="I'll run the authorized tests next; anything else?")
+    out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
+    assert out["decision"] == "block"
+
+
+def test_one_directive_answered_without_acting_is_still_pushed(tmp_path, monkeypatch):
+    # "Sure, I'll do that" and stopping is the premature stop the supervisor exists to catch.
     repo, env = _supervised_repo(tmp_path, monkeypatch)
-    tr = _chain_transcript(tmp_path, ["text", "text"], answer="Understood, continuing with that now.")
+    tr = _chain_transcript(tmp_path, ["text"])
     out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
     assert out["decision"] == "block"
 
