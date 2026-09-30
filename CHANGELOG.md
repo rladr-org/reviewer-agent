@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [Unreleased]
+
+### Fixed
+
+- The stop supervisor's prompt (shared by both hosts) says only the agent reads a directive. A
+  supervisor that judged a decision to be the operator's sometimes wrote the question or a status
+  summary to the operator ("Should the agent …? … still needs your decision"), and the hook
+  relayed that to the agent as a keep-working directive. Anything addressed to the operator is
+  now a STOP_OK, since the agent's own message already carries it.
+- The git 2.25 CI job runs its container with an init process, so killed orphans are reaped
+  instead of lingering as zombies that the process-tree cancellation tests saw as survivors.
+
 ## [1.3.3]
 
 ### Changed
