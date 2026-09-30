@@ -57,6 +57,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   (`...nothing is left. STOP_OK`) on both hosts, instead of relaying it as a keep-working directive.
   The supervisor prompt now says any other reply keeps the agent working, so a verdict that stopping
   is appropriate must be STOP_OK.
+- Codex: `$reviewer-agent-codex:reviewer-agent on` works in a linked worktree whose
+  `reviewerAgent.md` exists only in the main checkout (an untracked brief). It checks the same
+  brief every review from that worktree reads, instead of refusing with "brief not found".
 - A heredoc delimiter with an unquoted `$` or backtick (`<<$'EOF'`, `<<$(echo EOF)`) no longer hides
   a later commit from either gate: Bash ends it at a different line than the parser did, so every
   line after it had been read as data.

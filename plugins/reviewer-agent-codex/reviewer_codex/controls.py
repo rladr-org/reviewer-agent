@@ -3,7 +3,7 @@
 
 from pathlib import Path
 
-from . import state
+from . import prompts, state
 
 
 DISCLAIMER_PATH = Path(__file__).resolve().parent.parent / "DISCLAIMER.md"
@@ -17,13 +17,13 @@ def apply_feature_action(
     if not root:
         return 1, "{}: ERROR - {} is not a git repository".format(label, Path(path))
     if action == "on":
-        if feature == "reviewer" and not (Path(root) / "reviewerAgent.md").is_file():
-            return 1, "reviewerAgent: ERROR - brief not found at {}".format(
-                Path(root) / "reviewerAgent.md"
-            )
+        # The brief every review reads: a linked worktree falls back to the main checkout's.
+        brief_file = prompts.brief_path(root)
+        if feature == "reviewer" and not brief_file.is_file():
+            return 1, "reviewerAgent: ERROR - brief not found at {}".format(brief_file)
         if feature == "reviewer":
             try:
-                brief = (Path(root) / "reviewerAgent.md").read_text(encoding="utf-8")
+                brief = brief_file.read_text(encoding="utf-8")
             except (OSError, UnicodeError):
                 return 1, "reviewerAgent: ERROR - cannot read reviewerAgent.md"
             if not brief.strip() or "Project-specific guidance (replace this paragraph)" in brief:
