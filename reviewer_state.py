@@ -636,13 +636,36 @@ def _state_stem(key):
     return readable.decode("utf-8", "ignore") + "_" + digest
 
 
+# One stop hook asked git for the same project key 44 times (~35 ms each). Answers are kept
+# briefly, per process: long enough to cover one hook run, short enough never to go stale in a
+# longer-lived caller. The non-repo fallback is never kept -- the directory may become a repo.
+PROJECT_KEY_TTL_SECONDS = 2.0
+_clock = time.monotonic
+_project_keys = {}
+
+
 def canonical_project_key(path):
     """Stable per-PROJECT key shared by the main checkout, every linked worktree, and
     any subdirectory. Git's common dir is shared across a repo's worktrees, so
     dirname(realpath(--git-common-dir)) resolves to the main worktree root from anywhere
     inside the project. Falls back to realpath(path) when `path` is not inside a git repo
     (or git is unavailable), preserving the previous raw-path behavior for non-repos."""
-    raw = os.path.realpath(str(path))
+    lookup = os.path.abspath(str(path))
+    now = _clock()
+    hit = _project_keys.get(lookup)
+    if hit and hit[0] > now:
+        return hit[1]
+    key = _git_project_key(path)
+    if key is not None:
+        if len(_project_keys) > 256:
+            _project_keys.clear()
+        _project_keys[lookup] = (now + PROJECT_KEY_TTL_SECONDS, key)
+        return key
+    return os.path.realpath(str(path))
+
+
+def _git_project_key(path):
+    """The main worktree root git reports for `path`, or None outside a repo / without git."""
     try:
         p = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--git-common-dir"],
@@ -650,12 +673,12 @@ def canonical_project_key(path):
             text=True,
         )
     except FileNotFoundError:
-        return raw
+        return None
     if p.returncode != 0:
-        return raw
+        return None
     common = p.stdout.strip()
     if not common:
-        return raw
+        return None
     if not os.path.isabs(common):
         common = os.path.join(str(path), common)
     return os.path.dirname(os.path.realpath(common))

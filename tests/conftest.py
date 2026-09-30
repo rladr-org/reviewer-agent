@@ -13,6 +13,15 @@ sys.path.insert(0, str(SCRIPTS))
 
 
 @pytest.fixture(autouse=True)
+def _forget_project_keys():
+    # reviewer_state remembers git's project-key answers briefly; no test may see another test's.
+    import reviewer_state
+    reviewer_state._project_keys.clear()
+    yield
+    reviewer_state._project_keys.clear()
+
+
+@pytest.fixture(autouse=True)
 def _never_spend_a_real_reviewer_call(monkeypatch):
     """Point BOTH backend binaries at the test stub for EVERY test.
 
