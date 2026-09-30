@@ -1242,6 +1242,54 @@ def test_canonical_project_key_falls_back_to_realpath_outside_repo(tmp_path):
     assert rl.canonical_project_key(str(plain)) == os.path.realpath(str(plain))
 
 
+def _count_git_runs(monkeypatch):
+    import reviewer_state
+    calls = []
+    real_run = reviewer_state.subprocess.run
+
+    def counting(argv, *a, **k):
+        calls.append(argv)
+        return real_run(argv, *a, **k)
+
+    monkeypatch.setattr(reviewer_state.subprocess, "run", counting)
+    return calls
+
+
+def test_canonical_project_key_asks_git_once_per_short_window(tmp_path, monkeypatch):
+    # One stop hook asked git the same question 44 times (~35 ms each).
+    main = tmp_path / "main"
+    main.mkdir()
+    _make_repo(main)
+    calls = _count_git_runs(monkeypatch)
+    for _ in range(5):
+        assert rl.canonical_project_key(str(main)) == os.path.realpath(str(main))
+    assert len(calls) == 1
+
+
+def test_canonical_project_key_never_remembers_the_non_repo_fallback(tmp_path):
+    # A subdirectory: outside a repo it keys to itself, inside one it keys to the repo root.
+    plain = tmp_path / "plain"
+    sub = plain / "sub"
+    sub.mkdir(parents=True)
+    assert rl.canonical_project_key(str(sub)) == os.path.realpath(str(sub))
+    subprocess.run(["git", "init", "-q", str(plain)], check=True)
+    assert rl.canonical_project_key(str(sub)) == os.path.realpath(str(plain))
+
+
+def test_canonical_project_key_answers_expire(tmp_path, monkeypatch):
+    import reviewer_state
+    main = tmp_path / "main"
+    main.mkdir()
+    _make_repo(main)
+    now = [1000.0]
+    monkeypatch.setattr(reviewer_state, "_clock", lambda: now[0])
+    calls = _count_git_runs(monkeypatch)
+    rl.canonical_project_key(str(main))
+    now[0] += reviewer_state.PROJECT_KEY_TTL_SECONDS + 1
+    rl.canonical_project_key(str(main))
+    assert len(calls) == 2
+
+
 def test_flag_is_keyed_by_canonical_root_across_worktree(home, tmp_path):
     main = tmp_path / "m"
     main.mkdir()
