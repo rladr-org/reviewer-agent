@@ -106,7 +106,12 @@ jobs:
     # a newer git (operator policy).
     name: root and Codex suites on git 2.25 (ubuntu:20.04)
     runs-on: ubuntu-latest
-    container: ubuntu:20.04
+    container:
+      image: ubuntu:20.04
+      # A real init as PID 1. The job container's default PID 1 never reaps orphans, so a
+      # killed grandchild whose parent also died stays a zombie that `kill(pid, 0)` still sees,
+      # and the process-tree cancellation tests failed here while passing on every runner.
+      options: --init
     steps:
       - name: Git before checkout
         # Without git in the container, checkout falls back to a tarball with no .git, and the
