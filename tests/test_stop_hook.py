@@ -696,10 +696,13 @@ _REWORDED = (
 )
 
 
-def _chain_transcript(tmp_path, replies):
+_ASKS_OPERATOR = "Port the feature or document the gap? That choice is yours; still waiting."
+
+
+def _chain_transcript(tmp_path, replies, answer=_ASKS_OPERATOR):
     """A turn that did real work and asked the operator a question, then one supervisor
-    directive per entry of `replies`, each answered with text only ("text") or by acting
-    ("tool")."""
+    directive per entry of `replies`, each answered with `answer` as text only ("text") or after
+    acting ("tool")."""
     events = [
         _event("user", "Finish the handover tasks.", origin={"kind": "human"}),
         _event("assistant", _TOOL_CALL),
@@ -713,7 +716,7 @@ def _chain_transcript(tmp_path, replies):
                              isMeta=True))
         if reply == "tool":
             events += [_event("assistant", _TOOL_CALL), _event("user", _TOOL_RESULT)]
-        events.append(_event("assistant", _text("That choice is the operator's; still waiting.")))
+        events.append(_event("assistant", _text(answer)))
     p = tmp_path / "transcript.jsonl"
     p.write_text("".join(json.dumps(ev) + "\n" for ev in events))
     return str(p)
@@ -746,6 +749,15 @@ def test_one_directive_answered_without_acting_is_still_pushed(tmp_path, monkeyp
     # "Sure, I'll do that" and stopping is the premature stop the supervisor exists to catch.
     repo, env = _supervised_repo(tmp_path, monkeypatch)
     tr = _chain_transcript(tmp_path, ["text"])
+    out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
+    assert out["decision"] == "block"
+
+
+def test_replies_that_only_promise_to_continue_stay_supervised(tmp_path, monkeypatch):
+    # No question for the operator: nothing shows the agent is blocked on operator input, so
+    # the unfinished work stays under supervision however many times it says it will continue.
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    tr = _chain_transcript(tmp_path, ["text", "text"], answer="Understood, continuing with that now.")
     out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
     assert out["decision"] == "block"
 
