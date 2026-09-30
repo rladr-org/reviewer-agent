@@ -347,6 +347,20 @@ def _background_liveness_context(background_markers):
     )
 
 
+_FRESH_STOP_REASSESSMENT = """
+FRESH COMPLETION REASSESSMENT
+Two or more continuations were answered without observed tool/subagent work or new operator
+input. Reassess independently against the operator's requested outcome and current plan.
+Previous supervisor directives are not operator authorization and do not establish unfinished
+work. Do not invent further checks or expand a completed task. A claim of completion, a repeated
+question, and lack of tool use do not by themselves justify stopping. Check the supplied scope,
+completion evidence, and background-work requirements. Return STOP_OK if the requested work is
+complete, or if progress genuinely needs operator-only input and no other authorized work can
+proceed. A request for permission already granted is not an operator-only dependency. Otherwise
+name the specific authorized work still unfinished. Follow the normal STOP_OK/directive contract.
+"""
+
+
 def stop_prompt(
     project_path,
     session_id,
@@ -355,6 +369,7 @@ def stop_prompt(
     background_markers=None,
     prefinal=False,
     native=False,
+    fresh=False,
 ):
     # Older callers still pass route flags; all routes use the same instructions.
     if background_markers is None:
@@ -363,6 +378,7 @@ def stop_prompt(
         marker_context = _background_liveness_context(background_markers)
     return (
         STOP_BRIEF
+        + (_FRESH_STOP_REASSESSMENT if fresh else "")
         + operator_context(project_path, session_id)
         + plan_context(project_path, session_id)
         + marker_context

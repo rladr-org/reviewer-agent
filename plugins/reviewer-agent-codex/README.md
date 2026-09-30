@@ -514,6 +514,27 @@ remaining work as evidence, requires already-authorized and unfinished plan work
 allows a human-decision stop only when the decision is genuinely open and the proposed final message
 presents the decision, options, recommendation, and exact reply needed to unblock progress.
 
+After two consecutive blocking reviews without new operator input or observed tool/subagent
+activity, the next Stop receives a fresh completion reassessment. It replaces that Stop's normal
+resumed review, so there is still one reviewer call per Stop. Further unchanged continuations
+also receive fresh assessments until stopping is allowed, activity resets the chain, or the
+existing nudge cap is reached. The default cap remains ten.
+
+The fresh reviewer receives the current operator context, plan, final response, and background
+markers, plus an instruction to reassess the requested scope independently. It has no previous
+supervisor conversation: earlier directives cannot become operator authorization. It can approve
+completed work or a genuine operator-only dependency; lack of tool use, repeated questions, and
+claims of completion do not automatically permit a stop. Authorized unfinished work still gets a
+continuation. This check uses the configured reviewer model and effort, read-only access, and the
+normal stop-review timeout. The plugin never saves or resumes its disposable thread ID, and the
+check does not replace the persistent stop or commit-reviewer threads.
+
+The chain is stored per project and developer session, using operator/work generations captured
+by lifecycle hooks rather than rollout parsing. Changing only a host turn ID does not reset it.
+An allowed or cancelled stop ends the chain, and session cleanup removes it. Fresh results pass
+through the same cancellation, fail-open failure handling, new-input/work validation, and exact
+background-marker reconciliation as ordinary stop reviews.
+
 ## Blocking calls and cancellation
 
 The commit tool advertises the display title

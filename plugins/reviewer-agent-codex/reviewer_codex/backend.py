@@ -253,6 +253,23 @@ def resume(thread_id, cwd, sandbox, prompt, timeout, cancel_event=None):
     return code, output, error
 
 
+def review_once(cwd, sandbox, prompt, timeout, cancel_event=None):
+    """A disposable ruling: never resume or publish a persistent reviewer thread."""
+    with tempfile.TemporaryDirectory(
+        prefix="reviewer-agent-codex-", dir=stable_temp_root()
+    ) as directory:
+        output_path = Path(directory) / "last-message.txt"
+        code, _events, error = _run(
+            fresh_argv(cwd, sandbox=sandbox, output_path=output_path),
+            timeout=timeout, input_text=prompt, cancel_event=cancel_event,
+        )
+        try:
+            output = output_path.read_text(encoding="utf-8")
+        except OSError:
+            output = ""
+    return code, output, error
+
+
 def review_turn(cwd, root_session_id, role, sandbox, prompt, timeout, cancel_event=None):
     thread_id = state.read_reviewer_session(cwd, root_session_id, role)
     if thread_id:

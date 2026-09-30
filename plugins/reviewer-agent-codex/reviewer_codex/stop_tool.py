@@ -92,7 +92,7 @@ def _complete_allowed_stop(cancel_event, root, ticket, outcome="stop_ok"):
     return "allowed" if allowed else "new_work"
 
 
-def review_stop(cwd, review_token, cancel_event=None, *, native=False):
+def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=False):
     cwd = Path(str(cwd or ""))
     if not cwd.is_absolute():
         return _result("error", "cwd must be an absolute repository path")
@@ -118,21 +118,20 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False):
     ]
     abort_callback_registered = _register_abort_bypass(cancel_event, root, ticket)
     try:
-        code, output, stderr = backend.review_turn(
-            root,
-            session_id,
-            "stop",
-            "read-only",
-            prompts.stop_prompt(
-                root,
-                session_id,
-                ticket["final_message"],
-                background_markers=background_markers,
-                native=native,
-            ),
-            timeout=backend.STOP_REVIEW_TIMEOUT,
-            cancel_event=cancel_event,
+        prompt = prompts.stop_prompt(
+            root, session_id, ticket["final_message"],
+            background_markers=background_markers, native=native, fresh=fresh,
         )
+        if fresh:
+            code, output, stderr = backend.review_once(
+                root, "read-only", prompt, timeout=backend.STOP_REVIEW_TIMEOUT,
+                cancel_event=cancel_event,
+            )
+        else:
+            code, output, stderr = backend.review_turn(
+                root, session_id, "stop", "read-only", prompt,
+                timeout=backend.STOP_REVIEW_TIMEOUT, cancel_event=cancel_event,
+            )
     except Exception as error:
         if cancel_event is not None and cancel_event.is_set():
             return _cancelled(root, ticket, abort_callback_registered)

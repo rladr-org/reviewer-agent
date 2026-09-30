@@ -8,6 +8,7 @@ from . import liveness, state, stop_tool
 
 CONTINUATION_PREFIX = "[reviewer-agent-codex continuation]"
 SHELL_SETTLE_SECONDS = 0.25
+UNCHANGED_BLOCKS_BEFORE_FRESH = 2
 # Module-level seam for the settle delay. Tests patch THIS name, never `time.sleep` itself:
 # patching the global captured CPython's own `subprocess` wait-with-timeout polling (0.0005 s
 # doubling to 0.05 s while a child is still running), which fires only on a slow runner and
@@ -41,15 +42,22 @@ def supervise_hook(data, cancel_event=None):
             or not isinstance(data.get("stop_hook_active", False), bool)
         ):
             return _failed_open()
-        return _supervise(data, cancel_event=cancel_event) or {}
+        result = _supervise(data, cancel_event=cancel_event) or {}
+        if result.get("decision") != "block":
+            state.clear_stop_loop(data["cwd"], state.session_key(data))
+        return result
     except Exception:
         # Keep the fail-open boundary, without exposing a traceback
         # as a continuation or silently reporting approval after a state/backend error.
+        try:
+            state.clear_stop_loop(data["cwd"], state.session_key(data))
+        except Exception:
+            pass  # Cleanup must not defeat the fail-open boundary.
         return _failed_open()
 
 
-def _review_in_hook(cwd, session_id, token, cancel_event):
-    result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True)
+def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
+    result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True, fresh=fresh)
     status = result.get("status")
     if status in ("stop_ok", "failed_open"):
         # No second Stop is needed. Consume now to validate generations and avoid leaving
@@ -99,6 +107,8 @@ def _supervise(data, cancel_event=None):
     if used >= cap:
         return {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}
 
+    generations = state.stop_loop_generations(cwd, session_id)
+    blocks = state.read_stop_loop(cwd, session_id, generations)
     active = _settled_outstanding(cwd, session_id)
     liveness.clear_challenge(cwd, session_id)
     token = state.create_stop_ticket(
@@ -106,4 +116,8 @@ def _supervise(data, cancel_event=None):
         background_markers=active,
     )
     state.bump_nudges(cwd, session_id)
-    return _review_in_hook(cwd, session_id, token, cancel_event)
+    result = _review_in_hook(cwd, session_id, token, cancel_event,
+                             fresh=blocks >= UNCHANGED_BLOCKS_BEFORE_FRESH)
+    if result.get("decision") == "block":
+        state.record_stop_loop(cwd, session_id, generations, blocks + 1)
+    return result

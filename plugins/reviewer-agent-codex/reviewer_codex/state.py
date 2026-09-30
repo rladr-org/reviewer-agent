@@ -1148,6 +1148,43 @@ def nudge_file(path, session_id):
     return state_home() / "nudges" / (name + ".count") if name else None
 
 
+def _stop_loop_file(path, session_id):
+    target = nudge_file(path, session_id)
+    return target.with_suffix(".loop.json") if target else None
+
+
+def stop_loop_generations(path, session_id):
+    # Hook generations survive host-assigned turn-ID changes, and distinguish real
+    # activity from text-only replies without reading Codex rollout files.
+    return [stop_generation(path, session_id, strict_io=True),
+            stop_generation(path, session_id, work=True, strict_io=True)]
+
+
+def read_stop_loop(path, session_id, generations):
+    target = _stop_loop_file(path, session_id)
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+        if value["generations"] == generations:
+            return max(0, int(value["blocks"]))
+    except (AttributeError, OSError, ValueError, KeyError, TypeError):
+        pass
+    return 0
+
+
+def record_stop_loop(path, session_id, generations, blocks):
+    target = _stop_loop_file(path, session_id)
+    if target:
+        # Store the PRE-review generations: activity arriving during a review must
+        # not make that ruling count toward the new task's no-action chain.
+        _atomic_write(target, json.dumps({"generations": generations, "blocks": blocks}) + "\n")
+
+
+def clear_stop_loop(path, session_id):
+    target = _stop_loop_file(path, session_id)
+    if target:
+        target.unlink(missing_ok=True)
+
+
 def read_nudges(project_path, session_id):
     path = nudge_file(project_path, session_id)
     try:
@@ -1157,6 +1194,7 @@ def read_nudges(project_path, session_id):
 
 
 def reset_nudges(project_path, session_id):
+    clear_stop_loop(project_path, session_id)
     path = nudge_file(project_path, session_id)
     if path:
         path.unlink(missing_ok=True)

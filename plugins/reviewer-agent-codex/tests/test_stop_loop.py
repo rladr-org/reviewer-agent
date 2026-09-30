@@ -249,3 +249,15 @@ def test_supervisor_feedback_is_not_new_operator_input(git_repo, reviews, monkey
     assert supervisor.supervise_hook(event(git_repo)) == {}
     assert reviews["calls"][-1]["fresh"]
     assert DIRECTIVE not in reviews["calls"][-1]["prompt"]
+
+
+def test_outer_fail_open_ends_chain(git_repo, reviews, monkeypatch):
+    block_twice(git_repo)
+    with monkeypatch.context() as patch:
+        def unavailable(*args):
+            raise OSError("liveness state unavailable")
+        patch.setattr(supervisor, "_settled_outstanding", unavailable)
+        result = supervisor.supervise_hook(event(git_repo))
+        assert "fail-open" in result["systemMessage"]
+    assert supervisor.supervise_hook(event(git_repo))["decision"] == "block"
+    assert not reviews["calls"][-1]["fresh"]
