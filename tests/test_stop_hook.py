@@ -260,6 +260,26 @@ def test_genuinely_done_stop_ok_allows_stop(tmp_path, monkeypatch):
     assert "STOP_OK -- the task is genuinely complete." in out["systemMessage"]
 
 
+def test_an_approved_stop_records_when_it_was_approved(tmp_path, monkeypatch):
+    # The next review sends the agent's replies from after this point (tests/test_stop_agent_replies.py).
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    tr = _transcript(tmp_path, "Done.")
+    env = {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0"}
+    run_hook(_input(repo, tr), dict(env, FAKE_CODEX_STDOUT="Run the tests first."))
+    assert rl.stop_approval_epoch(repo, "claude-stop") is None
+    # Fail-open allows are not approvals: nobody reviewed those replies.
+    run_hook(_input(repo, tr), dict(env, FAKE_CODEX_STDOUT="STOP_OK", FAKE_CODEX_EXIT="1"))
+    assert rl.stop_approval_epoch(repo, "claude-stop") is None
+    run_hook(_input(repo, tr), dict(env, FAKE_CODEX_STDOUT=""))
+    assert rl.stop_approval_epoch(repo, "claude-stop") is None
+    run_hook(_input(repo, tr), dict(env, FAKE_CODEX_STDOUT="STOP_OK"))
+    assert rl.stop_approval_epoch(repo, "claude-stop") is not None
+
+
 def test_codex_failure_fails_open_allows_stop(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
