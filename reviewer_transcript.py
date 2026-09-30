@@ -168,6 +168,40 @@ def _last_turn_prompt_text(events):
     return ""
 
 
+def directives_answered_without_action(events):
+    """How many of this turn's most recent stop-hook directives the agent answered without a
+    single tool call, counted back from the latest until one it acted on.
+
+    A reply with no tool call means the agent disagreed and said so: re-blocking it cannot make it
+    act, and the supervisor rewords each push, so a wording check never sees a repeat (2026-09-30:
+    nine reworded pushes to make the operator's choice, each answered in text). Only the current
+    turn counts: any other user turn-start (an operator message, a watchdog tick, a task
+    notification) ends the chain. Sidechain (subagent) events are ignored."""
+    count = 0
+    acted = False
+    for ev in reversed(events or []):
+        if ev.get("isSidechain"):
+            continue
+        kind = ev.get("type")
+        content = _event_content(ev)
+        if kind == "assistant":
+            if isinstance(content, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
+                acted = True
+            continue
+        if kind != "user" or ev.get("toolUseResult") is not None:
+            continue
+        if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            continue
+        if not _event_text(ev).lstrip().lower().startswith("stop hook feedback:"):
+            return count  # the turn started here
+        if acted:
+            return count
+        count += 1
+    return count
+
+
 def _event_epoch_seconds(ev):
     """The event's ISO-8601 timestamp as epoch seconds, or None."""
     ts = ev.get("timestamp")

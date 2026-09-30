@@ -419,6 +419,7 @@ from reviewer_backends import (  # noqa: F401
     run_codex_resume_by_id,
     run_codex_streaming_audit,
     run_claude_review,
+    run_fresh_turn,
     run_pi_review,
     serialize_questions,
 )
@@ -441,6 +442,8 @@ from reviewer_stopcontinue import (  # noqa: F401
     GENERIC_CONTINUE,
     clear_directive,
     directive_repeats,
+    is_waiting_verdict,
+    waiting_check_prompt,
     last_directive_file,
     record_directive,
     is_stop_ok,
@@ -477,5 +480,6 @@ from reviewer_transcript import (  # noqa: F401
     _parse_transcript_events,
     _reset_transcript_cache,
     _transcript_events,
+    directives_answered_without_action,
     resolve_transcript_path,
 )

@@ -35,6 +35,10 @@ import reviewer_lib as rl  # noqa: E402
 
 STOP_TIMEOUT = 300
 
+# Consecutive directives the agent may answer without a tool call before its stop is allowed.
+# One is not enough: "sure, I'll do that" followed by a stop is the premature stop to catch.
+DECLINED_DIRECTIVES_LIMIT = 2
+
 # Wall clock for the pre-enactment delay's remaining-budget cap. A seam so a test can drive
 # elapsed time deterministically.
 _hook_now = time.monotonic
@@ -51,6 +55,20 @@ def _turn_start_is_tick(data):
         return rl._last_turn_prompt_text(events).strip().startswith("stopContinueWatchdog tick")
     except Exception:
         return False
+
+
+def _awaits_operator(cwd, key, reply):
+    """Ask a fresh reviewer session whether `reply` is waiting on something only the operator
+    can give. Any failure or unclear answer is False: the stop stays supervised."""
+    try:
+        code, out, err = rl.run_fresh_turn(
+            cwd, rl.reviewer_backend(cwd), rl.waiting_check_prompt(reply))
+    except Exception as exc:  # the check only ever lets a stop through; failing keeps supervision
+        code, out, err = 1, "", repr(exc)
+    waiting = code == 0 and rl.is_waiting_verdict(out)
+    rl.log("[stop] key={} waiting check exit={} verdict={!r} err_tail={!r}".format(
+        key, code, rl.short(out, 80), rl.tail(err, 120)))
+    return waiting
 
 
 def _watchdog_pre_supervision(cwd, claude_sid):
@@ -71,9 +89,10 @@ def _watchdog_pre_supervision(cwd, claude_sid):
 
 
 def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
-    """Runs only on a genuine STOP_OK verdict -- never on KEEP_WORKING, nor on the tool-only /
-    bg-wait / nudge-cap / fail-open allow paths, which take earlier returns and leave the watchdog
-    armed to recover an incomplete or parked strand. Because a tick only reaches here when it
+    """Runs on a genuine STOP_OK verdict, and on a stop allowed because the agent declined the
+    supervisor's directives (it is waiting on the operator, which is idle) -- never on
+    KEEP_WORKING, nor on the tool-only / bg-wait / nudge-cap / fail-open allow paths, which take
+    earlier returns and leave the watchdog armed to recover an incomplete or parked strand. Because a tick only reaches here when it
     genuinely completed (a healthy `ok`, or a recovery that finished its work), it is safe to arm
     `teardown_ready` here when the disarm marker has aged past one interval -- the next tick then
     removes the cron. Then set the disarm marker ONLY if none exists (a heartbeat tick never resets
@@ -165,6 +184,25 @@ def _main(data):
         return 0
 
     transcript_path = rl.resolve_transcript_path(data)
+    # The agent answered the last directives without acting: it disagrees, often because the
+    # pushed work needs a decision only the operator can make. The supervisor rewords each push,
+    # so `directive_repeats` never fires, and being a RESUMED session it cites its own earlier
+    # directive as the operator's ("as already directed") -- asking it again only loops until the
+    # host overrides the hook. So a FRESH session, shown only the agent's reply, decides whether
+    # the agent is really waiting on the operator.
+    if stop_active:
+        declined = rl.directives_answered_without_action(rl._transcript_events(transcript_path))
+        waiting = declined >= DECLINED_DIRECTIVES_LIMIT and _awaits_operator(cwd, key, text)
+        if waiting:
+            rl.log("[stop] key={} agent answered {} declined supervisor directives without "
+                   "acting and is waiting on the operator -> allow stop".format(key, declined))
+            print(json.dumps(rl.info_output(
+                "[stopContinue] the agent answered the supervisor's last {} directives without "
+                "acting on them; letting it stop so you can decide.".format(declined))))
+            rl.clear_directive(cwd, claude_sid)
+            # Waiting on the operator is idle, not stalled: a tick must not re-open the push.
+            _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
+            return 0
     prompt = rl.apply_context(
         rl.STOP_SUPERVISE_PROMPT.format(text),
         cwd,

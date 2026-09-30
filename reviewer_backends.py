@@ -746,6 +746,38 @@ def brief_and_capture_text(proj, text, timeout=BRIEF_CAPTURE_TIMEOUT, on_cancel=
     )
 
 
+def fresh_codex_argv(proj):
+    """A one-turn read-only codex exec in a NEW session that nobody resumes: the prompt comes on
+    stdin (`-`) and the final message on stdout. Low reasoning effort, like the brief."""
+    argv = [
+        codex_bin(), "exec", "-C", str(proj),
+        "--sandbox", "read-only",
+        "-c", APPROVAL_CONFIG,
+        "-c", BRIEF_REASONING_CONFIG,
+        "-c", SERVICE_TIER_CONFIG,
+        "-c", DISABLE_PLUGINS,
+    ]
+    model = codex_model()
+    if model:
+        argv += ["-c", codex_model_config(model)]
+    return argv + ["-"]
+
+
+def run_fresh_turn(proj, backend, prompt, timeout=120):
+    """One reviewer turn in a brand-new session that is never recorded or resumed, so nothing an
+    earlier turn said can leak into this answer. Returns (code, final_text, err)."""
+    data = (prompt or "").encode("utf-8")
+    if backend == "claude":
+        code, out, err = _run(claude_argv(prompt, new_claude_session_id(), effort="low"),
+                              input_bytes=data, timeout=timeout, cwd=str(proj))
+        return code, parse_claude_result(out), err
+    if backend == "pi":
+        code, out, err = _run(pi_argv(prompt, model=reviewer_model("pi"), thinking="low"),
+                              timeout=timeout, cwd=str(proj))
+        return code, parse_pi_final_text(out), err
+    return _run(fresh_codex_argv(proj), input_bytes=data, timeout=timeout)
+
+
 # NOTE: there is deliberately no session-less resume helper. `codex resume --last` attaches
 # to whatever codex session ran most recently on the MACHINE -- which may belong to another
 # Claude session, or to the operator's own codex use -- so a reviewer built on it can silently

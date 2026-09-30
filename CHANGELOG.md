@@ -63,6 +63,13 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   (`...nothing is left. STOP_OK`) on both hosts, instead of relaying it as a keep-working directive.
   The supervisor prompt now says any other reply keeps the agent working, so a verdict that stopping
   is appropriate must be STOP_OK.
+- Claude Code: the stop supervisor can no longer loop an agent that is waiting on an operator
+  decision. It reworded each push (so the repeat check never matched) and cited its own earlier
+  directive as the operator's, until Claude Code overrode the hook at 9 blocks. Now, once the agent
+  has answered two consecutive directives without a tool call, a fresh reviewer session shown only
+  the agent's reply decides whether it is waiting on the operator; if so the stop is allowed and
+  starts the watchdog's idle countdown. The nudge cap default drops from 10 to 8, below the host's
+  9-block limit, so the plugin's own cap ends a runaway loop first.
 - Claude Code: a retry that stages only a file-mode fix (an executable bit) is reported to the
   reviewer as `MODE CHANGED` with the old and new mode, instead of "NOTHING MOVED ... reject
   again". A retry record written before modes were kept gets a full review.

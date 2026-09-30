@@ -325,7 +325,11 @@ The Claude Code plugin provides three per-repository capabilities:
    Fail-open.
 3. **`stopContinue` supervision.** When enabled separately, the selected reviewer checks each
    proposed stop. It returns `STOP_OK` when the task is complete or gives a continuation directive
-   when work remains. This path is fail-open and has a per-turn nudge cap.
+   when work remains. This path is fail-open and has a per-turn nudge cap. On Claude Code, once
+   the agent has answered two consecutive directives without a single tool call, one short
+   check in a fresh reviewer session, shown only the agent's reply, asks whether it is waiting on
+   something only you can give. If so, the stop is allowed and says so, however the supervisor
+   rewords its push.
 
 The Codex package provides the commit gate and stop supervisor. Its blocking MCP calls suspend the
 developer agent until the independent reviewer returns or the call is cancelled.
@@ -988,7 +992,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_DELTA_INLINE_MAX` | `48000` | Re-attempt diff bytes inlined per path; `0` disables. |
 | `REVIEWER_DELTA_INLINE_TOTAL_MAX` | `96000` | Re-attempt diff bytes inlined in total; `0` disables. |
 | `REVIEWER_STOPCONTINUE_EFFORT` | `low` | Stop-supervisor reasoning effort. |
-| `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `10` | Maximum forced continuations per user turn. |
+| `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `8` | Maximum forced continuations per user turn. Kept below Claude Code's own limit of 9 consecutive Stop-hook blocks, which ends the turn with an error. |
 | `REVIEWER_STOP_ROTATE_EVERY` | `6` | Retire the stop supervisor's session after this many completed reviews, bounding the context each resumed review re-sends; `0` never retires it. Also `stopRotateEvery` in `config.json`. Changing the model or effort with `/reviewerModel` also retires this project's reviewer sessions for the current Claude session. |
 | `REVIEWER_STOPCONTINUE_DELAY_SECS` | `0` (max 300) | Seconds to pause before enacting either stopContinue verdict — a continue directive or a stop approval — giving you a window to intervene (Escape). Announced on stderr first, then capped against the remaining Stop-hook budget. Also `stopContinueDelaySecs` in `config.json`. |
 | `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |

@@ -273,9 +273,11 @@ def reset_nudge_count(proj, claude_session_id):
 
 def max_nudges():
     """Cap on forced continuations per turn boundary (env REVIEWER_STOPCONTINUE_MAX_NUDGES,
-    default 10, floored at 1). The supervisor stops nudging past this so a mis-judging
-    reviewer can never loop the agent forever."""
-    return _tunable_int("REVIEWER_STOPCONTINUE_MAX_NUDGES", "maxNudges", 10, 1)
+    default 8, floored at 1). The supervisor stops nudging past this so a mis-judging
+    reviewer can never loop the agent forever. The default stays below Claude Code's own limit
+    of 9 consecutive Stop-hook blocks: at 10 the host always ended the loop first, with an
+    error, and this cap never fired."""
+    return _tunable_int("REVIEWER_STOPCONTINUE_MAX_NUDGES", "maxNudges", 8, 1)
 
 
 # The prompt's own generic continuation. It is identical every time BY DESIGN, so it can never
@@ -302,6 +304,39 @@ def _content_words(normalized):
     """The directive's content words IN ORDER: order carries meaning ("A before B")."""
     words = (w.strip(".,;:!?()[]'\"`-/") for w in normalized.split())
     return [w for w in words if w and w not in _FILLER_WORDS]
+
+
+# Asked in a FRESH session once the agent has answered the supervisor's directives without acting.
+# It sees the agent's reply and nothing else. Not the directives: the resumed supervisor cited its
+# own earlier ones as the operator's decision (2026-09-30). Not the operator's message either:
+# measured live on that loop, "if they are in HANDOVER.md they are approved" made this check call
+# a genuine port-or-document question NOT_WAITING, while the reply alone was WAITING (2 of 2).
+# One narrow question, one word back.
+WAITING_CHECK_PROMPT = """\
+Answer one question about a coding agent's message to its operator, with exactly one word.
+
+WAITING: the message asks the operator for a decision, an authorization, credentials or
+information that only the operator can give, and the agent cannot proceed until it has it.
+
+NOT_WAITING: anything else. For example, the agent promises or describes work it can do itself;
+it offers to continue ("shall I?", "anything else?"); or it asks something it could settle itself.
+
+----- THE AGENT'S MESSAGE -----
+{reply}
+----- END -----
+
+Reply WAITING or NOT_WAITING, and nothing else."""
+
+
+def waiting_check_prompt(reply_text, limit=6000):
+    return WAITING_CHECK_PROMPT.format(reply=(reply_text or "")[-limit:])
+
+
+def is_waiting_verdict(reply):
+    """True only for a reply whose first word is WAITING (markdown and punctuation ignored).
+    Anything else, including NOT_WAITING, an empty reply or prose, keeps supervision on."""
+    words = (reply or "").split()
+    return bool(words) and re.sub(r"[^A-Z_]", "", words[0].upper()) == "WAITING"
 
 
 def directive_repeats(proj, claude_session_id, directive, threshold=0.85):

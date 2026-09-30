@@ -44,7 +44,7 @@ def test_defaults_apply_with_no_config_file(tmp_path, monkeypatch):
     assert rl.commit_review_timeout() == 900
     assert rl.first_output_timeout() == 30
     assert rl.idle_timeout() == 900
-    assert rl.max_nudges() == 10
+    assert rl.max_nudges() == 8
     assert rl.stopcontinue_effort() == "low"
     assert rl.reviewer_session_audit_limit() == 3
 
@@ -224,7 +224,7 @@ def test_malformed_config_falls_back_to_defaults(tmp_path, monkeypatch):
     p = tmp_path / "config.json"
     p.write_text('{"maxNudges": 3,}', encoding="utf-8")
     monkeypatch.setenv("REVIEWER_CONFIG_FILE", str(p))
-    assert rl.max_nudges() == 10
+    assert rl.max_nudges() == 8
     assert rl._bg_shell_stale_secs() == 12 * 3600
 
 
@@ -232,7 +232,7 @@ def test_nonsense_values_fall_back_to_defaults(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     _cfg(tmp_path, monkeypatch, {"bgShellStaleSecs": "not-a-number", "maxNudges": None})
     assert rl._bg_shell_stale_secs() == 12 * 3600
-    assert rl.max_nudges() == 10
+    assert rl.max_nudges() == 8
 
 
 def test_invalid_model_in_config_is_ignored(tmp_path, monkeypatch):

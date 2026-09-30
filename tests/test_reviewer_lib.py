@@ -1569,13 +1569,13 @@ def test_nudge_count_read_bump_reset(home):
 
 def test_max_nudges_default_floor_and_env_override(monkeypatch):
     monkeypatch.delenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", raising=False)
-    assert rl.max_nudges() == 10
+    assert rl.max_nudges() == 8
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", "3")
     assert rl.max_nudges() == 3
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", "0")
     assert rl.max_nudges() == 1                    # floored at 1
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", "garbage")
-    assert rl.max_nudges() == 10                   # falls back on non-int
+    assert rl.max_nudges() == 8                   # falls back on non-int
 
 
 def test_stopcontinue_effort_default_low_and_env_override(monkeypatch):
