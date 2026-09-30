@@ -6,7 +6,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from . import backend, cancellation, prompts, state
+from . import backend, cancellation, ignore, prompts, state
 from .git import git_head, run_commit, staged_files, staged_tree
 
 
@@ -139,7 +139,7 @@ def _delta(cwd, before_sha, path):
     return result.stdout if result.returncode == 0 else None
 
 
-def _change_block(cwd, session_id, reviewer_id, current):
+def _change_block(cwd, session_id, reviewer_id, current, ignore_matcher=None):
     previous = state.read_commit_cursor(cwd, session_id)
     if not previous:
         return ""
@@ -171,6 +171,10 @@ def _change_block(cwd, session_id, reviewer_id, current):
         lines.append("CHANGED: " + name)
         previous_identity = before[name].split()
         lines.append("Index identity: {} -> {}".format(before[name], current[name]))
+        if ignore_matcher is not None and ignore_matcher.matches(name):
+            lines.append("SKIM: retry delta omitted per reviewerAgent-ignore.md; "
+                         "check intent, schema, naming and location; fetch if suspicious.")
+            continue
         old_sha = previous_identity[-1]
         delta = _delta(cwd, old_sha, name)
         size = len((delta or "").encode("utf-8", "replace"))
@@ -239,12 +243,31 @@ def _review_staged(root, session_id, message, options, cancel_event):
     snapshot = _stage_snapshot(root)
     if not reviewed_tree or snapshot is None:
         return _result("error", "could not fingerprint the staged index")
+    matcher, prose, error = ignore.parse_reviewer_ignore(root, snapshot)
+    if error:
+        counts = {"ignore_matched_files": 0, "ignore_matched_lines": 0}
+        state.record_review_outcome(root, session_id, state.OUTCOME_FAILED, error,
+                                    ignore_counts=counts)
+        return _result("error", error + " — fix or remove the malformed rules and retry", **counts)
+    files, lines = ignore.matched_counts(root, matcher)
+    counts = {"ignore_matched_files": files, "ignore_matched_lines": lines}
+    result = _review_with_ignore(root, session_id, message, options, cancel_event,
+                                reviewed_tree, reviewed_head, snapshot, matcher, prose, counts)
+    result.update(counts)
+    return result
+
+
+def _review_with_ignore(root, session_id, message, options, cancel_event,
+                        reviewed_tree, reviewed_head, snapshot, matcher, prose, counts):
+    def record_outcome(*args, **kwargs):
+        state.record_review_outcome(*args, ignore_counts=counts, **kwargs)
+
     review_timeout = state.commit_review_timeout()
     retry_audit = state.commit_retry_pending(root, session_id)
     try:
         reviewer_id = state.read_reviewer_session(root, session_id, "reviewer")
         if reviewer_id:
-            change_block = _change_block(root, session_id, reviewer_id, snapshot)
+            change_block = _change_block(root, session_id, reviewer_id, snapshot, matcher)
             prompt = change_block
         else:
             change_block = ""
@@ -256,6 +279,12 @@ def _review_staged(root, session_id, message, options, cancel_event):
         prompt += prompts.commit_prompt(
             root, session_id, include_previous=bool(reviewer_id) or retry_audit
         )
+        # Keep the mandatory audit contract ahead of repository-controlled guidance,
+        # matching the Claude host's per-commit prompt ordering.
+        prompt += ignore.channel_a_block(prose)
+        if not prose:
+            # A resumed child may remember rules from a previous, now-deleted file.
+            prompt += "No effective reviewer-ignore guidance for this audit; fully review all paths.\n\n"
         if cancel_event is None:
             code, output, stderr = backend.review_turn(
                 root,
@@ -276,14 +305,14 @@ def _review_staged(root, session_id, message, options, cancel_event):
                 cancel_event=cancel_event,
             )
     except Exception as error:
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_FAILED,
             "the review raised before returning: {}".format(error),
         )
         return _result("error", "review failed unexpectedly: {}".format(error))
 
     if code == backend.CANCELLED_EXIT or (cancel_event is not None and cancel_event.is_set()):
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_CANCELLED,
             "the review was cancelled before it returned a verdict",
         )
@@ -310,7 +339,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
         detail = stderr.strip() or "reviewer timed out"
         if state.model_rejection_detail(stderr):
             detail += "\n\n" + state.model_rejection_message(stderr)
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_TIMEOUT,
             "the review exceeded the {}s budget: {}".format(review_timeout, detail),
         )
@@ -333,7 +362,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
             "reviewer could not inspect the staged changes; restore reviewer access and "
             "retry the review. No commit was made."
         )
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_FAILED, detail, verdict=output,
         )
         return _result("error", detail, review=output.strip())
@@ -346,7 +375,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
             state.model_rejection_message(stderr)
             if state.model_rejection_detail(stderr) else ""
         )
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_FAILED,
             "exit {}: {}{}".format(code, detail, ("\n\n" + diagnosis) if diagnosis else ""),
         )
@@ -354,7 +383,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
             return _result("error", "review could not run. {}".format(diagnosis))
         return _result("error", "review failed (exit {}): {}".format(code, detail))
     if staged_tree(root) != reviewed_tree:
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_DISCARDED,
             "the staged set changed while it was being reviewed, so this ruling judged a "
             "different set than the one now staged and was not applied",
@@ -366,7 +395,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
         )
     reviewer_id = state.read_reviewer_session(root, session_id, "reviewer")
     if not reviewer_id:
-        state.record_review_outcome(
+        record_outcome(
             root, session_id, state.OUTCOME_DISCARDED,
             "no reviewer thread was captured, so this ruling could not be attributed to a "
             "reviewer session and was not applied",
@@ -374,7 +403,7 @@ def _review_staged(root, session_id, message, options, cancel_event):
         )
         return _result("error", "reviewer startup failed: no reviewer thread was captured")
 
-    review_path = state.save_review(root, session_id, output, history=True)
+    review_path = state.save_review(root, session_id, output, history=True, ignore_counts=counts)
     state.write_commit_cursor(
         root,
         session_id,

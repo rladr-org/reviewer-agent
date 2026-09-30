@@ -1287,7 +1287,7 @@ OUTCOME_FAILED = "FAILED"
 OUTCOME_DISCARDED = "DISCARDED"
 
 
-def record_review_outcome(path, session_id, outcome, detail="", verdict=None):
+def record_review_outcome(path, session_id, outcome, detail="", verdict=None, ignore_counts=None):
     """Append one labelled non-verdict outcome to this project's retained history."""
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     text = str(verdict or "").strip()
@@ -1312,6 +1312,7 @@ def record_review_outcome(path, session_id, outcome, detail="", verdict=None):
         "detail:\n{}\n"
     ).format(outcome, stamp, str(session_id or "unidentified"), explanation,
              (detail or "").strip() or "(none)")
+    body += _ignore_count_summary(ignore_counts)
     if text:
         body += "\nunapplied verdict:\n{}\n".format(text)
     try:
@@ -1360,13 +1361,20 @@ def clear_review_history(path):
     return removed
 
 
-def save_review(path, session_id, text, history=False):
+def _ignore_count_summary(counts):
+    if counts is None:
+        return ""
+    return "\nignore_matched_files={} ignore_matched_lines={}\n".format(
+        counts["ignore_matched_files"], counts["ignore_matched_lines"])
+
+
+def save_review(path, session_id, text, history=False, ignore_counts=None):
     target = last_review_file(path, session_id)
     body = str(text or "")
     with _mutation_lock():
         _atomic_write(target, body)
         if history:
-            _append_review_history(path, session_id, body)
+            _append_review_history(path, session_id, body + _ignore_count_summary(ignore_counts))
     return target
 
 
