@@ -9,6 +9,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
+- Codex: one hook or tool call asks git for the project root and key once, not ~44 times
+  (~35 ms each); the answers are kept for two seconds per process, and a failed lookup is never
+  kept. A stop review's slowest test went from 1.9 s to under 0.3 s.
 - Inline-script and pipeline checks distinguish `merge-base` and `commit-graph` from
   commit-producing commands; the Claude inline-script check also covers `am` and `pull`.
 - The Codex installer selects and remembers a compatible Python for both hooks and MCP, so

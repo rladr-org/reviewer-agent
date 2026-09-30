@@ -318,19 +318,45 @@ def _git(path, *args):
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+# One stop review asked git the same two questions ~44 times (~35 ms each). Answers are kept
+# briefly, per process: long enough to cover one hook or tool call, short enough that the
+# long-lived MCP server never serves a stale mapping. Failed lookups are never kept.
+PROJECT_LOOKUP_TTL_SECONDS = 2.0
+_clock = time.monotonic
+_project_lookups = {}
+
+
+def _remembered(kind, path, compute):
+    key = (kind, os.path.abspath(str(path)))
+    now = _clock()
+    hit = _project_lookups.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    value = compute()
+    if value:
+        if len(_project_lookups) > 256:
+            _project_lookups.clear()
+        _project_lookups[key] = (now + PROJECT_LOOKUP_TTL_SECONDS, value)
+    return value
+
+
 def project_root(path):
-    root = _git(path, "rev-parse", "--show-toplevel")
-    return os.path.realpath(root) if root else None
+    def compute():
+        root = _git(path, "rev-parse", "--show-toplevel")
+        return os.path.realpath(root) if root else None
+    return _remembered("root", path, compute)
 
 
 def project_key(path):
-    root = project_root(path)
-    if not root:
-        return None
-    # Older Git echoes unknown rev-parse flags with exit zero. Plain common-dir
-    # works there too, but its relative result is anchored at Git's cwd, not ours.
-    common = _git(root, "rev-parse", "--git-common-dir")
-    return os.path.realpath(os.path.join(root, common)) if common else root
+    def compute():
+        root = project_root(path)
+        if not root:
+            return None
+        # Older Git echoes unknown rev-parse flags with exit zero. Plain common-dir
+        # works there too, but its relative result is anchored at Git's cwd, not ours.
+        common = _git(root, "rev-parse", "--git-common-dir")
+        return os.path.realpath(os.path.join(root, common)) if common else root
+    return _remembered("key", path, compute)
 
 
 def _project_stem(path):

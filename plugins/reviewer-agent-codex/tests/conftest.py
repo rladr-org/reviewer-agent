@@ -3,6 +3,16 @@ import subprocess
 
 import pytest
 
+from reviewer_codex import state
+
+
+@pytest.fixture(autouse=True)
+def _forget_project_lookups():
+    # state remembers git's project-root answers briefly; no test may see another test's.
+    state._project_lookups.clear()
+    yield
+    state._project_lookups.clear()
+
 
 @pytest.fixture
 def git_repo(tmp_path):
