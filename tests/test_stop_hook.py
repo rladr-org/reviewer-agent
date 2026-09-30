@@ -764,14 +764,17 @@ def test_the_waiting_check_is_a_fresh_session_not_the_supervisors(tmp_path, monk
     assert "resume" not in calls[0] and "sid-stop" not in calls[0]
 
 
-def test_the_waiting_check_sees_the_reply_and_the_operator_not_the_directives(
-        tmp_path, monkeypatch):
+def test_the_waiting_check_sees_only_the_agents_reply(tmp_path, monkeypatch):
+    # Not the directives, and not the operator's message either: measured live on the real
+    # loop, "if they are in HANDOVER.md they are approved" made a fresh check call a genuine
+    # port-or-document question NOT_WAITING (the supervisor's own misreading); without it the
+    # same reply was WAITING, 2 of 2.
     repo, env = _supervised_repo(tmp_path, monkeypatch, reply="WAITING")
     tr = _chain_transcript(tmp_path, ["text", "text"])
     run_hook(_input(repo, tr, stop_hook_active=True), env)
     sent = (tmp_path / "stdin.txt").read_text()
     assert _ASKS_OPERATOR in sent
-    assert "Finish the handover tasks." in sent
+    assert "Finish the handover tasks." not in sent
     assert not any(directive in sent for directive in _REWORDED)
 
 
