@@ -211,6 +211,46 @@ def test_project_key_with_old_git_resolves_common_dir_against_repo(
     assert state.project_key(git_repo) == str((git_repo / ".git").resolve())
 
 
+def _counting_git(monkeypatch):
+    calls = []
+    real_git = state._git
+
+    def counting(path, *args):
+        calls.append(args)
+        return real_git(path, *args)
+
+    monkeypatch.setattr(state, "_git", counting)
+    return calls
+
+
+def test_repeated_project_lookups_reuse_one_git_query_per_question(git_repo, monkeypatch):
+    # One stop review asked git the same two questions ~44 times (~35 ms each).
+    calls = _counting_git(monkeypatch)
+    for _ in range(5):
+        state.project_root(git_repo)
+        state.project_key(git_repo)
+    assert len(calls) == 2
+
+
+def test_a_failed_project_lookup_is_not_remembered(tmp_path, monkeypatch):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert state.project_root(plain) is None
+    subprocess.run(["git", "init", "-q", str(plain)], check=True)
+    assert state.project_root(plain) == str(plain.resolve())
+
+
+def test_project_lookups_expire(git_repo, monkeypatch):
+    # The Codex MCP server is long-lived: a remembered answer must not outlive one tool call.
+    now = [1000.0]
+    monkeypatch.setattr(state, "_clock", lambda: now[0])
+    calls = _counting_git(monkeypatch)
+    state.project_root(git_repo)
+    now[0] += state.PROJECT_LOOKUP_TTL_SECONDS + 1
+    state.project_root(git_repo)
+    assert len(calls) == 2
+
+
 def test_project_key_uses_plain_common_dir_for_linked_worktree(
     git_repo, tmp_path, monkeypatch
 ):
