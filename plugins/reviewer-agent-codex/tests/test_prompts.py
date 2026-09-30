@@ -275,3 +275,26 @@ def test_a_linked_worktrees_own_brief_wins(git_repo, isolated_state):
     assert prompts.project_brief(worktree) == "worktree brief"
     assert str((worktree / "reviewerAgent.md").resolve()) in prompts.commit_capsule(
         worktree, "root-session")
+
+
+def test_turning_the_reviewer_on_in_a_linked_worktree_accepts_the_main_checkouts_brief(
+        git_repo, isolated_state):
+    # `on` looked for reviewerAgent.md only in the worktree's own root, so it refused with
+    # "brief not found" although every review from that worktree reads the main checkout's.
+    from reviewer_codex import controls
+    (git_repo / "reviewerAgent.md").write_text("Project rule: check units.\n", encoding="utf-8")
+    worktree = _linked_worktree(git_repo)
+    code, message = controls.apply_feature_action(worktree, "reviewer", "on", accept_risk=True)
+    assert code == 0, message
+    assert state.feature_enabled(git_repo, "reviewer")
+
+
+def test_turning_the_reviewer_on_in_a_linked_worktree_still_rejects_the_template_brief(
+        git_repo, isolated_state):
+    from reviewer_codex import controls
+    (git_repo / "reviewerAgent.md").write_text(
+        "Project-specific guidance (replace this paragraph)\n", encoding="utf-8")
+    worktree = _linked_worktree(git_repo)
+    code, message = controls.apply_feature_action(worktree, "reviewer", "on", accept_risk=True)
+    assert code == 1
+    assert "template placeholder" in message
