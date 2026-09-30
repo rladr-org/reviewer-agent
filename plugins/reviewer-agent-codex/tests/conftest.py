@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
+import shutil
 import subprocess
 
 import pytest
@@ -14,9 +15,10 @@ def _forget_project_lookups():
     state._project_lookups.clear()
 
 
-@pytest.fixture
-def git_repo(tmp_path):
-    repo = tmp_path / "repo"
+@pytest.fixture(scope="session")
+def _template_repo(tmp_path_factory):
+    # Built once per run; each test gets a copy (five git processes cost ~0.3 s per test).
+    repo = tmp_path_factory.mktemp("template") / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True)
@@ -24,6 +26,13 @@ def git_repo(tmp_path):
     (repo / "base.txt").write_text("base\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "base.txt"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "initial"], check=True)
+    return repo
+
+
+@pytest.fixture
+def git_repo(tmp_path, _template_repo):
+    repo = tmp_path / "repo"
+    shutil.copytree(str(_template_repo), str(repo), symlinks=True)
     return repo
 
 
