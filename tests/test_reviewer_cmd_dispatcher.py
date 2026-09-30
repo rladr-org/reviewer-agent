@@ -187,3 +187,34 @@ def test_skill_wiring_dispatcher_bangs_and_directive_sentinel():
     assert not any(ln.strip().startswith("!`") for ln in d.splitlines()), \
         "reviewerDirective must not use a bang pre-exec (it moves to the hook)"
     assert SENTINEL in d and "$ARGUMENTS" in d
+
+
+# Claude Code hands UserPromptSubmit the prompt AS TYPED -- `/reviewer-agent:reviewerDirective list`
+# (verified on 2.1.285 with a hook that dumped its input) -- before the skill body that carries the
+# sentinel is expanded. Matching only the sentinel meant the command never ran.
+@pytest.mark.parametrize("command", ["/reviewer-agent:reviewerDirective", "/reviewerDirective"])
+def test_directive_hook_handles_the_typed_slash_command(tmp_path, monkeypatch, command):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    pwned = tmp_path / "PWNED_marker"
+    text = '$(touch {}) plan -> commit (green) and a "quote"'.format(pwned)
+    p = run_ups(repo, command + " " + text, home)
+    assert p.returncode == 0, p.stderr
+    assert not pwned.exists(), "shell command substitution executed -- not injection-proof"
+    assert [d["text"] for d in rl.load_directives(repo)] == [text]
+    out = json.loads(p.stdout or "{}")
+    assert out.get("decision") == "block", out
+
+    listed = json.loads(run_ups(repo, command + " list", home).stdout or "{}")
+    assert listed.get("decision") == "block", listed
+    assert text in listed.get("reason", ""), listed
+
+
+def test_directive_hook_ignores_a_longer_command_name(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    p = run_ups(repo, "/reviewerDirectives list", home)
+    assert json.loads(p.stdout or "{}").get("decision") != "block"
+    assert rl.load_directives(repo) == []

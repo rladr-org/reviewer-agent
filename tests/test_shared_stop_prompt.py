@@ -71,3 +71,11 @@ def test_the_prompt_treats_operator_only_steps_as_a_hand_off():
     text = (ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8")
     assert "OPERATOR-ONLY STEPS" in text
     assert "slash command" in text
+
+
+def test_the_output_rule_says_any_other_reply_keeps_the_agent_working():
+    # Observed 2026-09-29: the supervisor wrote "stopping is appropriate" without the sentinel, and
+    # the hook relayed that to the agent as a keep-working directive.
+    text = (ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8")
+    assert "instruction to keep working" in text
+    assert "stopping is appropriate" in text

@@ -2340,3 +2340,25 @@ def test_stop_ok_position_first_and_none():
     assert rl.stop_ok_position("") is None
     assert rl.stop_ok_position("   \n\n  ") is None
     assert rl.stop_ok_position(None) is None
+
+
+# Observed 2026-09-29: the supervisor ended its reasoning with the verdict as its own final sentence
+# on the same line, and the hook relayed a permitted stop to the agent as "KEEP WORKING".
+_SAME_LINE_STOP_OK = (
+    "The diagnosis request is complete. The proposed final message reports no further authorized "
+    "work; it only offers an unrequested code fix. STOP_OK"
+)
+
+
+def test_is_stop_ok_accepts_the_sentinel_as_the_final_sentence_of_the_last_line():
+    assert rl.is_stop_ok(_SAME_LINE_STOP_OK) is True
+    assert rl.stop_ok_position(_SAME_LINE_STOP_OK) == "last"
+    assert rl.is_stop_ok("Nothing is left to do. **STOP_OK**.") is True
+    assert rl.is_stop_ok("Nothing is left to do: STOP_OK") is True
+    assert rl.is_stop_ok("Earlier reasoning.\n\nNothing is left to do. STOP_OK!") is True
+
+
+def test_is_stop_ok_sentinel_mentioned_inside_a_directive_sentence_is_not_a_permit():
+    assert rl.is_stop_ok("Run the tests first, and only then reply STOP_OK") is False
+    assert rl.is_stop_ok("Fix the linter errors before STOP_OK.") is False
+    assert rl.is_stop_ok("Nothing is left to do. STOP_OKAY") is False
