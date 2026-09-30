@@ -312,6 +312,43 @@ Commit output is captured in temporary files, so a repository hook's background 
 cannot keep the commit waiting for output pipes to close. Hooks remain responsible for helpers
 they detach after exiting; the plugin does not launch those helpers.
 
+For generated data, an optional repository-root `reviewerAgent-ignore.md` supplies the same
+skim guidance as the Claude Code plugin. Combine explanatory Markdown with fenced patterns:
+
+````markdown
+# Generated records
+Check schema and intent; record correctness is checked upstream.
+
+```reviewer-ignore
+data/**/*.jsonl
+outputs/*.csv
+```
+````
+
+Patterns support `*`, whole-segment `**`, `?`, character classes such as `[a-z]`, a leading
+`/` to anchor at the repository root, and a trailing `/` for a subtree. Unanchored patterns
+can match at any depth. Blank lines and `#` comments inside the fences are ignored; multiple
+fences form a union. Negation, backslash escapes, embedded `**`, and negated character classes
+are rejected. Malformed patterns or invalid UTF-8 block the commit before the reviewer runs.
+
+The effective file comes from the index, never an unstaged or untracked working copy. If the
+file is staged, the previous HEAD version supplies this audit's rules and prose; the staged
+candidate is still validated. New or changed rules apply only after that commit lands. First
+introduction supplies no exclusions, deletion keeps the old rules for that commit, and the
+root ignore file itself is always fully reviewed even under a `**` pattern.
+
+Every audit, including a resumed review, receives the current effective guidance. Matched
+paths are skimmed for intent, schema, naming and location; the reviewer can fetch suspicious
+content with `git diff --cached -- <path>`. Matching retry deltas are omitted before fetching
+or inlining their bytes. Paths remain in the retry inventory and the full staged fingerprint;
+even an entirely matched staged set still requires approval and is committed in full.
+Completed audits and operational outcomes after ignore parsing include `ignore_matched_files`
+and `ignore_matched_lines` in the MCP result and retained history. Lines count additions plus
+deletions, binary files contribute zero lines, and absent rules produce zero counts. Statistics
+use separate deletion/addition entries for renames. Malformed-rule failures record zero counts.
+The latest-verdict file retains only the
+reviewer's verdict so statistics do not become retry findings.
+
 Every completed commit audit is written to two durable locations under the state directory. A
 stable per-project, per-developer-session file holds the latest verdict for retry prompts; the MCP
 result prints that path before the inline verdict so it remains visible when Codex collapses or

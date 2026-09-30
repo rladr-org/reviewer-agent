@@ -167,3 +167,30 @@ def test_absent_file_has_zero_counts(git_repo, reviewer):
     result = audit(git_repo)
     assert "[reviewerAgent-ignore.md]" not in reviewer[0]
     assert result["ignore_matched_files"] == result["ignore_matched_lines"] == 0
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_mandatory_audit_contract_precedes_ignore_guidance(git_repo, reviewer, configured):
+    from reviewer_codex import prompts
+
+    if configured:
+        configure(git_repo)
+    stage(git_repo, "source.py", "a = 1\n")
+    for _ in range(2):
+        audit(git_repo)
+        prompt = reviewer[-1]
+        guidance = ("[reviewerAgent-ignore.md]" if configured else
+                    "No effective reviewer-ignore guidance for this audit")
+        assert prompt.index(prompts.COMMIT_PROMPT) < prompt.index(guidance)
+
+
+def test_malformed_ignore_outcome_has_zero_counts_in_result_and_history(git_repo, reviewer):
+    stage(git_repo, IGNORE, "```reviewer-ignore\n!bad\n```\n")
+    result = audit(git_repo)
+    assert result["status"] == "error"
+    assert reviewer == []
+    assert result["ignore_matched_files"] == result["ignore_matched_lines"] == 0
+    history = state.review_history(git_repo)[-1].read_text()
+    assert "OUTCOME: FAILED" in history
+    assert "ignore_matched_files=0" in history
+    assert "ignore_matched_lines=0" in history

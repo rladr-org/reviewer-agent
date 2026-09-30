@@ -198,3 +198,11 @@ def test_pattern_error_carries_lineno_and_pattern():
     assert ei.value.lineno == 42
     assert ei.value.pattern == "!bad"
     assert ei.value.reason      # non-empty explanation
+
+
+def test_character_class_range_cannot_cross_a_path_separator():
+    matcher = IgnoreMatcher([(1, "a[,-9]b")])
+    assert matcher.matches("a.b")
+    assert matcher.matches("a9b")
+    assert not matcher.matches("a/b")
+    assert not matcher.matches("nested/a/b")

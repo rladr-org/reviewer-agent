@@ -170,9 +170,10 @@ def test_each_completed_review_is_retained_in_immutable_history(
         encoding="utf-8"
     ) == second["review"]
     history = sorted((isolated_state / "reviews").glob("*.history/*.txt"))
+    counts = "\nignore_matched_files=0 ignore_matched_lines=0\n"
     assert [path.read_text(encoding="utf-8") for path in history] == [
-        first["review"],
-        second["review"],
+        first["review"] + counts,
+        second["review"] + counts,
     ]
 
 
