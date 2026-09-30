@@ -50,6 +50,13 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   target cannot hide a later protected target in a compound command.
 - Both parsers detect commits in Bash's `function name { ...; }` form and honor backslash or
   mixed quoting in heredoc delimiters.
+- `/reviewerDirective` works again: Claude Code passes the UserPromptSubmit hook the typed command
+  (`/reviewer-agent:reviewerDirective list`), not the expanded skill text the hook looked for, so
+  directives were never recorded or listed. The hook now recognizes the typed command.
+- The stop hook honors a supervisor verdict that ends with STOP_OK as its own final sentence
+  (`...nothing is left. STOP_OK`) on both hosts, instead of relaying it as a keep-working directive.
+  The supervisor prompt now says any other reply keeps the agent working, so a verdict that stopping
+  is appropriate must be STOP_OK.
 - A heredoc delimiter with an unquoted `$` or backtick (`<<$'EOF'`, `<<$(echo EOF)`) no longer hides
   a later commit from either gate: Bash ends it at a different line than the parser did, so every
   line after it had been read as data.

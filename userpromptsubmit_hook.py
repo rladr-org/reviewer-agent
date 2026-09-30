@@ -13,6 +13,7 @@ Fail-open: any error emits nothing (a missing re-arm just leaves the SessionStar
 prompt to recover it -- it never wedges the turn). See docs/plans/watchdog_auto_shutoff.md.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -26,16 +27,27 @@ import directive_toggle  # noqa: E402
 # still a prompt-injection vector against the reviewer once recorded -- a separate, unchanged
 # concern, per SECURITY.md.)
 DIRECTIVE_SENTINEL = "<<reviewer-agent directive>>"
+# Claude Code hands this hook the prompt AS TYPED (`/reviewer-agent:reviewerDirective list`), before
+# the skill body carrying the sentinel is expanded (verified on 2.1.285), so the typed command is
+# the form that actually arrives. It is read from the same JSON field, so it stays injection-proof.
+_DIRECTIVE_COMMAND = re.compile(r"\A\s*/(?:reviewer-agent:)?reviewerDirective(?=\s|\Z)")
+
+
+def _directive_remainder(prompt):
+    """The directive arguments when `prompt` invokes reviewerDirective, else None."""
+    if prompt.lstrip().startswith(DIRECTIVE_SENTINEL):
+        return prompt.split(DIRECTIVE_SENTINEL, 1)[1].strip()
+    match = _DIRECTIVE_COMMAND.match(prompt)
+    return prompt[match.end():].strip() if match else None
 
 
 def _directive_block(data, cwd):
     """If the prompt is a reviewerDirective invocation, record it under the payload cwd (the
     AUTHORITATIVE project, not the hook process's own directory) and return a top-level blocking
     result so the model turn is suppressed and the outcome is shown; else None."""
-    prompt = str(data.get("prompt") or "")
-    if not prompt.lstrip().startswith(DIRECTIVE_SENTINEL):
+    remainder = _directive_remainder(str(data.get("prompt") or ""))
+    if remainder is None:
         return None
-    remainder = prompt.split(DIRECTIVE_SENTINEL, 1)[1].strip()
     toks = remainder.split()
     verb = toks[0].lower() if toks else ""
     is_command = (

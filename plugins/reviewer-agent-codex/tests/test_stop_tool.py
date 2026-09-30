@@ -548,6 +548,8 @@ def test_stop_ok_as_the_final_sentence_of_the_last_line_is_a_permit():
         "authorized work; it only offers an unrequested code fix. STOP_OK"
     )
     assert stop_tool._stop_ok(observed)
-    assert stop_tool._stop_ok("Nothing is left to do: STOP_OK.")
+    assert stop_tool._stop_ok("Nothing is left to do. STOP_OK.")
     assert not stop_tool._stop_ok("Run the tests first, and only then reply STOP_OK")
     assert not stop_tool._stop_ok("Nothing is left to do. STOP_OKAY")
+    assert not stop_tool._stop_ok("Run tests first; then reply: STOP_OK")
+    assert not stop_tool._stop_ok("Fix the lint errors; STOP_OK")

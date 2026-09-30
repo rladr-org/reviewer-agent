@@ -6,16 +6,18 @@ from pathlib import Path
 
 from . import backend, cancellation, liveness, prompts, state
 
-# The sentinel as a whole TRAILING line: STOP_OK alone, tolerating only markdown emphasis /
-# backticks around it and trailing sentence punctuation. Exact token, never a prefix (STOP_OKAY
-# is not the sentinel, and a directive may END with a sentence that merely mentions it).
-_STOP_OK_BARE_LINE = re.compile(r"^[\s*_`]*STOP_OK[\s*_`.!]*$")
+# The sentinel ending the TRAILING line, alone or as its own sentence after a full stop, `!` or `?`
+# ("...an unrequested code fix. STOP_OK"), tolerating only markdown emphasis / backticks and
+# trailing punctuation. Exact token, never a prefix (STOP_OKAY is not the sentinel), and a
+# directive that ends by naming it ("then reply STOP_OK", "then reply: STOP_OK") is not a
+# permit. Parity with the Claude Code hook's `_STOP_OK_FINAL_SENTENCE`.
+_STOP_OK_FINAL_SENTENCE = re.compile(r"(?:^|[.!?]\s+)[*_`]*STOP_OK[\s*_`.!]*$")
 
 
 def _stop_ok(output):
     """The ruling permits the stop when the STOP_OK sentinel is the FIRST non-empty line
     (exact token, unchanged: `STOP_OK.` followed by a directive is NOT a permit) or the bare
-    sentinel is the LAST non-empty line. A model that explains itself and then answers puts it
+    sentinel ends the LAST non-empty line as its own sentence. A model that explains itself and then answers puts it
     last; first-line-only parsing read that as an incomplete ruling. A sentinel line in the
     MIDDLE, followed by more directive, is contradictory and resolves to incomplete. Parity with
     the Claude Code hook's `is_stop_ok` (docs/plans/stopcontinue_trailing_stop_ok.md)."""
@@ -24,7 +26,7 @@ def _stop_ok(output):
         return False
     if lines[0].upper() == "STOP_OK":
         return True
-    return bool(_STOP_OK_BARE_LINE.match(lines[-1].upper()))
+    return bool(_STOP_OK_FINAL_SENTENCE.search(lines[-1].upper()))
 
 
 def _result(status, message, **values):

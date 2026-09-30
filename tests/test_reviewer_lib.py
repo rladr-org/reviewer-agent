@@ -2354,7 +2354,6 @@ def test_is_stop_ok_accepts_the_sentinel_as_the_final_sentence_of_the_last_line(
     assert rl.is_stop_ok(_SAME_LINE_STOP_OK) is True
     assert rl.stop_ok_position(_SAME_LINE_STOP_OK) == "last"
     assert rl.is_stop_ok("Nothing is left to do. **STOP_OK**.") is True
-    assert rl.is_stop_ok("Nothing is left to do: STOP_OK") is True
     assert rl.is_stop_ok("Earlier reasoning.\n\nNothing is left to do. STOP_OK!") is True
 
 
@@ -2362,3 +2361,7 @@ def test_is_stop_ok_sentinel_mentioned_inside_a_directive_sentence_is_not_a_perm
     assert rl.is_stop_ok("Run the tests first, and only then reply STOP_OK") is False
     assert rl.is_stop_ok("Fix the linter errors before STOP_OK.") is False
     assert rl.is_stop_ok("Nothing is left to do. STOP_OKAY") is False
+    # A colon or semicolon does not end the directive before the sentinel.
+    assert rl.is_stop_ok("Run tests first; then reply: STOP_OK") is False
+    assert rl.is_stop_ok("Nothing is left to do: STOP_OK") is False
+    assert rl.is_stop_ok("Fix the lint errors; STOP_OK") is False

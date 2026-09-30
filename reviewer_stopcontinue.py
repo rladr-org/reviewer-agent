@@ -167,6 +167,11 @@ def last_assistant_text(transcript_path, retries=3, retry_delay=0.3, final_messa
 # rule on the trailing line would read that as approval. Prefix matching stays confined to the
 # first line, where the prompt puts the verdict and where the long-standing tests pin it.
 _STOP_OK_BARE_LINE = re.compile(r"^[\s*_`]*STOP_OK[\s*_`.!]*$")
+# The last line may also END with the sentinel as its own sentence, after a full stop, `!` or `?`
+# (observed 2026-09-29: "...it only offers an unrequested code fix. STOP_OK", relayed as a
+# keep-working directive). A directive that ends by naming it ("then reply STOP_OK", "first run
+# the tests; then reply: STOP_OK") is not: a colon or semicolon does not end the directive.
+_STOP_OK_FINAL_SENTENCE = re.compile(r"(?:^|[.!?]\s+)[*_`]*STOP_OK[\s*_`.!]*$")
 # The first line opens with the WHOLE WORD STOP_OK: a trailing clause is fine (`STOP_OK -- the
 # task is genuinely complete.`), a longer token is not (`STOP_OKAY`). A bare `startswith` accepted
 # the latter, in conflict with the exact-token rule the Codex parser and the trailing line apply.
@@ -181,8 +186,8 @@ def stop_ok_position(codex_out):
     "first" -- the first non-empty line opens with the whole word STOP_OK (the prompt-compliant
                shape; a trailing clause such as `STOP_OK -- the task is genuinely complete.` is
                fine, `STOP_OKAY` is not).
-    "last"  -- the last non-empty line is the bare sentinel (`_STOP_OK_BARE_LINE`): a model that
-               explained itself and THEN answered. Observed in the wild (2026-09, claude backend):
+    "last"  -- the last non-empty line is the bare sentinel, or ends with it as its own final
+               sentence (`_STOP_OK_FINAL_SENTENCE`): a model that explained itself and THEN answered. Observed in the wild (2026-09, claude backend):
                first-line-only parsing read this permit-the-stop verdict as a continue directive
                and nudged a finished task to the cap, relaying reasoning that said there was
                nothing to do as the "keep working" instruction.
@@ -208,7 +213,7 @@ def stop_ok_position(codex_out):
         return "first"
     if _GATE_APPROVAL_OPENING.match(lines[0].upper()):
         return "gate"
-    if _STOP_OK_BARE_LINE.match(lines[-1].upper()):
+    if _STOP_OK_FINAL_SENTENCE.search(lines[-1].upper()):
         return "last"
     if any(_STOP_OK_BARE_LINE.match(ln.upper()) for ln in lines[1:-1]):
         return "mid"

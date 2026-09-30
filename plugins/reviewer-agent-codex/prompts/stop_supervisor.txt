@@ -96,3 +96,5 @@ Reply with exactly one of:
 
 - STOP_OK, and nothing else, when stopping is permitted; or
 - a short directive naming the next authorized work when it is identifiable, or the generic continuation above when authorized work remains but its tasks cannot be identified.
+
+Any reply other than STOP_OK is relayed to the agent as an instruction to keep working. If you conclude that the task is complete, that stopping is appropriate, or that the agent should stop and report, reply STOP_OK; never say so in a directive.
