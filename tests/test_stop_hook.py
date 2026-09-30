@@ -670,3 +670,115 @@ def test_the_stop_capsule_is_not_the_commit_reviewers(tmp_path, monkeypatch):
     assert stop.count("git diff --cached") == 1
     # The reviewer role's capsule is unchanged.
     assert "REVIEWER STANDING REMINDER" in rl.apply_context("TASK", repo)
+
+
+# --------------------------------------------------------------------------
+# a directive the agent declines is not pushed forever (2026-09-30: nine reworded pushes to make
+# the operator's port-or-document choice; the agent answered each in text, never acting, until
+# the host overrode the hook at its own nine-block limit)
+# --------------------------------------------------------------------------
+def _event(kind, content, **extra):
+    ev = {"type": kind, "message": {"role": kind, "content": content}}
+    ev.update(extra)
+    return ev
+
+
+def _text(value):
+    return [{"type": "text", "text": value}]
+
+
+_TOOL_CALL = [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]
+_TOOL_RESULT = [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]
+_REWORDED = (
+    "Continue with the unresolved gap recorded under task 1 and add focused tests.",
+    "Document that the plugin lacks the feature; keep this within the approved task.",
+    "Stop asking for a choice and complete the already-directed documentation.",
+)
+
+
+def _chain_transcript(tmp_path, replies):
+    """A turn that did real work and asked the operator a question, then one supervisor
+    directive per entry of `replies`, each answered with text only ("text") or by acting
+    ("tool")."""
+    events = [
+        _event("user", "Finish the handover tasks.", origin={"kind": "human"}),
+        _event("assistant", _TOOL_CALL),
+        _event("user", _TOOL_RESULT),
+        _event("assistant", _text("Done. Port the feature or document the gap?")),
+    ]
+    for n, reply in enumerate(replies):
+        # Reworded every time, as the supervisor did: a repeat check never matched them.
+        events.append(_event("user", "Stop hook feedback:\nThe stopContinue supervisor reviewed "
+                                     "your stop ... " + _REWORDED[n % len(_REWORDED)],
+                             isMeta=True))
+        if reply == "tool":
+            events += [_event("assistant", _TOOL_CALL), _event("user", _TOOL_RESULT)]
+        events.append(_event("assistant", _text("That choice is the operator's; still waiting.")))
+    p = tmp_path / "transcript.jsonl"
+    p.write_text("".join(json.dumps(ev) + "\n" for ev in events))
+    return str(p)
+
+
+def _supervised_repo(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)
+    rl.write_session_id(repo, "claude-stop", "sid-stop", role=rl.ROLE_STOP)
+    # A differently worded directive every time, as the supervisor produced it.
+    env = {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+           "FAKE_CODEX_STDOUT": "As already directed, document the gap now."}
+    return repo, env
+
+
+def test_a_stop_after_two_directives_answered_without_acting_is_allowed(tmp_path, monkeypatch):
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    tr = _chain_transcript(tmp_path, ["text", "text"])
+    p = run_hook(_input(repo, tr, stop_hook_active=True), env)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert "decision" not in out
+    assert "without acting" in out["systemMessage"]
+    assert "declined supervisor directives" in _log_text(env["REVIEWER_HOME"])
+
+
+def test_one_directive_answered_without_acting_is_still_pushed(tmp_path, monkeypatch):
+    # "Sure, I'll do that" and stopping is the premature stop the supervisor exists to catch.
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    tr = _chain_transcript(tmp_path, ["text"])
+    out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
+    assert out["decision"] == "block"
+
+
+def test_a_directive_the_agent_acted_on_restarts_the_count(tmp_path, monkeypatch):
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    tr = _chain_transcript(tmp_path, ["text", "tool"])
+    out = json.loads(run_hook(_input(repo, tr, stop_hook_active=True), env).stdout)
+    assert out["decision"] == "block"
+
+
+def test_directives_from_an_earlier_turn_do_not_count(tmp_path, monkeypatch):
+    # Only this turn's chain: a new operator message starts over.
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    tr = _chain_transcript(tmp_path, ["text", "text"])
+    with open(tr, "a") as handle:
+        handle.write(json.dumps(_event("user", "Please continue.", origin={"kind": "human"})) + "\n")
+        handle.write(json.dumps(_event("assistant", _text("Waiting on your choice."))) + "\n")
+    out = json.loads(run_hook(_input(repo, tr), env).stdout)
+    assert out["decision"] == "block"
+
+
+def test_a_declined_directive_stop_starts_the_watchdog_idle_countdown(tmp_path, monkeypatch):
+    # The agent is waiting on the operator, not stalled: a tick must not re-open the push.
+    repo, env = _supervised_repo(tmp_path, monkeypatch)
+    rl.set_stopcontinue_watchdog_active(repo)
+    tr = _chain_transcript(tmp_path, ["text", "text"])
+    run_hook(_input(repo, tr, stop_hook_active=True), env)
+    assert rl.is_watchdog_disarm_set(repo, "claude-stop") is True
+
+
+def test_the_default_nudge_cap_ends_the_loop_before_the_host_overrides_the_hook(monkeypatch):
+    # Claude Code ends a turn itself after 9 consecutive Stop-hook blocks, with an error.
+    monkeypatch.delenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", raising=False)
+    monkeypatch.setenv("REVIEWER_CONFIG_FILE", "/nonexistent/config.json")
+    assert rl.max_nudges() < 9
