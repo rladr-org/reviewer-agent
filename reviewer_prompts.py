@@ -747,30 +747,37 @@ def directives_block(proj):
 # a finding on an unchanged file is still valid and must still block, and findings are not
 # file-local -- a change in one staged file can overturn a conclusion about another.
 # --------------------------------------------------------------------------
-def staged_blob_shas(path):
-    """{staged path: index blob sha} for the files in `git diff --cached`, or {} outside a
-    repo. Deleted paths map to the "-" sentinel: they are part of the staged set under
-    review but have no index blob."""
+def _staged_index(path):
+    """({path: blob sha}, {path: file mode}) for the files in `git diff --cached`, or ({}, {})
+    outside a repo. Deleted paths map to the "-" sentinel in both."""
     names = staged_files(path)
     if not names:
-        return {}
-    out = {name: "-" for name in names}
+        return {}, {}
+    shas = {name: "-" for name in names}
+    modes = dict(shas)
     try:
         p = subprocess.run(
             ["git", "-C", str(path), "ls-files", "--stage", "--"] + names,
             capture_output=True, text=True,
         )
     except FileNotFoundError:
-        return out
+        return shas, modes
     if p.returncode != 0:
-        return out
+        return shas, modes
     for line in p.stdout.splitlines():
         # "<mode> <sha> <stage>\t<path>"
         meta, _, name = line.partition("\t")
         parts = meta.split()
         if name and len(parts) >= 2:
-            out[name] = parts[1]
-    return out
+            modes[name], shas[name] = parts[0], parts[1]
+    return shas, modes
+
+
+def staged_blob_shas(path):
+    """{staged path: index blob sha} for the files in `git diff --cached`, or {} outside a
+    repo. Deleted paths map to the "-" sentinel: they are part of the staged set under
+    review but have no index blob."""
+    return _staged_index(path)[0]
 
 
 def _head_sha(path):
@@ -820,11 +827,14 @@ def record_audited_stage(proj, claude_session_id, codex_session_id):
     f = audited_stage_file(proj, claude_session_id)
     if f is None:
         return
+    shas, modes = _staged_index(proj)
     _atomic_write_text(f, json.dumps({
         "codex_sid": str(codex_session_id or ""),
         "head": _head_sha(proj),
         "round": round_no + 1,
-        "files": staged_blob_shas(proj),
+        "files": shas,
+        # The mode is part of what was reviewed: an executable-bit fix leaves the blob alone.
+        "modes": modes,
     }, indent=2) + "\n")
 
 
@@ -1078,11 +1088,20 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
     if prev.get("head") != _head_sha(proj):
         return ""
     before = prev["files"]
-    now = staged_blob_shas(proj)
+    before_modes = prev.get("modes")
+    if not isinstance(before_modes, dict):
+        # Written before modes were kept: it cannot establish that a mode was reviewed, and
+        # calling a mode-only fix UNCHANGED would order the rejection repeated.
+        return ""
+    now, now_modes = _staged_index(proj)
     if not now:
         return ""
+    moved_mode = {p: (before_modes.get(p), now_modes.get(p)) for p in now
+                  if p in before and before_modes.get(p) != now_modes.get(p)}
     changed = sorted(p for p, sha in now.items() if p in before and before[p] != sha)
-    unchanged = sorted(p for p, sha in now.items() if before.get(p) == sha)
+    mode_only = sorted(p for p in moved_mode if p not in changed)
+    unchanged = sorted(p for p, sha in now.items()
+                       if before.get(p) == sha and p not in moved_mode)
     added = sorted(p for p in now if p not in before)
     removed = sorted(p for p in before if p not in now)
     # Channel B: reviewerAgent-ignore.md matched paths are dropped from `changed` and `added`
@@ -1098,10 +1117,11 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
     # distinguish "the index really is byte-identical" from "only skimmed paths changed."
     # The two states are visibly different -- restating findings while a data file changed
     # would be honest under the true no-movement branch and misleading under the second.
-    _raw_moved = bool(changed or added or removed)
+    _raw_moved = bool(changed or added or removed or mode_only)
     if ignore_matcher is not None:
         changed = [p for p in changed if not ignore_matcher.matches(p)]
         added = [p for p in added if not ignore_matcher.matches(p)]
+        mode_only = [p for p in mode_only if not ignore_matcher.matches(p)]
     backend = reviewer_backend(proj)
     # Skipped entirely when nothing can consume it: `_delta_candidates` runs one `git cat-file`
     # per changed path, and with inlining disabled on a backend that gets no commands either,
@@ -1115,7 +1135,7 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
     deltas = _delta_commands(proj, candidates, before)
     round_no = prev.get("round", 1)
 
-    if not (changed or added or removed):
+    if not (changed or added or removed or mode_only):
         if _raw_moved:
             # The index did move but every moved path was skimmed per reviewerAgent-ignore.md.
             # Non-skimmed paths are byte-identical to what the reviewer already audited, so
@@ -1155,11 +1175,15 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
     not_shown = [p for p in list(changed) + list(added) if p not in inlined]
 
     lines = ["STAGED SET vs YOUR LAST AUDIT (re-review #{}):".format(round_no + 1)]
-    for label, paths in (("CHANGED", changed), ("ADDED", added),
+    for label, paths in (("CHANGED", changed), ("MODE CHANGED", mode_only), ("ADDED", added),
                          ("UNCHANGED", unchanged), ("REMOVED", removed)):
         for p in paths:
             row = "  {:<10} {}".format(label, p)
-            if p in inlined:
+            if p in moved_mode:
+                row += "    -- file mode {} -> {}".format(*moved_mode[p])
+            if label == "MODE CHANGED":
+                row += "; content byte-identical to what you reviewed"
+            elif p in inlined:
                 row += "    -- diff shown below"
             elif p in deltas:
                 row += "    -- delta: {}".format(deltas[p])
@@ -1284,6 +1308,13 @@ def staged_change_block(proj, claude_session_id, codex_session_id, ignore_matche
             " Answering from a remembered earlier draft is how an already-fixed finding gets "
             "re-raised.\n"
             "  Cite only line numbers you can see in the current staged content.".format(order)
+        )
+    if mode_only:
+        lines.append(
+            "MODE CHANGED: only the file mode moved (for example an executable bit); the "
+            "content is byte-identical to what you reviewed. Re-judge every earlier finding "
+            "about these paths' mode against the new mode; findings about their content still "
+            "stand."
         )
     if unchanged:
         lines.append(

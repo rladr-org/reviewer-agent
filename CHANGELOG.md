@@ -63,6 +63,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   (`...nothing is left. STOP_OK`) on both hosts, instead of relaying it as a keep-working directive.
   The supervisor prompt now says any other reply keeps the agent working, so a verdict that stopping
   is appropriate must be STOP_OK.
+- Claude Code: a retry that stages only a file-mode fix (an executable bit) is reported to the
+  reviewer as `MODE CHANGED` with the old and new mode, instead of "NOTHING MOVED ... reject
+  again". A retry record written before modes were kept gets a full review.
 - Codex: `$reviewer-agent-codex:reviewer-agent on` works in a linked worktree whose
   `reviewerAgent.md` exists only in the main checkout (an untracked brief). It checks the same
   brief every review from that worktree reads, instead of refusing with "brief not found".

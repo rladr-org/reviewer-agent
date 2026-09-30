@@ -237,7 +237,8 @@ tree. Revisit it only with evidence that a real hook caused loss.
   primitives.
 - **Retry identity is mode-aware** and taken from the captured snapshot, per the handoff's second
   defect. A record without mode information forces a fresh review rather than a false unchanged
-  classification.
+  classification. (Implemented 2026-09-30: the audited-stage record keeps `modes` beside `files`,
+  and a mode-only move is reported as `MODE CHANGED`; see `tests/test_rereview.py`.)
 
 ## Test plan
 
