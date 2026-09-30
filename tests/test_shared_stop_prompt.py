@@ -79,3 +79,12 @@ def test_the_output_rule_says_any_other_reply_keeps_the_agent_working():
     text = (ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8")
     assert "instruction to keep working" in text
     assert "stopping is appropriate" in text
+
+
+def test_the_output_rule_says_only_the_agent_reads_a_directive():
+    # Observed 2026-09-30, seven times: the supervisor wrote to the operator ("Should the agent add
+    # ... to the to-do list? The `--init` change still needs your decision") and the hook relayed
+    # that to the agent as a keep-working directive it could do nothing with.
+    text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
+    assert "Only the agent reads a directive" in text
+    assert "never write to the operator" in text
