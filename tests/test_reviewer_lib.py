@@ -1567,7 +1567,8 @@ def test_nudge_count_read_bump_reset(home):
     assert rl.read_nudge_count(PROJ, "c1") == 0
 
 
-def test_max_nudges_default_floor_and_env_override(monkeypatch):
+def test_max_nudges_default_floor_and_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_CONFIG_FILE", str(tmp_path / "missing.json"))
     monkeypatch.delenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", raising=False)
     assert rl.max_nudges() == 8
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_MAX_NUDGES", "3")
@@ -1578,7 +1579,10 @@ def test_max_nudges_default_floor_and_env_override(monkeypatch):
     assert rl.max_nudges() == 8                   # falls back on non-int
 
 
-def test_stopcontinue_effort_default_low_and_env_override(monkeypatch):
+def test_stopcontinue_effort_default_low_and_env_override(tmp_path, monkeypatch):
+    # Isolated from the operator's own config.json: a machine that sets stopContinueEffort
+    # failed this test, which is about the built-in default.
+    monkeypatch.setenv("REVIEWER_CONFIG_FILE", str(tmp_path / "missing.json"))
     monkeypatch.delenv("REVIEWER_STOPCONTINUE_EFFORT", raising=False)
     assert rl.stopcontinue_effort() == "low"       # snappy by default, not xhigh
     assert rl.stopcontinue_effort_config() == 'model_reasoning_effort="low"'
