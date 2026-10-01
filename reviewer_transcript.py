@@ -168,6 +168,25 @@ def _last_turn_prompt_text(events):
     return ""
 
 
+def ends_with_operator_interrupt(events):
+    """True when the operator's interrupt is the last thing in the main session, ignoring the
+    watchdog tick prompt that is arriving now: the operator stopped the agent and has not spoken or
+    let it continue since."""
+    for ev in reversed(events or []):
+        kind = ev.get("type")
+        if ev.get("isSidechain") or kind not in ("user", "assistant"):
+            continue
+        if kind == "assistant":
+            return False
+        if _event_text(ev).lstrip().startswith("[Request interrupted by user"):
+            return True
+        if _is_human_prompt(ev):
+            return False  # the operator spoke after the interrupt
+        # Anything else is not the operator speaking -- the tick itself, a task notification, hook
+        # feedback, a compaction summary, a tool-result carrier -- and leaves a pause intact.
+    return False
+
+
 def directives_answered_without_action(events):
     """How many of this turn's most recent stop-hook directives the agent answered without a
     single tool call, counted back from the latest until one it acted on.

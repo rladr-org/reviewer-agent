@@ -19,6 +19,11 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Fixed
 
+- Claude Code: a `stopContinueWatchdog` tick no longer starts work while the operator has the
+  turn. It resumed unfinished work even when the operator had paused to read a long reply. The
+  tick now reads the disarm marker, which an approved stop writes and the operator's next message
+  removes, and replies `ok` while it exists; a tick arriving right after an operator interrupt
+  writes it first. A stalled turn that was never approved is still recovered.
 - The stop supervisor's prompt (shared by both hosts) says only the agent reads a directive. A
   supervisor that judged a decision to be the operator's sometimes wrote the question or a status
   summary to the operator ("Should the agent …? … still needs your decision"), and the hook

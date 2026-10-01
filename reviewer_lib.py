@@ -484,5 +484,6 @@ from reviewer_transcript import (  # noqa: F401
     _reset_transcript_cache,
     _transcript_events,
     directives_answered_without_action,
+    ends_with_operator_interrupt,
     resolve_transcript_path,
 )

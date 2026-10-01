@@ -53,6 +53,7 @@ from reviewer_state import (
     stop_approval_epoch,
     stopcontinue_flag_file,
     stopcontinue_watchdog_flag_file,
+    watchdog_disarm_file,
     watchdog_teardown_ready_file,
 )
 from reviewer_transcript import (
@@ -199,6 +200,10 @@ def watchdog_tick_prompt(proj, claude_session_id):
     ready = str(watchdog_teardown_ready_file(proj, claude_session_id))
     wd = str(stopcontinue_watchdog_flag_file(proj))
     sc = str(stopcontinue_flag_file(proj))
+    # The pause marker is the disarm marker: written when a stop is approved or the operator
+    # interrupts, removed by the operator's next message. While it exists the operator has the turn
+    # -- they may be reading a long reply -- so a tick must not start work (2026-09-30).
+    paused = str(watchdog_disarm_file(proj, claude_session_id))
     return (
         "stopContinueWatchdog tick -- Check these three paths INDIVIDUALLY (Read each, not one "
         "batched `ls` -- the teardown-ready marker is normally ABSENT): the teardown-ready "
@@ -206,9 +211,11 @@ def watchdog_tick_prompt(proj, claude_session_id):
         "read failure. If the teardown-ready marker exists, OR either flag file is missing, "
         'CronList and CronDelete every task whose prompt contains "{marker}", then stop. If you '
         "cannot read a path (a real error, not a missing file), do NOT delete anything -- reply "
-        "`ok` and stop. Otherwise: if you have unfinished work from before, resume it; otherwise "
-        "reply `ok` and stop."
-    ).format(ready=ready, wd=wd, sc=sc, marker=WATCHDOG_MARKER)
+        "`ok` and stop. Otherwise, also Read `{paused}`: if it exists, the operator has the turn "
+        "(your last stop was approved, or they interrupted you), so reply `ok` and stop without "
+        "doing anything else. Only if it is absent: if you have unfinished work from before, "
+        "resume it; otherwise reply `ok` and stop."
+    ).format(ready=ready, wd=wd, sc=sc, marker=WATCHDOG_MARKER, paused=paused)
 
 
 def watchdog_arm_instruction(proj, interval, claude_session_id):

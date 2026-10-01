@@ -914,9 +914,9 @@ def test_tick_prompt_holds_while_the_operator_has_the_turn(tmp_path, monkeypatch
     assert paused in tick
     low = " ".join(tick.split()).lower()
     assert "operator has the turn" in low
-    assert "do not resume" in low
+    assert "without doing anything else" in low
     # The pause check comes before the resume instruction, which it overrides.
-    assert tick.find(paused) < low.find("resume it")
+    assert low.find(paused.lower()) < low.find("resume it")
 
 
 def _ups_with_transcript(cwd, prompt, home, transcript, session_id="claude-ups"):
@@ -949,6 +949,37 @@ def test_a_tick_right_after_an_operator_interrupt_marks_the_pause(tmp_path, monk
     repo = make_repo(tmp_path)
     _effective(repo)
     p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
+
+
+def test_a_system_notice_after_the_interrupt_does_not_end_the_pause(tmp_path, monkeypatch):
+    # A task notification is injected by the host, not typed by the operator.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    notice = [{"type": "user", "message": {"role": "user", "content":
+               "<task-notification><task-id>b1</task-id><status>completed</status>"
+               "</task-notification>"}}]
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, notice))
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
+
+
+def test_a_compaction_summary_or_tool_result_after_the_interrupt_does_not_end_the_pause(
+        tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    synthetic = [
+        {"type": "user", "isCompactSummary": True,
+         "message": {"role": "user", "content": "Summary of the earlier conversation."}},
+        {"type": "user", "toolUseResult": {"stdout": "x"}, "message": {"role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t9", "content": "x"}]}},
+    ]
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, synthetic))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 

@@ -440,11 +440,14 @@ def test_watchdog_tick_prompt_stays_read_based_and_bounded(tmp_path, monkeypatch
             m, "stopcontinue_watchdog_flag_file", lambda p, _x=short: _x, raising=False)
         monkeypatch.setattr(
             m, "watchdog_teardown_ready_file", lambda p, s, _x=short: _x, raising=False)
+        monkeypatch.setattr(
+            m, "watchdog_disarm_file", lambda p, s, _x=short: _x, raising=False)
     tick = rl.watchdog_tick_prompt(proj, SID)
     # No per-tick shell-out to a script -- the whole point of the visibility change.
     assert "python3" not in tick and "toggle.py" not in tick
-    # Bounded: catches an accidental runaway while allowing the fail-safe + teardown_ready clauses.
-    assert len(tick) < 700, "tick prompt ballooned (%d bytes): %r" % (len(tick), tick)
+    # Bounded: catches an accidental runaway while allowing the fail-safe, teardown_ready and
+    # operator-has-the-turn (pause marker) clauses.
+    assert len(tick) < 900, "tick prompt ballooned (%d bytes): %r" % (len(tick), tick)
 
 
 def test_arm_instruction_signature_takes_proj_and_interval(tmp_path, monkeypatch):

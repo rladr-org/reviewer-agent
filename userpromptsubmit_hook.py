@@ -81,6 +81,12 @@ def _rearm_context(data, cwd):
     # THROUGH this hook, so this is also where the cron's liveness is observed, for free.
     if "stopContinueWatchdog tick" in prompt:
         rl.set_watchdog_tick_seen(cwd, sid)
+        # An interrupt is a deliberate pause, like an approved stop: mark it so the tick (which
+        # reads this marker next) replies `ok` instead of resuming work. Only if unset, so an
+        # aging marker keeps its timestamp for the idle teardown.
+        if not rl.is_watchdog_disarm_set(cwd, sid) and rl.ends_with_operator_interrupt(
+                rl._transcript_events(rl.resolve_transcript_path(data))):
+            rl.set_watchdog_disarm(cwd, sid)
         return None
     rearm = (
         rl.is_watchdog_teardown_ready(cwd, sid)
