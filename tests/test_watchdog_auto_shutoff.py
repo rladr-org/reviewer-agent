@@ -1008,3 +1008,54 @@ def test_the_operators_next_message_ends_the_pause(tmp_path, monkeypatch):
     rl.set_watchdog_disarm(repo, "claude-ups")
     run_ups(repo, "ok, continue", home, "claude-ups")
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
+
+
+def _supervisor_calls(path):
+    return [json.loads(line) for line in Path(path).read_text().splitlines()] if Path(
+        path).exists() else []
+
+
+def test_a_paused_ticks_ok_is_not_sent_to_the_supervisor(tmp_path, monkeypatch):
+    # Live on the test build, 2026-09-30: the tick honoured the pause and replied `ok`, then the
+    # supervisor reviewed that `ok` and pushed the agent back to work.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    rl.set_watchdog_disarm(repo, "claude-stop")
+    argv = str(tmp_path / "argv.jsonl")
+    p = run_stop(_stop_input(repo, _tick_turn_transcript(tmp_path, "ok")),
+                 {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+                  "FAKE_CODEX_STDOUT": "Check the log and report.", "FAKE_CODEX_ARGV_FILE": argv})
+    assert p.returncode == 0, p.stderr
+    assert "decision" not in (json.loads(p.stdout) if p.stdout.strip() else {})
+    assert _supervisor_calls(argv) == []
+
+
+def test_a_paused_ticks_ok_still_advances_the_idle_teardown(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)                                              # interval = 1 min
+    old_ts = _write_disarm_age(repo, "claude-stop", 120)      # idle for two intervals
+    argv = str(tmp_path / "argv.jsonl")
+    run_stop(_stop_input(repo, _tick_turn_transcript(tmp_path, "ok")),
+             {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+              "FAKE_CODEX_STDOUT": "Check the log and report.", "FAKE_CODEX_ARGV_FILE": argv})
+    assert _supervisor_calls(argv) == []
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is True
+    assert _disarm_ts(repo, "claude-stop") == old_ts
+
+
+def test_a_tick_that_did_more_than_reply_ok_is_still_supervised(tmp_path, monkeypatch):
+    # A tick turn that resumed work is ordinary work, pause marker or not.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    rl.set_watchdog_disarm(repo, "claude-stop")
+    tr = _tick_turn_transcript(tmp_path, "Resumed the migration; two steps left.")
+    p = run_stop(_stop_input(repo, tr),
+                 {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+                  "FAKE_CODEX_STDOUT": "Finish the two remaining steps."})
+    assert json.loads(p.stdout)["decision"] == "block"
