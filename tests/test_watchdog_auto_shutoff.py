@@ -900,3 +900,80 @@ def test_hooks_manifest_registers_userpromptsubmit():
     hooks = json.loads(MANIFEST.read_text()).get("hooks", {})
     assert "UserPromptSubmit" in hooks
     assert "userpromptsubmit_hook.py" in json.dumps(hooks["UserPromptSubmit"])
+
+
+# --------------------------------------------------------------------------
+# A tick holds while the operator has the turn (2026-09-30: ticks resumed work the operator had
+# paused to read a long reply -- after an approved stop, and after an interrupt)
+# --------------------------------------------------------------------------
+def test_tick_prompt_holds_while_the_operator_has_the_turn(tmp_path, monkeypatch):
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    tick = rl.watchdog_tick_prompt(repo, "S-A")
+    paused = str(rl.watchdog_disarm_file(repo, "S-A"))
+    assert paused in tick
+    low = " ".join(tick.split()).lower()
+    assert "operator has the turn" in low
+    assert "do not resume" in low
+    # The pause check comes before the resume instruction, which it overrides.
+    assert tick.find(paused) < low.find("resume it")
+
+
+def _ups_with_transcript(cwd, prompt, home, transcript, session_id="claude-ups"):
+    env = dict(os.environ)
+    env["REVIEWER_HOME"] = home
+    env["CLAUDE_PROJECT_DIR"] = cwd
+    stdin = {"cwd": cwd, "session_id": session_id, "prompt": prompt,
+             "transcript_path": transcript, "hook_event_name": "UserPromptSubmit"}
+    return subprocess.run([sys.executable, UPS], input=json.dumps(stdin),
+                          capture_output=True, text=True, env=env)
+
+
+def _interrupted_transcript(tmp_path, after=()):
+    events = [
+        {"type": "user", "origin": {"kind": "human"},
+         "message": {"role": "user", "content": "do the thing"}},
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": "Working on it."}]}},
+        {"type": "user", "message": {"role": "user",
+            "content": [{"type": "text", "text": "[Request interrupted by user]"}]}},
+    ] + list(after) + [
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": _TICK_BODY}},
+    ]
+    return _write_jsonl(tmp_path, "interrupted.jsonl", events)
+
+
+def test_a_tick_right_after_an_operator_interrupt_marks_the_pause(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
+
+
+def test_a_tick_after_the_agent_resumed_does_not_mark_a_pause(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    resumed = [
+        {"type": "user", "origin": {"kind": "human"},
+         "message": {"role": "user", "content": "carry on"}},
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": "Carrying on."}]}},
+    ]
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, resumed))
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
+
+
+def test_the_operators_next_message_ends_the_pause(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    rl.set_watchdog_disarm(repo, "claude-ups")
+    run_ups(repo, "ok, continue", home, "claude-ups")
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
