@@ -1047,6 +1047,27 @@ def test_a_paused_ticks_ok_still_advances_the_idle_teardown(tmp_path, monkeypatc
     assert _disarm_ts(repo, "claude-stop") == old_ts
 
 
+def test_the_teardown_ticks_report_is_not_sent_to_the_supervisor(tmp_path, monkeypatch):
+    # Live on the test build: the tick that removed the cron ended with "I deleted its cron ...",
+    # not `ok`, so the supervisor reviewed it and pushed work during the pause. teardown_ready is
+    # only ever set for an idle session, so its tick is not work to supervise.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    rl.set_watchdog_disarm(repo, "claude-stop")
+    rl.set_watchdog_teardown_ready(repo, "claude-stop")
+    argv = str(tmp_path / "argv.jsonl")
+    tr = _tick_turn_transcript(tmp_path, "The teardown marker appeared, so I deleted its cron.")
+    p = run_stop(_stop_input(repo, tr),
+                 {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+                  "FAKE_CODEX_STDOUT": "Verify the retest and report.",
+                  "FAKE_CODEX_ARGV_FILE": argv})
+    assert p.returncode == 0, p.stderr
+    assert "decision" not in (json.loads(p.stdout) if p.stdout.strip() else {})
+    assert _supervisor_calls(argv) == []
+
+
 def test_a_tick_that_did_more_than_reply_ok_is_still_supervised(tmp_path, monkeypatch):
     # A tick turn that resumed work is ordinary work, pause marker or not.
     home = str(tmp_path / "rh")
