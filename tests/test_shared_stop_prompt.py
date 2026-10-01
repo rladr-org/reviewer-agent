@@ -88,3 +88,12 @@ def test_the_output_rule_says_only_the_agent_reads_a_directive():
     text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
     assert "only the agent reads a directive" in text.lower()
     assert "never write to the operator" in text.lower()
+
+
+def test_work_promised_in_earlier_replies_counts_as_remaining_work():
+    # Replayed live 2026-09-30: shown the AGENT'S OWN EARLIER REPLIES block with "3. Recording the
+    # Linux to-dos ... in HANDOVER.md" undone, the supervisor still approved the stop (2 of 2),
+    # because its remaining-work rule only read the proposed final message.
+    text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
+    assert "AGENT'S OWN EARLIER REPLIES" in text
+    assert "counts as remaining work" in text
