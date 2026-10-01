@@ -89,8 +89,9 @@ def _watchdog_pre_supervision(cwd, claude_sid):
 
 
 def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
-    """Runs on a genuine STOP_OK verdict, and on a stop allowed because the agent declined the
-    supervisor's directives (it is waiting on the operator, which is idle) -- never on
+    """Runs on a genuine STOP_OK verdict, on a stop allowed because the agent declined the
+    supervisor's directives (it is waiting on the operator, which is idle), and on a paused tick's
+    `ok` (the operator has the turn) -- never on
     KEEP_WORKING, nor on the tool-only / bg-wait / nudge-cap / fail-open allow paths, which take
     earlier returns and leave the watchdog armed to recover an incomplete or parked strand. Because a tick only reaches here when it
     genuinely completed (a healthy `ok`, or a recovery that finished its work), it is safe to arm
@@ -166,6 +167,18 @@ def _main(data):
             "[stop] key={} background wait (harness auto-wakes on completion) -> allow stop, "
             "no supervisor call".format(key)
         )
+        return 0
+
+    # A tick that found the pause marker and replied `ok`: the operator has the turn, so there is
+    # nothing to supervise. Sending that `ok` to the supervisor let it push the agent back to
+    # work, undoing the pause the tick had just honoured (2026-09-30). The idle teardown still
+    # advances exactly as it does when a tick's `ok` is approved. A tick turn that did anything
+    # more than reply `ok` is ordinary work and stays supervised.
+    if (is_tick and text.strip().lower().rstrip(".") == "ok"
+            and rl.is_watchdog_disarm_set(cwd, claude_sid)):
+        rl.log("[stop] key={} paused tick replied ok (operator has the turn) -> allow stop, "
+               "no supervisor call".format(key))
+        _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
         return 0
 
     # A fresh (NOT hook-driven) stop is the first stop of a user turn -> reset the budget, and
