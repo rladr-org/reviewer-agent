@@ -180,6 +180,12 @@ def _main(data):
                "no supervisor call".format(key))
         _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
         return 0
+    # The tick that tears the cron down reports that in a sentence, not `ok`. teardown_ready is
+    # only ever set for a session that has been idle a full interval, so this is not work either.
+    if is_tick and rl.is_watchdog_teardown_ready(cwd, claude_sid):
+        rl.log("[stop] key={} teardown tick (session idle) -> allow stop, no supervisor "
+               "call".format(key))
+        return 0
 
     # A fresh (NOT hook-driven) stop is the first stop of a user turn -> reset the budget, and
     # forget the previous chain's directive so it cannot count as a repeat.
