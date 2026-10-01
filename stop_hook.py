@@ -355,6 +355,9 @@ def _main(data):
         )))
         # A genuine completion arms the watchdog idle countdown (disarm only on STOP_OK).
         _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
+        # Everything the agent said up to here has now been judged: the next review is shown
+        # only its later replies. Fail-open allows never record this -- nobody reviewed those.
+        rl.record_stop_approval(cwd, claude_sid)
     elif gate_verdict:
         # Fail-open like any reply without a usable stop verdict, but visibly: silence would hide
         # a supervisor that has lost its framing. The watchdog stays armed, as for any stop that

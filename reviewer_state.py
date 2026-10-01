@@ -1805,6 +1805,30 @@ def record_stop_review(proj, claude_session_id):
     return n
 
 
+def _stop_approval_file(proj, claude_session_id):
+    stem = _project_session_stem(proj, claude_session_id)
+    return None if stem is None else reviewer_home() / "state" / (stem + ".stop-approved")
+
+
+def record_stop_approval(proj, claude_session_id, epoch=None):
+    """Remember when the supervisor last approved a stop (a genuine STOP_OK). The next review
+    shows it the agent's replies from after this point: earlier ones were already judged."""
+    f = _stop_approval_file(proj, claude_session_id)
+    if f is None:
+        return
+    _atomic_write_text(f, "{:.3f}\n".format(time.time() if epoch is None else float(epoch)))
+
+
+def stop_approval_epoch(proj, claude_session_id):
+    """Epoch seconds of the last approved stop, or None if none is recorded or it is unreadable
+    (no window then: every recent reply is eligible, which is the safe direction)."""
+    f = _stop_approval_file(proj, claude_session_id)
+    try:
+        return float(f.read_text().strip()) if f is not None else None
+    except (OSError, ValueError):
+        return None
+
+
 def retire_stop_session(proj, claude_session_id):
     """Retire only the stopContinue supervisor, preserving the commit reviewer. Returns the state
     paths cleared, the review count among them, so the count restarts with the new session."""

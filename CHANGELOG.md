@@ -7,6 +7,14 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+### Changed
+
+- Claude Code: the stop supervisor also sees the agent's own text replies since it last approved
+  a stop (no tool calls or output), each trimmed to its last 1,500 characters and 8,000 in all
+  (`stopAgentReplyChars`, `stopAgentRepliesMaxChars`). It reviews only the turn that is ending,
+  so a to-do announced in an earlier turn was invisible whenever that turn's review was cut off
+  by an interrupt. The block says these are the agent's words, never operator authorization.
+
 ### Fixed
 
 - The stop supervisor's prompt (shared by both hosts) says only the agent reads a directive. A
