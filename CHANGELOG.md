@@ -14,6 +14,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   (`stopAgentReplyChars`, `stopAgentRepliesMaxChars`). It reviews only the turn that is ending,
   so a to-do announced in an earlier turn was invisible whenever that turn's review was cut off
   by an interrupt. The block says these are the agent's words, never operator authorization.
+  The shared stop prompt counts work promised there as remaining work, but only on evidence that
+  it is unfinished and not redirected; unclear cases do not block.
 
 ### Fixed
 
