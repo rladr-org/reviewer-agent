@@ -400,9 +400,12 @@ def test_commit_hook_timeout_is_bounded_and_cannot_publish(ready, monkeypatch):
 def test_external_hook_background_output_does_not_hold_commit_open(ready, detached):
     pid_file = ready / "hook-child.pid"
     hook = ready / ".git" / "hooks" / "post-commit"
+    # The child publishes its pid by rename: write_text creates the file before filling it, and
+    # the cleanup below read it empty in that gap on a CI runner (int('') -> ValueError).
     script = ("import os, time; from pathlib import Path; "
               + ("os.setsid(); " if detached else "") +
-              "Path('hook-child.pid').write_text(str(os.getpid())); time.sleep(60)")
+              "Path('hook-child.pid.tmp').write_text(str(os.getpid())); "
+              "os.replace('hook-child.pid.tmp', 'hook-child.pid'); time.sleep(60)")
     hook.write_text("#!/bin/sh\n{} -c {} &\n".format(
         shlex.quote(sys.executable), shlex.quote(script)))
     hook.chmod(0o755)
