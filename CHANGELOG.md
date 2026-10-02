@@ -23,7 +23,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   turn. It resumed unfinished work even when the operator had paused to read a long reply. The
   tick now reads the disarm marker, which an approved stop writes and the operator's next message
   removes, and replies `ok` while it exists; a tick arriving right after an operator interrupt
-  writes it first. A stalled turn that was never approved is still recovered. The paused tick's
+  writes it first, also when Claude Code put its own filler reply (model `<synthetic>`, "No
+  response requested.") between the interrupt and the tick. A stalled turn that was never approved is still recovered. The paused tick's
   `ok` is not sent to the stop supervisor either (on the test build it reviewed that `ok` and
   pushed the agent back to work); the idle teardown still advances. The tick that removes the
   cron is not reviewed either.

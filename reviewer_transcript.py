@@ -177,6 +177,9 @@ def ends_with_operator_interrupt(events):
         if ev.get("isSidechain") or kind not in ("user", "assistant"):
             continue
         if kind == "assistant":
+            msg = ev.get("message")
+            if isinstance(msg, dict) and msg.get("model") == "<synthetic>":
+                continue  # the host's own filler ("No response requested."), not the agent
             return False
         if _event_text(ev).lstrip().startswith("[Request interrupted by user"):
             return True
