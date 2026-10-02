@@ -984,6 +984,23 @@ def test_a_compaction_summary_or_tool_result_after_the_interrupt_does_not_end_th
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 
 
+def test_the_hosts_own_filler_reply_after_the_interrupt_does_not_end_the_pause(
+        tmp_path, monkeypatch):
+    # Claude Code sometimes writes an assistant event of its own between the interrupt and the
+    # tick (model `<synthetic>`, "No response requested."). The agent did not carry on.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    filler = [{"type": "assistant", "isApiErrorMessage": False,
+               "message": {"role": "assistant", "model": "<synthetic>",
+                           "stop_reason": "stop_sequence",
+                           "content": [{"type": "text", "text": "No response requested."}]}}]
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, filler))
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
+
+
 def test_a_tick_after_the_agent_resumed_does_not_mark_a_pause(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
