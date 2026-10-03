@@ -99,6 +99,13 @@ def serialize_questions(tool_input):
 # its own remedy, a bigger budget -- from "the reviewer failed".
 TIMEOUT_EXIT = 124
 
+# Exit code `_run` reports when its caller's `should_cancel` fired and the reviewer was torn down
+# (the shell convention for an interrupted command).
+CANCELLED_EXIT = 130
+
+# How often `_run` asks `should_cancel`. Half a second is well under the time an operator notices.
+CANCEL_POLL_S = 0.5
+
 
 # codex exited 0 but its `-o` file held no schema-conforming verdict. A DISTINCT nonzero code (not
 # TIMEOUT_EXIT, not 0) so the fail-CLOSED block is attributable to a malformed/absent verdict
@@ -183,8 +190,37 @@ def _terminate(process):
             pass
 
 
+def _communicate(process, input_bytes, timeout, should_cancel):
+    """`process.communicate`, but asking `should_cancel` every CANCEL_POLL_S. Returns (stdout,
+    stderr, cancelled); raises TimeoutExpired at the deadline exactly as communicate does."""
+    if should_cancel is None:
+        stdout, stderr = process.communicate(input=input_bytes, timeout=timeout)
+        return stdout, stderr, False
+    deadline = time.monotonic() + timeout
+    pending = input_bytes
+    while True:
+        remaining = deadline - time.monotonic()
+        try:
+            # Retrying after a timeout loses no output; the input is only sent the first time.
+            stdout, stderr = process.communicate(input=pending,
+                                                 timeout=max(0.0, min(CANCEL_POLL_S, remaining)))
+            return stdout, stderr, False
+        except subprocess.TimeoutExpired:
+            pending = None
+            if time.monotonic() >= deadline:
+                raise
+        try:
+            cancel = should_cancel()
+        except Exception:
+            cancel = False  # a broken check must not cost the caller its review
+        if cancel:
+            _terminate(process)
+            stdout, stderr = process.communicate()
+            return stdout, stderr, True
+
+
 def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=None,
-         scratch_dir=None):
+         scratch_dir=None, should_cancel=None):
     """Run one reviewer call, and make sure nothing it started outlives it.
 
     Three cleanup paths, because a review ends early in three different ways:
@@ -206,6 +242,9 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
 
     cwd matters for pi (which has no `-C` flag and audits its process cwd); codex uses
     `-C proj` and leaves cwd=None (inherit), so its behavior is unchanged.
+
+    `should_cancel`, when given, is asked every CANCEL_POLL_S while the reviewer runs; once it
+    returns true the reviewer tree is torn down and the call returns CANCELLED_EXIT.
     """
     started = time.monotonic()
     posix = os.name == "posix"
@@ -282,7 +321,7 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
 
     try:
         try:
-            stdout, stderr = process.communicate(input=input_bytes, timeout=timeout)
+            stdout, stderr, cancelled = _communicate(process, input_bytes, timeout, should_cancel)
         except subprocess.TimeoutExpired:
             _terminate(process)
             stdout, stderr = process.communicate()
@@ -303,6 +342,9 @@ def _run(argv, input_bytes=None, timeout=DEFAULT_TIMEOUT, cwd=None, on_cancel=No
         _close(lifecycle_write)
 
     _record_invocation(argv, started)
+    if cancelled:
+        return (CANCELLED_EXIT, (stdout or b"").decode("utf-8", "replace"),
+                "review cancelled by its caller")
     return (
         process.returncode,
         (stdout or b"").decode("utf-8", "replace"),
@@ -725,12 +767,19 @@ def brief_capture_argv(proj):
     return argv + ["-"]
 
 
-def _brief_capture_run(proj, data, timeout, on_cancel=None):
+def _cancel_kwargs(should_cancel):
+    """`should_cancel` as a keyword only when a caller supplied one, so a call path (or a test
+    seam) that predates the keyword is untouched."""
+    return {} if should_cancel is None else {"should_cancel": should_cancel}
+
+
+def _brief_capture_run(proj, data, timeout, on_cancel=None, should_cancel=None):
     """Run the read-only --json brief with `data` on stdin and capture the session id from
     the leading `thread.started` event (emitted as soon as the session exists, so it is
     parsed even if the turn then times out or exits nonzero). Returns (sid, code, out, err)."""
     code, out, err = _run(
-        brief_capture_argv(proj), input_bytes=data, timeout=timeout, on_cancel=on_cancel
+        brief_capture_argv(proj), input_bytes=data, timeout=timeout, on_cancel=on_cancel,
+        **_cancel_kwargs(should_cancel)
     )
     return parse_session_id(out), code, out, err
 
@@ -739,10 +788,12 @@ def _brief_capture_run(proj, data, timeout, on_cancel=None):
 # reviewerAgent.md's raw bytes) and is removed rather than left unused: sending the project file
 # alone silently omits REVIEWER_STANDING_BRIEF, so keeping it would leave a callable path that
 # bypasses composition. Every brief goes through compose_brief -> brief_and_capture_text.
-def brief_and_capture_text(proj, text, timeout=BRIEF_CAPTURE_TIMEOUT, on_cancel=None):
+def brief_and_capture_text(proj, text, timeout=BRIEF_CAPTURE_TIMEOUT, on_cancel=None,
+                           should_cancel=None):
     """Brief from an in-memory string (compose_brief's output) and capture the session id."""
     return _brief_capture_run(
-        proj, (text or "").encode("utf-8"), timeout, on_cancel=on_cancel
+        proj, (text or "").encode("utf-8"), timeout, on_cancel=on_cancel,
+        **_cancel_kwargs(should_cancel)
     )
 
 
@@ -827,12 +878,13 @@ def resume_by_id_argv(session_id, proj, sandbox, prompt, extra_config=None,
 
 def run_codex_resume_by_id(
     session_id, proj, sandbox, prompt, timeout=DEFAULT_TIMEOUT, extra_config=None,
-    on_cancel=None,
+    on_cancel=None, should_cancel=None,
 ):
     return _run(
         resume_by_id_argv(session_id, proj, sandbox, prompt, extra_config=extra_config),
         timeout=timeout,
         on_cancel=on_cancel,
+        **_cancel_kwargs(should_cancel)
     )
 
 
@@ -1165,6 +1217,7 @@ def run_pi_review(
     role=ROLE_REVIEWER,
     require_staged_read=True,
     on_cancel=None,
+    should_cancel=None,
 ):
     """One read-only Pi turn against ``cwd`` using capture-then-resume.
 
@@ -1187,7 +1240,8 @@ def run_pi_review(
         # accepts literal text (DEFAULT_BRIEF was passed that way when no project brief existed).
         argv = pi_argv(prompt, model=model, thinking=thinking,
                        system_prompt=compose_brief(cwd))
-    code, out, err = _run(argv, timeout=timeout, cwd=str(cwd), on_cancel=on_cancel)
+    code, out, err = _run(argv, timeout=timeout, cwd=str(cwd), on_cancel=on_cancel,
+                          **_cancel_kwargs(should_cancel))
     if not stored:
         sid = parse_pi_session_id(out)
         if sid:
@@ -1244,7 +1298,7 @@ def retire_legacy_sessions(claude_session_id):
 
 
 def ensure_session(cwd, claude_session_id, timeout=BRIEF_CAPTURE_TIMEOUT, role=ROLE_REVIEWER,
-                   on_cancel=None):
+                   on_cancel=None, should_cancel=None):
     """Return a codex reviewer session id for THIS Claude session and `role`, briefing+capturing
     one if none is persisted yet. The brief runs at the CANONICAL PROJECT ROOT (where
     reviewerAgent.md lives and which is identical across worktrees); later audits resume
@@ -1264,7 +1318,7 @@ def ensure_session(cwd, claude_session_id, timeout=BRIEF_CAPTURE_TIMEOUT, role=R
     # Piping the project file's raw bytes, as this did, silently dropped the system prompt.
     composed = compose_brief(root)
     new_sid, code, out, err = brief_and_capture_text(
-        root, composed, timeout=timeout, on_cancel=on_cancel
+        root, composed, timeout=timeout, on_cancel=on_cancel, **_cancel_kwargs(should_cancel)
     )
     if not new_sid:
         detail = (err or "").strip() or "no session id captured (exit {})".format(code)
@@ -1431,7 +1485,7 @@ def claude_rate_limit_detail(stdout):
 
 
 def run_claude_review(cwd, claude_session_id, prompt, timeout=DEFAULT_TIMEOUT,
-                      effort=None, role=ROLE_REVIEWER, on_cancel=None):
+                      effort=None, role=ROLE_REVIEWER, on_cancel=None, should_cancel=None):
     """One Claude Code reviewer turn against `cwd`, resuming this project's own child session.
 
     The first turn mints a session id and publishes it compare-and-set; later turns resume it,
@@ -1447,7 +1501,7 @@ def run_claude_review(cwd, claude_session_id, prompt, timeout=DEFAULT_TIMEOUT,
     )
     code, out, err = _run(
         argv, input_bytes=(prompt or "").encode("utf-8"), timeout=timeout, cwd=str(cwd),
-        on_cancel=on_cancel,
+        on_cancel=on_cancel, **_cancel_kwargs(should_cancel)
     )
     if not stored:
         # Only after a turn that actually ran: publishing an id the CLI never accepted would

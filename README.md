@@ -1014,6 +1014,12 @@ the rerouted question is answered by stop supervision. When `REVIEWER_STOPCONTIN
 host timeout is 630 s to fit the reviewer plus a full delay, and the delay is capped against the
 remaining budget so it never overruns cancellation (which would fail the stop open).
 
+A reply you submit (Enter) while the agent's turn is still ending wins over the supervisor, with
+no Escape needed: Claude Code queues it, and the Stop hook sees it in the transcript. Queued
+before the review, the review is skipped; during the review, the reviewer is killed within about
+half a second; during the delay, or as the verdict arrives, a continue directive is dropped. Each
+case allows the stop with a notice, and the dropped directive is shown to you, not to the agent.
+
 The streaming, scratch, and idle-threshold behavior below is specific to **this Claude Code plugin
 running its `codex` reviewer backend** (Claude Code as the host, codex as the reviewer). It does not
 apply to this plugin's `pi` or `claude` backends, and it is unrelated to the separate native-Codex

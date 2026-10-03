@@ -109,6 +109,17 @@ def _watchdog_on_stop_ok(cwd, claude_sid, is_tick):
         rl.clear_watchdog_teardown_ready(cwd, claude_sid)
 
 
+def _allow_for_operator_reply(key, when, outcome, directive=""):
+    """Let the stop through because the operator replied. Not an approval: nothing is recorded
+    as judged complete, and the watchdog pause is not set, since the reply is the next prompt."""
+    rl.log("[stop] key={} operator replied {} -> {}, allow stop".format(key, when, outcome))
+    message = "[stopContinue] you replied {}, so the stop was allowed ({}).".format(when, outcome)
+    if directive.strip():
+        message += " The supervisor had said:\n" + rl.short(directive)
+    print(json.dumps(rl.info_output(message)))
+    return 0
+
+
 def _main(data):
     hook_start = _hook_now()  # for the pre-enactment delay's remaining-budget cap
     cwd = data.get("cwd") or rl.project_dir()
@@ -187,6 +198,23 @@ def _main(data):
                "call".format(key))
         return 0
 
+    transcript_path = rl.resolve_transcript_path(data)
+    # The operator pressed Enter on a reply while this turn was still running: they have the
+    # turn, so the review gives way at every point it can -- skipped here, killed while it runs,
+    # or its directive dropped before it is enacted. Without this the directive won and the
+    # operator had to press Escape as well (2026-09-02: "no continue" queued 4s after the reply,
+    # pushed anyway 39s later).
+    watch = rl.operator_reply_watch(transcript_path)
+    if watch.replied():
+        return _allow_for_operator_reply(key, "before the review", "supervisor call skipped")
+    cancelled = []
+
+    def should_cancel():
+        if watch.replied():
+            cancelled.append(True)
+            return True
+        return False
+
     # A fresh (NOT hook-driven) stop is the first stop of a user turn -> reset the budget, and
     # forget the previous chain's directive so it cannot count as a repeat.
     if not stop_active:
@@ -202,7 +230,6 @@ def _main(data):
         )))
         return 0
 
-    transcript_path = rl.resolve_transcript_path(data)
     # The agent answered the last directives without acting: it disagrees, often because the
     # pushed work needs a decision only the operator can make. The supervisor rewords each push,
     # so `directive_repeats` never fires, and being a RESUMED session it cites its own earlier
@@ -247,6 +274,7 @@ def _main(data):
             timeout=STOP_TIMEOUT,
             effort=effort,
             role=rl.ROLE_STOP,
+            should_cancel=should_cancel,
         )
         sid = rl.read_claude_session(cwd, claude_sid, role=rl.ROLE_STOP) or "unestablished"
     elif backend == "pi":
@@ -264,12 +292,16 @@ def _main(data):
             thinking=thinking,
             role=rl.ROLE_STOP,
             require_staged_read=False,
+            should_cancel=should_cancel,
         )
         sid = rl.read_pi_session(cwd, claude_sid, role=rl.ROLE_STOP) or "unestablished"
     else:
         # The STOP role, not the commit/question reviewer's: supervision runs at every turn
         # end, and sharing one session let its framing bleed into the next commit audit.
-        sid, serr = rl.ensure_session(cwd, claude_sid, role=rl.ROLE_STOP)
+        sid, serr = rl.ensure_session(cwd, claude_sid, role=rl.ROLE_STOP,
+                                      should_cancel=should_cancel)
+        if cancelled:  # Enter while the first stop of this session briefs its supervisor
+            return _allow_for_operator_reply(key, "during the review", "review cancelled")
         if sid is None:
             if rl.model_rejection_detail(backend, serr):
                 print(json.dumps(rl.info_output(
@@ -289,6 +321,7 @@ def _main(data):
             prompt,
             timeout=STOP_TIMEOUT,
             extra_config=[rl.stopcontinue_effort_config()],
+            should_cancel=should_cancel,
         )
     # A commit-gate APPROVED is neither a completion verdict nor a directive (see
     # `stop_ok_position`): relaying it told the agent "NOT yet complete ... APPROVED".
@@ -327,6 +360,11 @@ def _main(data):
             rl.retire_stop_session(cwd, claude_sid)
             rl.log("[stop] key={} stop session retired after {} reviews".format(key, every))
 
+    if cancelled:
+        return _allow_for_operator_reply(key, "during the review", "review cancelled")
+    if keep_going and watch.replied():
+        return _allow_for_operator_reply(key, "as the verdict arrived", "directive dropped", out)
+
     # A directive that restates the previous one in this stop chain was already answered by the
     # agent; re-issuing it only loops (#19). Let the stop through so the operator can respond.
     if keep_going and stop_active and rl.directive_repeats(cwd, claude_sid, out):
@@ -344,8 +382,12 @@ def _main(data):
     produced_verdict = keep_going or (code == 0 and bool(out.strip()) and rl.is_stop_ok(out))
     if produced_verdict:
         budget = rl.HOOK_BUDGET_S - (_hook_now() - hook_start) - rl.DELAY_MARGIN_S
-        rl.apply_stopcontinue_delay(
-            "continue" if keep_going else "stop-approval", budget_remaining=budget)
+        cut_short = rl.apply_stopcontinue_delay(
+            "continue" if keep_going else "stop-approval", budget_remaining=budget,
+            should_cancel=watch.replied)
+        if cut_short and keep_going:
+            return _allow_for_operator_reply(
+                key, "during the pre-enactment delay", "directive dropped", out)
 
     if keep_going:
         rl.bump_nudge_count(cwd, claude_sid)

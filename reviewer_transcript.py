@@ -190,6 +190,82 @@ def ends_with_operator_interrupt(events):
     return False
 
 
+def _reply_signal(ev):
+    """'agent' for the agent's own message, 'reply' for a message the operator submitted while
+    the turn was running, else None. Claude Code writes the submit as a `queue-operation` /
+    `enqueue` event at the moment the operator presses Enter."""
+    kind = ev.get("type")
+    if kind == "assistant":
+        msg = ev.get("message")
+        if ev.get("isSidechain") or (isinstance(msg, dict) and msg.get("model") == "<synthetic>"):
+            return None
+        return "agent"
+    if kind != "queue-operation" or ev.get("operation") != "enqueue":
+        return None
+    content = ev.get("content")
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    low = content.lstrip().lower()
+    if low.startswith("stopcontinuewatchdog tick") or any(
+            low.startswith(pre) for pre in _NON_HUMAN_USER_PREFIXES):
+        return None
+    return "reply"
+
+
+class _OperatorReplyWatch:
+    """Has the operator submitted a reply since the agent's last message? Reads the transcript
+    once, then only what is appended, so a Stop hook can poll it cheaply while a review runs."""
+
+    def __init__(self, transcript_path):
+        self._path = transcript_path
+        self._offset = 0
+        self._replied = False
+        data = self._read_from(0)
+        end = data.rfind(b"\n") + 1
+        self._offset = end
+        # Only what follows the agent's last message matters, and that is near the end.
+        for line in reversed(data[:end].splitlines()):
+            signal = self._signal(line)
+            if signal is not None:
+                self._replied = signal == "reply"
+                break
+
+    def _read_from(self, offset):
+        if not self._path:
+            return b""
+        try:
+            with open(self._path, "rb") as fh:
+                fh.seek(offset)
+                return fh.read()
+        except OSError:
+            return b""
+
+    @staticmethod
+    def _signal(line):
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            return None
+        return _reply_signal(ev) if isinstance(ev, dict) else None
+
+    def replied(self):
+        data = self._read_from(self._offset)
+        end = data.rfind(b"\n") + 1  # a line still being written is read on the next poll
+        self._offset += end
+        for line in data[:end].splitlines():
+            signal = self._signal(line)
+            if signal is not None:
+                self._replied = signal == "reply"
+        return self._replied
+
+
+def operator_reply_watch(transcript_path):
+    return _OperatorReplyWatch(transcript_path)
+
+
 def directives_answered_without_action(events):
     """How many of this turn's most recent stop-hook directives the agent answered without a
     single tool call, counted back from the latest until one it acted on.

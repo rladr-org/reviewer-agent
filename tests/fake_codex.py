@@ -21,9 +21,9 @@ codex success/failure without invoking the real reviewer:
                          WHICH brief text reached codex.
   FAKE_CODEX_DUMP_TMPDIR if set, write this invocation's TMPDIR env value to that file, so a test
                          can prove the audit subprocess ran with a scratch-scoped TMPDIR.
-  FAKE_CODEX_APPEND_FILE / FAKE_CODEX_APPEND_LINE  a plain resume appends that line to that file
-                         before FAKE_CODEX_SLEEP, e.g. an operator reply queued in the transcript
-                         while a stop review runs.
+  FAKE_CODEX_APPEND_FILE / FAKE_CODEX_APPEND_LINE  every invocation appends that line to that file
+                         before any sleep, e.g. an operator reply queued in the transcript while a
+                         stop review (or its session's briefing) runs.
 
 The STREAMING COMMIT AUDIT (`--json ... resume <id> <prompt>`) is driven by these extra knobs:
 
@@ -80,6 +80,13 @@ _tmpdir_dump = os.environ.get("FAKE_CODEX_DUMP_TMPDIR")
 if _tmpdir_dump:
     with open(_tmpdir_dump, "w", encoding="utf-8") as _fh:
         _fh.write(os.environ.get("TMPDIR", ""))
+
+# FAKE_CODEX_APPEND_FILE / FAKE_CODEX_APPEND_LINE: append one line to a file (a Claude transcript)
+# before any sleep, so a test can make the operator press Enter while the review is running.
+_append = os.environ.get("FAKE_CODEX_APPEND_FILE")
+if _append:
+    with open(_append, "a", encoding="utf-8") as _fh:
+        _fh.write(os.environ.get("FAKE_CODEX_APPEND_LINE", "") + "\n")
 
 
 def _emit(event):
@@ -183,13 +190,6 @@ if "--json" in argv:
         + "\n"
     )
     sys.exit(0)
-
-# FAKE_CODEX_APPEND_FILE / FAKE_CODEX_APPEND_LINE: append one line to a file (a Claude transcript)
-# before sleeping, so a test can make the operator press Enter while the review is running.
-_append = os.environ.get("FAKE_CODEX_APPEND_FILE")
-if _append:
-    with open(_append, "a", encoding="utf-8") as _fh:
-        _fh.write(os.environ.get("FAKE_CODEX_APPEND_LINE", "") + "\n")
 
 _sleep = os.environ.get("FAKE_CODEX_SLEEP")
 if _sleep:

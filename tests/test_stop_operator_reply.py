@@ -227,6 +227,22 @@ def test_pressing_enter_during_the_review_kills_it_and_allows_the_stop(tmp_path,
     assert "operator replied" in log and "cancelled" in log
 
 
+def test_pressing_enter_while_the_stop_session_is_briefed_kills_the_briefing(
+        tmp_path, monkeypatch):
+    # The first codex-backed stop briefs a new supervisor session before it can review.
+    home, repo = _setup(tmp_path, monkeypatch)
+    rl.clear_session_id(repo, "claude-stop", role=rl.ROLE_STOP)
+    tr = _write(tmp_path, [_assistant("Shall I go ahead with A?")])
+    started = time.monotonic()
+    p = _run_hook(repo, tr, home, FAKE_CODEX_BRIEF_SLEEP="60", FAKE_CODEX_APPEND_FILE=tr,
+                  FAKE_CODEX_APPEND_LINE=json.dumps(_enqueue("yes, A")))
+    assert time.monotonic() - started < 20  # not the briefing's 60s
+    assert p.returncode == 0, p.stderr
+    assert _output(p).get("decision") != "block"
+    log = _log_text(home)
+    assert "operator replied" in log and "cancelled" in log
+
+
 def test_a_reply_queued_as_the_verdict_arrives_still_wins(tmp_path, monkeypatch):
     home, repo = _setup(tmp_path, monkeypatch)
     tr = _write(tmp_path, [_assistant("Shall I go ahead with A?")])

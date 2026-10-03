@@ -406,23 +406,38 @@ def stopcontinue_delay_secs():
     return min(DELAY_MAX_S, _tunable_int("REVIEWER_STOPCONTINUE_DELAY_SECS", "stopContinueDelaySecs", 0, 0))
 
 
-def apply_stopcontinue_delay(decision, budget_remaining=None):
+def apply_stopcontinue_delay(decision, budget_remaining=None, should_cancel=None):
     """Pause before enacting a stopContinue `decision` ("continue" or "stop-approval"), if
     configured. Announces on stderr BEFORE sleeping so an operator can Escape during the window,
     then sleeps via the `_delay_sleep` seam. `budget_remaining`, when given, caps the sleep against
-    the time left before the host cancels the Stop hook, so the decision is always emitted."""
+    the time left before the host cancels the Stop hook, so the decision is always emitted.
+    `should_cancel`, when given, is asked every half second; True is returned if it fired, so the
+    caller can drop the decision."""
     secs = stopcontinue_delay_secs()
     if budget_remaining is not None:
         secs = min(secs, max(0, int(budget_remaining)))
     if secs <= 0:
-        return
+        return False
     try:
         sys.stderr.write(
             "[stopContinue] applying {} in {}s -- interrupt now to override.\n".format(decision, secs))
         sys.stderr.flush()
     except Exception:  # a heads-up must never be the reason the decision is not enacted
         pass
-    _delay_sleep(secs)
+    if should_cancel is None:
+        _delay_sleep(secs)
+        return False
+    left = float(secs)
+    while left > 0:
+        step = min(0.5, left)
+        _delay_sleep(step)
+        left -= step
+        try:
+            if should_cancel():
+                return True
+        except Exception:
+            pass  # a broken check must not cut the window short or stop the decision
+    return False
 
 
 # Retained verdicts per project. Enough to cover a long convergence across several sessions,

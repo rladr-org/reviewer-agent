@@ -9,6 +9,13 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
+- Claude Code: a reply the operator submits while a stop review is running wins over the
+  supervisor. Claude Code queues it and records the submit in the transcript; the Stop hook
+  watches for that and skips the review, kills the reviewer within about half a second, or drops
+  a continue directive that arrives with or after it (also during the pre-enactment delay), then
+  allows the stop. The operator had to press Escape as well, or the directive won anyway.
+  Watchdog ticks and task notifications in the queue do not count.
+
 - Claude Code: the stop supervisor also sees the agent's own text replies since it last approved
   a stop (no tool calls or output), each trimmed to its last 1,500 characters and 8,000 in all
   (`stopAgentReplyChars`, `stopAgentRepliesMaxChars`). It reviews only the turn that is ending,
