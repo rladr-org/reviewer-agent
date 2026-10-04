@@ -807,7 +807,7 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
             outcome = value.get("outcome")
             if outcome == "budget_exhausted" and value.get("strict_completion") is not True:
                 return None
-            return outcome if outcome in ("stop_ok", "failed_open", "budget_exhausted") else None
+            return outcome if outcome in ("stop_ok", "stop_wait", "failed_open", "budget_exhausted") else None
         except OSError:
             if strict_io:
                 raise

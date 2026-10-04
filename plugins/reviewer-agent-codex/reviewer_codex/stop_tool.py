@@ -65,7 +65,14 @@ def _allow_stop(root, ticket, outcome):
     background_markers = ticket.get("background_markers") or [
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
-    if background_markers:
+    if outcome == "stop_wait":
+        # A temporary yield is not completion: retain the reviewed markers. Also reject
+        # newly observed work even if its caller omitted the generation invalidation.
+        reviewed = {(item.get("kind"), item.get("id")) for item in background_markers}
+        if any((item.get("kind"), item.get("id")) not in reviewed
+               for item in liveness.outstanding(root, session_id)):
+            return False
+    elif background_markers:
         try:
             liveness.clear_items(root, session_id, background_markers)
             if liveness.outstanding(root, session_id):
@@ -171,8 +178,10 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
             "stop supervisor failed; the next stop is allowed",
             detail=detail,
         )
-    if _stop_ok(output):
-        completion = _complete_allowed_stop(cancel_event, root, ticket)
+    waiting = output.strip().upper() == "STOP_WAIT"
+    if waiting or _stop_ok(output):
+        outcome = "stop_wait" if waiting else "stop_ok"
+        completion = _complete_allowed_stop(cancel_event, root, ticket, outcome=outcome)
         if completion == "cancelled":
             return _cancelled(root, ticket, abort_callback_registered)
         if completion == "new_work":
@@ -181,7 +190,9 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
                 "task input or work changed while stopContinue was running",
                 directive="Address the new input or work and inspect newly started background work.",
             )
-        return _result("stop_ok", "the stop supervisor approved completion", ruling=output.strip())
+        return _result(outcome, ("the stop supervisor approved a background wait" if waiting
+                                 else "the stop supervisor approved completion"),
+                       ruling=output.strip())
     completed, _unused = cancellation.complete(cancel_event, lambda: None)
     if not completed:
         return _cancelled(root, ticket, abort_callback_registered)

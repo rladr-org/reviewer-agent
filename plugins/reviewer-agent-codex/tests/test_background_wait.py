@@ -75,7 +75,7 @@ def test_wait_rejects_new_marker_even_without_generation_event(git_repo, waiting
     monkeypatch.setattr(backend, "review_turn", ruling)
     result = supervisor.supervise_hook(event(git_repo))
     assert result["decision"] == "block"
-    assert "changed" in result["reason"]
+    assert "newly started background work" in result["reason"]
     assert len(liveness.outstanding(git_repo, SESSION)) == 4
 
 

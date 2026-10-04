@@ -332,7 +332,12 @@ The Claude Code plugin provides three per-repository capabilities:
    rewords its push.
 
 The Codex package provides the commit gate and stop supervisor. Its blocking MCP calls suspend the
-developer agent until the independent reviewer returns or the call is cancelled.
+developer agent until the independent reviewer returns or the call is cancelled. Codex also
+accepts `STOP_WAIT` for a temporary yield while background work continues or a scheduled wake-up
+is pending, when a concrete resumption mechanism is already arranged and no other authorized
+work can proceed now (or the operator explicitly requested the pause). This preserves task
+markers rather than declaring the work complete. A missing wake-up arrangement or actionable
+foreground work still prompts continuation. See [Codex liveness](plugins/reviewer-agent-codex/README.md#codex-specific-liveness).
 
 ## Agent-assisted installation
 

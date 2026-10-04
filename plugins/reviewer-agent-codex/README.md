@@ -629,7 +629,13 @@ reviewer thread and cursor are retired and the next attempt is deliberately fres
 The plugin records a shell item at `PreToolUse` and clears it at the corresponding `PostToolUse`.
 Codex can deliver that post event when a later `write_stdin` poll observes completion. Subagents are
 tracked from `SubagentStart` through `SubagentStop`. If Codex proposes stopping while either remains
-active, stopContinue directs it to wait and inspect the result. Before blocking on a shell marker,
+active, stopContinue distinguishes temporary background waiting from task completion. If a
+monitor, scheduled wake-up, or host completion notification is already arranged and no other
+authorized work can proceed now (or the operator explicitly requested the pause), it permits
+the turn to end with `STOP_WAIT`. A future wake-up test is verified on the resumed turn. Ordinary
+unified-exec sessions do not by themselves establish an automatic wake-up. If no resumption
+mechanism is arranged or actionable foreground work remains, the supervisor directs that work.
+Before reviewing a shell marker,
 the Stop hook waits 250 milliseconds and rechecks once; only a concurrently delivered
 `PostToolUse` clear changes that immediate outcome.
 
@@ -637,16 +643,19 @@ Codex exposes no lifecycle API for enumerating a unified-exec session whose `ses
 and either a shell completion event or a `SubagentStop` event can be missed. Sandboxed hooks cannot
 safely use the host process table or collaboration registry to prove whether such a marker is still
 live. A stop with shell and/or subagent markers therefore routes the exact `(kind, id)` set directly
-through the same minimal, cancellable completion supervisor. The supervisor may approve shell markers only when
+through the same minimal, cancellable completion supervisor. For a completion ruling (`STOP_OK`), the supervisor may approve shell markers only when
 the proposed final states that the named work was inspected or polled and no process or
 unified-exec session remains; for subagent markers it must state that the collaboration registry
 was reconciled and no live subagent remains. Otherwise it directs the developer agent to perform
-the missing polling or reconciliation after the blocking call returns. Approval or fail-open clears
+the missing polling or reconciliation after the blocking call returns. `STOP_WAIT` preserves
+the existing shell and subagent markers for later lifecycle events and reviews; it is neither
+a declaration of completion nor a failure. Completion approval or fail-open clears
 only the exact adjudicated `(kind, id)` set. Cleanup is best-effort so a state I/O error cannot
 defeat StopContinue's fail-open contract. New work that appears during the ruling prevents the stop.
 
 A yielded unified-exec response containing `session_id` is still active. Code-mode orchestration
-must poll that exact session with `write_stdin` until it returns completion; waiting only on the
+must poll that exact session with `write_stdin` to observe completion, unless it is temporarily
+yielding to an arranged resumption mechanism; waiting only on the
 surrounding JavaScript cell does not poll the underlying command and intentionally leaves its
 liveness marker active.
 

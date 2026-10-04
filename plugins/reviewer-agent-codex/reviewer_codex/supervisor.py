@@ -59,7 +59,7 @@ def supervise_hook(data, cancel_event=None):
 def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
     result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True, fresh=fresh)
     status = result.get("status")
-    if status in ("stop_ok", "failed_open"):
+    if status in ("stop_ok", "stop_wait", "failed_open"):
         # No second Stop is needed. Consume now to validate generations and avoid leaving
         # approval that could authorize another event. review_stop snapshots work itself,
         # so it also works when the native hook emits no PreToolUse event.
@@ -69,7 +69,7 @@ def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
                 "Task input or work changed during completion review. Address the new "
                 "request or work before stopping."
             )
-        return {} if permit == "stop_ok" else _failed_open()
+        return {} if permit in ("stop_ok", "stop_wait") else _failed_open()
     if status in ("cancelled", "disabled"):
         return {}
     if status == "incomplete":

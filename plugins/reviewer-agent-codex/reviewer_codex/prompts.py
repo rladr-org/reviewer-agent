@@ -299,10 +299,11 @@ def _persistent_shell_context(shell_markers):
         "\n\nPERSISTENT SHELL MARKERS AFTER ONE WAIT / INSPECTION NUDGE:\n"
         + "\n".join(rendered)
         + "\nThese durable markers mean Codex did not deliver their matching completion event; they "
-        "are not proof that a process is still running. Return STOP_OK only if the agent's "
-        "proposed final message explicitly states that it inspected or polled the named work "
+        "are not proof that a process is still running. For a completion ruling (STOP_OK), the agent's "
+        "proposed final message must be one that explicitly states that it inspected or polled the named work "
         "and that no process or unified-exec session remains. Otherwise direct the agent to "
-        "perform that inspection or polling. Do not infer completion merely from marker age.\n"
+        "perform that inspection or polling, unless STOP_WAIT applies under the background-wait "
+        "policy below. Do not infer completion merely from marker age.\n"
         "--- end persistent shell markers ---\n"
     )
 
@@ -339,10 +340,11 @@ def _background_liveness_context(background_markers):
         + "\n".join(rendered)
         + "\nCodex has not delivered the matching lifecycle completion events. These markers may "
         "represent live work or lost completion events; their presence alone does not distinguish "
-        "the two. Return STOP_OK only if the agent's proposed final message explicitly reports "
+        "the two. For a completion ruling (STOP_OK), the agent's proposed final message must report "
         "every applicable completion check. "
         + " ".join(requirements)
-        + " Otherwise direct the agent to perform the missing check. Do not infer completion "
+        + " Otherwise direct the agent to perform the missing check, unless STOP_WAIT applies under "
+        "the background-wait policy below. Do not infer completion "
         "merely from marker age.\n--- end background liveness markers ---\n"
     )
 
@@ -360,6 +362,33 @@ proceed. A request for permission already granted is not an operator-only depend
 name the specific authorized work still unfinished. Follow the normal STOP_OK/directive contract.
 """
 
+
+
+_CODEX_BACKGROUND_WAIT = """
+CODEX BACKGROUND WAIT — additional permitted stop outcome
+This Codex-specific policy extends the stopping and output rules above. Ending the current
+turn to await background work is not a declaration that the overall task is complete.
+Return exactly STOP_WAIT when the context establishes that background work is still running
+or a scheduled wake-up is pending, a concrete resumption mechanism is already arranged
+(for example a running monitor, scheduled wake-up, or a host completion notification),
+and no other authorized work can proceed now. An operator's explicit instruction to pause
+for an arranged wake-up test also permits this temporary yield. Do not assume an ordinary
+unified-exec session wakes the agent automatically; the resumption mechanism must be named.
+Do not require background work to finish, processes to exit, or subagents to terminate before
+permitting this wait. Do not require verification of a future wake-up before it occurs;
+verification belongs to the resumed turn. STOP_WAIT preserves live task markers.
+
+A durable marker alone does not prove live work or an arranged wake-up. A vague promise to
+check later, a monitor the agent has not yet started, or authorized foreground work that can
+proceed now is not a background wait: direct the missing work or handoff. When the agent
+claims completion, use STOP_OK only after the applicable marker reconciliation above.
+Honor an explicit operator cancellation or pause under the normal policy.
+
+OUTPUT FOR THIS CODEX REVIEW: exactly STOP_WAIT (alone, no explanation) for the temporary
+wait described here; STOP_OK for completed work or other normally permitted stops; otherwise
+a next-step directive naming work the agent can perform now. Do not embed STOP_WAIT in a
+directive. These are alternatives; never combine a stop sentinel with instructions to continue.
+"""
 
 def stop_prompt(
     project_path,
@@ -382,7 +411,8 @@ def stop_prompt(
         + operator_context(project_path, session_id)
         + plan_context(project_path, session_id)
         + marker_context
+        + _CODEX_BACKGROUND_WAIT
         + "\nAGENT'S PROPOSED FINAL MESSAGE:\n"
         + str(final_message or "").strip()
-        + "\n\nReturn STOP_OK or the next-step directive now."
+        + "\n\nReturn STOP_OK, STOP_WAIT, or the next-step directive now."
     )
