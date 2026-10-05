@@ -16,7 +16,9 @@ _REJECTED = re.compile(r"\bREJECTED\b")
 # are not verdicts. Recognize explicit standalone/colon/dash headings, including common
 # Markdown/list decoration, rather than searching the entire explanation for a word.
 _REJECTION_VERDICT = re.compile(
-    r"^[ \t]*(?:(?:#{1,6}|[-+*]|\d+[.)])[ \t]+)?[*_`]*REJECTED[*_`]*"
+    r"^[ \t]*(?:(?:#{1,6}|[-+*]|\d+[.)])[ \t]+)?"
+    r"(?:[*_`]*(?:(?:FINAL|CURRENT)[ \t]+)?(?:VERDICT|DECISION|RESULT|STATUS|OUTCOME)"
+    r"[*_`]*[ \t]*:[*_`]*[ \t]*)?[*_`]*REJECTED[*_`]*"
     r"(?:[ \t]*:|[ \t]*[.!]?[ \t]*$|[ \t]+[—–-][ \t])",
     re.MULTILINE,
 )

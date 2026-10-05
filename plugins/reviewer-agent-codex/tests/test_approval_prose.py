@@ -17,6 +17,7 @@ Prior findings:
     RECIPES_RULING,
     RECIPES_RULING + "\n\nSUGGESTIONS:\n1. Add a short example.",
     "APPROVED\n\nThe previous REJECTED verdict is superseded; both findings are fixed.",
+    "APPROVED\n\nThe prior verdict: REJECTED; those findings are now fixed.",
     "APPROVED\n\nRejected inputs now produce the documented validation error.",
     "APPROVED\n\nThe test asserts that the returned status equals `REJECTED`.",
 ])
@@ -32,6 +33,9 @@ def test_approval_survives_explanatory_rejected_prose(ruling):
     "APPROVED\n**REJECTED**\n1. Fix the bug",
     "APPROVED\n- REJECTED: fix the bug",
     "APPROVED\n1. REJECTED: fix the bug",
+    "APPROVED\nVerdict: REJECTED: fix the bug",
+    "APPROVED\nFinal verdict: REJECTED: fix the bug",
+    "APPROVED\n**Decision:** **REJECTED**: fix the bug",
     "REJECTED:\nThe earlier result was APPROVED.",
     "The result is APPROVED",
     "APPROVEDX",
