@@ -12,6 +12,14 @@ from .git import git_head, run_commit, staged_files, staged_tree
 
 _APPROVED = re.compile(r"^APPROVED\b")
 _REJECTED = re.compile(r"\bREJECTED\b")
+# A second verdict is contradictory; explanations such as "invalid input is rejected"
+# are not verdicts. Recognize explicit standalone/colon/dash headings, including common
+# Markdown/list decoration, rather than searching the entire explanation for a word.
+_REJECTION_VERDICT = re.compile(
+    r"^[ \t]*(?:(?:#{1,6}|[-+*]|\d+[.)])[ \t]+)?[*_`]*REJECTED[*_`]*"
+    r"(?:[ \t]*:|[ \t]*[.!]?[ \t]*$|[ \t]+[—–-][ \t])",
+    re.MULTILINE,
+)
 _SUGGESTIONS_MARKER = "SUGGESTIONS:"
 # Recognize direct admissions that the audit input was not inspected, including the
 # contradictory APPROVED/SUGGESTIONS response observed with a broken Linux sandbox.
@@ -74,13 +82,14 @@ def approved(output):
     verdict, suggestions = split_suggestions(text)
     if suggestions is None and _suggestion_starts(text):
         return False
-    if _REJECTED.search(verdict.upper()):
+    lines = [line.strip().upper() for line in verdict.splitlines() if line.strip()]
+    if not lines or not _APPROVED.match(lines[0]):
         return False
-    for line in verdict.splitlines():
-        text = line.strip().upper()
-        if text:
-            return bool(_APPROVED.match(text))
-    return False
+    # Keep the existing fail-closed rule for a mixed opening verdict. Elsewhere only
+    # explicit verdict markers can veto approval, not prior-finding dispositions.
+    if _REJECTED.search(lines[0]):
+        return False
+    return not _REJECTION_VERDICT.search("\n".join(lines[1:]))
 
 
 DELTA_INLINE_MAX = 48000

@@ -293,6 +293,11 @@ A script that spawns an unrelated process and also mentions a commit can still b
 The Codex parser is packaged independently of the Claude runtime; updating one does not update
 the other.
 
+The commit parser uses the first nonempty verdict line. An `APPROVED` response may explain
+that an invalid input was "rejected" without turning that explanation into a rejection verdict.
+Contradictory verdict markers, malformed suggestions sections, and admissions that staged
+input could not be inspected still block the commit.
+
 The gate records the staged set's `git write-tree` hash before review and compares it again
 immediately before committing. If staging changed, a fresh review is required. On approval it
 runs ordinary `git commit` in the real repository, with the configured hooks and signing. Hooks
