@@ -63,8 +63,12 @@ def test_wait_cannot_hide_new_input_or_work(git_repo, waiting, monkeypatch, work
         return 0, "STOP_WAIT", ""
     monkeypatch.setattr(backend, "review_turn", ruling)
     result = supervisor.supervise_hook(event(git_repo))
-    assert result["decision"] == "block"
-    assert "changed" in result["reason"]
+    if work:
+        assert result["decision"] == "block"
+        assert "changed" in result["reason"]
+    else:
+        # A new operator message supersedes the old wait ruling without a continuation.
+        assert result == {}
     assert liveness.outstanding(git_repo, SESSION) == waiting
 
 

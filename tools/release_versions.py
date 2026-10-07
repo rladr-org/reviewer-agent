@@ -27,8 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 # The canonical release identity. Everything else is a spelling of this.
-RELEASE = "1.4.1"
-PEP440_RELEASE = "1.4.1"
+RELEASE = "1.4.2"
+PEP440_RELEASE = "1.4.2"
 TAG = "v" + RELEASE
 
 _PEP440_PRERELEASE = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?P<kind>a|b|rc)(?P<number>\d+)$")
