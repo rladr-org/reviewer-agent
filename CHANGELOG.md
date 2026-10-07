@@ -5,6 +5,24 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [1.4.1]
+
+### Added
+
+- Codex: the stop supervisor accepts `STOP_WAIT`, a temporary yield while background work
+  continues or a scheduled wake-up is pending. It applies only when a concrete way to resume is
+  already arranged and no other authorized work can proceed now, or when the operator asked for
+  the pause. Task markers are kept instead of the work being declared complete; a missing
+  wake-up arrangement or actionable foreground work still prompts continuation.
+
+### Fixed
+
+- Codex: the commit gate reads the verdict from the reviewer's first nonempty line. An approval
+  followed by explanatory prose that mentions a rejection, such as a prior finding's disposition
+  saying an input "is rejected", was read as a rejection and blocked the commit. A rejection token
+  on the approval line itself, or a separate explicit REJECTED verdict line or heading, still
+  blocks, and a missing or invalid verdict still fails closed.
+
 ## [1.4.0]
 
 ### Changed
