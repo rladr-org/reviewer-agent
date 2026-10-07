@@ -195,8 +195,8 @@ def test_fresh_cancellation_keeps_one_use_bypass_and_resets_chain(git_repo, revi
     cancel = Cancellation()
     def interrupt(fresh, token):
         if fresh:
-            assert token is cancel
-            token.cancel()
+            cancel.cancel()
+            assert token.is_set()
     reviews["callback"] = interrupt
     result = supervisor.supervise_hook(event(git_repo), cancel_event=cancel)
     assert result == {}
@@ -218,7 +218,10 @@ def test_new_activity_during_fresh_review_invalidates_approval(git_repo, reviews
     reviews["callback"] = activity
     result = supervisor.supervise_hook(event(git_repo))
     assert reviews["calls"][-1]["fresh"]
-    assert result["decision"] == "block"
+    if work:
+        assert result["decision"] == "block"
+    else:
+        assert result == {}
     assert not state.consume_stop_permit(git_repo, SESSION)
     reviews["callback"] = None
     block_twice(git_repo)

@@ -15,6 +15,9 @@ _CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:(reviewer-agent|stop-continue)\s+"
     r"(on|off|status)(?:\s+(acceptRisk))?\s*$"
 )
+_STOP_DELAY_RE = re.compile(
+    r"^\s*\$reviewer-agent-codex:stop-continue\s+delay(?:\s+(.*?))?\s*$"
+)
 _SESSION_CONTROL_RE = re.compile(
     r"^\s*\$reviewer-agent-codex:reviewer-session\s+"
     r"(status|rotate)(?:\s+([^\s]+))?\s*$|"
@@ -30,7 +33,10 @@ def _control_output(data, prompt):
     match = _CONTROL_RE.fullmatch(prompt)
     session_match = _SESSION_CONTROL_RE.fullmatch(prompt)
     history_match = _HISTORY_CONTROL_RE.fullmatch(prompt)
-    if match:
+    delay_match = _STOP_DELAY_RE.fullmatch(prompt)
+    if delay_match:
+        code, message = controls.apply_stop_delay_action(delay_match.group(1))
+    elif match:
         skill, action, acceptance = match.groups()
         feature = "reviewer" if skill == "reviewer-agent" else "stop"
         label = "reviewerAgent" if feature == "reviewer" else "stopContinue"

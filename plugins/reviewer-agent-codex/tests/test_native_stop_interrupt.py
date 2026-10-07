@@ -80,25 +80,25 @@ def test_interrupt_canonicalizes_cwd_and_cancels_all_matching_requests(git_repo,
     alias = tmp_path / "alias"
     alias.symlink_to(git_repo, target_is_directory=True)
     tokens = [Cancellation() for _ in range(3)]
-    started = [threading.Event() for _ in tokens]
+    started = queue.Queue()
 
     def review(*args, **kwargs):
         token = kwargs["cancel_event"]
-        started[tokens.index(token)].set()
+        started.put(True)
         assert token.wait(15)
         return backend.CANCELLED_EXIT, "", ""
 
     monkeypatch.setattr(backend, "review_turn", review)
     workers = []
-    for index, token in enumerate(tokens):
-        payload = event(git_repo, turn_id="unrelated" if index == 2 else "turn")
-        worker = threading.Thread(target=mcp_server.handle_message,
-                                  args=(request("stop_hook", payload, index + 1),),
-                                  kwargs={"cancel_event": token})
-        workers.append(worker)
-        worker.start()
     try:
-        assert all(item.wait(10) for item in started)
+        for index, token in enumerate(tokens):
+            payload = event(git_repo, turn_id="unrelated" if index == 2 else "turn")
+            worker = threading.Thread(target=mcp_server.handle_message,
+                                      args=(request("stop_hook", payload, index + 1),),
+                                      kwargs={"cancel_event": token})
+            workers.append(worker)
+            worker.start()
+            assert started.get(timeout=10)
         interrupt(alias)
         assert tokens[0].is_set() and tokens[1].is_set()
         assert not tokens[2].is_set()

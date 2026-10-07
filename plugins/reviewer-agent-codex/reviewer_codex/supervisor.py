@@ -57,7 +57,12 @@ def supervise_hook(data, cancel_event=None):
 
 
 def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
+    generation = state.stop_generation(cwd, session_id, strict_io=True)
     result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True, fresh=fresh)
+    # The prompt may arrive after the reviewer completed but before its result reaches
+    # the host. A new operator turn owns the conversation, so emit no old continuation.
+    if state.stop_generation(cwd, session_id, strict_io=True) != generation:
+        return {}
     status = result.get("status")
     if status in ("stop_ok", "stop_wait", "failed_open"):
         # No second Stop is needed. Consume now to validate generations and avoid leaving
@@ -114,6 +119,7 @@ def _supervise(data, cancel_event=None):
     token = state.create_stop_ticket(
         cwd, session_id, final_message, turn_id=data.get("turn_id"),
         background_markers=active,
+        operator_generation=generations[0],
     )
     state.bump_nudges(cwd, session_id)
     result = _review_in_hook(cwd, session_id, token, cancel_event,

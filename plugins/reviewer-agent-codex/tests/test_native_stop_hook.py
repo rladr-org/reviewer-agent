@@ -68,16 +68,19 @@ def test_incomplete_returns_only_actionable_continuation(git_repo, review, monke
 
 
 @pytest.mark.parametrize("work", [False, True], ids=["operator-input", "tool-work"])
-def test_approval_invalidated_during_review_must_continue(git_repo, review, monkeypatch, work):
+def test_new_work_continues_but_new_operator_input_discards_old_review(git_repo, review, monkeypatch, work):
     def ruling(*args, **kwargs):
         state.invalidate_stop_permits(git_repo, "native-session", work=work)
         return 0, "STOP_OK", ""
 
     monkeypatch.setattr(backend, "review_turn", ruling)
     result = supervisor.supervise_hook(event(git_repo))
-    assert result["decision"] == "block"
-    assert result["reason"].startswith(supervisor.CONTINUATION_PREFIX)
-    assert "review_token" not in result["reason"]
+    if work:
+        assert result["decision"] == "block"
+        assert result["reason"].startswith(supervisor.CONTINUATION_PREFIX)
+        assert "review_token" not in result["reason"]
+    else:
+        assert result == {}
     assert not state.consume_stop_permit(git_repo, "native-session")
 
 
@@ -213,8 +216,8 @@ def test_cancelled_review_preserves_one_use_abort_bypass(git_repo, review, monke
     token = Cancellation()
 
     def ruling(*args, **kwargs):
-        assert kwargs["cancel_event"] is token
         token.cancel()
+        assert kwargs["cancel_event"].is_set()
         return backend.CANCELLED_EXIT, "", ""
 
     monkeypatch.setattr(backend, "review_turn", ruling)

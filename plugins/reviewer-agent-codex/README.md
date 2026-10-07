@@ -591,6 +591,48 @@ prompt or routine success warning, preserving the original final answer. An inco
 adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
 The plugin cannot force the app's previous-message dropdown to remain expanded.
 
+Before starting a completion review, the native Stop hook waits **15 seconds** to give you time
+to read the agent's response. Set `stopContinueDelaySecs` in
+`~/.codex/reviewer-agent-codex/config.json`, or the overriding environment variable
+`REVIEWER_STOPCONTINUE_DELAY_SECS`, to change the window (integer seconds, 0 disables it,
+maximum 300). Invalid values fall through to the next source and then the default. The Stop
+hook's 630-second timeout accommodates the maximum window plus the 300-second review budget.
+Escape cancels both the reading window and a running review, with no late continuation.
+The host may display `Checking completion` during the window; the plugin cannot delay that UI.
+
+Set or inspect the same config option from the chat composer:
+
+```text
+$reviewer-agent-codex:stop-continue delay 30
+$reviewer-agent-codex:stop-continue delay status
+$reviewer-agent-codex:stop-continue delay clear
+```
+
+`delay` alone also shows the effective delay and its source; `clear` removes the config key.
+The command accepts integer seconds from 0 to 300 and preserves other config entries. It applies
+across repositories and does not enable supervision. If the environment overrides the saved
+setting, the result shows both values. The CLI equivalent is
+`python3 scripts/toggle.py stop delay 30`. The corresponding config fragment is:
+
+```json
+{"stopContinueDelaySecs": 30}
+```
+
+Submitting a new operator message cancels the pending reading window or running stop reviewer
+when Codex delivers `UserPromptSubmit`. The reviewer watches the hook's repository/session input
+generation every 0.1 seconds and checks it again before applying a verdict. The cancellation
+uses the existing reviewer process-tree cleanup and suppresses the old continuation or approval.
+It does not cancel commit reviews or reviews belonging to another repository or session, and
+generated continuation prompts do not count as operator submissions. A submission leaves no
+Escape bypass that could skip supervision for the new task. If a host queues the message without
+delivering the hook until later, the plugin cannot react until that delivery; Escape remains the
+immediate interruption mechanism.
+
+Typing into an unsent draft does **not** itself cancel a review. The
+[documented host hooks](https://learn.chatgpt.com/docs/hooks) expose
+`Interrupt` and `UserPromptSubmit`, but no draft-typing event. Cancellation on the first keystroke
+would require a host change. Submit the reply or press Escape to cancel the current check.
+
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
 Completion supervision is invoked only by the Stop hook. The developer model remains suspended
 while the hook review runs. The Interrupt handler cancels matching active reviews.

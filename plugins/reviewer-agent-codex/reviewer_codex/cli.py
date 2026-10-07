@@ -10,6 +10,7 @@ from . import controls, state
 def _usage():
     print(
         "usage: toggle.py reviewer|stop on|off|status | "
+        "stop delay [0..300|status|clear] | "
         "model [<model> [<effort>] | clear | effort <level>|clear]",
         file=sys.stderr,
     )
@@ -78,6 +79,12 @@ def _model_command(args):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if args[:2] == ["stop", "delay"]:
+        if len(args) > 3:
+            return _usage()
+        code, message = controls.apply_stop_delay_action(args[2] if len(args) == 3 else None)
+        print(message, file=sys.stderr if code else sys.stdout)
+        return code
     if args and args[0] == "model":
         return _model_command(args[1:])
     if len(args) != 2 or args[0] not in ("reviewer", "stop") or args[1] not in ("on", "off", "status"):

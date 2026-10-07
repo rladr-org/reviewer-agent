@@ -9,6 +9,24 @@ from . import prompts, state
 DISCLAIMER_PATH = Path(__file__).resolve().parent.parent / "DISCLAIMER.md"
 
 
+def apply_stop_delay_action(value=None):
+    token = str(value or "status").strip()
+    saved = ""
+    try:
+        if token == "clear":
+            state.save_stopcontinue_delay(None)
+            saved = "saved delay cleared; "
+        elif token != "status":
+            if not token.isascii() or not token.isdecimal() or not 0 <= int(token) <= 300:
+                raise ValueError("delay expects 0..300, status, or clear")
+            state.save_stopcontinue_delay(int(token))
+            saved = "saved {} seconds in config.json; ".format(int(token))
+        seconds, source = state.stopcontinue_delay_detail()
+        return 0, "stopContinue: {}effective delay {} seconds (from {}; applies across repositories)".format(saved, seconds, source)
+    except (OSError, ValueError) as error:
+        return 1, "stopContinue: ERROR - {}".format(error)
+
+
 def apply_feature_action(
     path, feature, action, turn_id=None, accept_risk=False, acceptance_source=None
 ):

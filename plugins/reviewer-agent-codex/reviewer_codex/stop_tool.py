@@ -2,9 +2,23 @@
 """Cancellable minimal stopContinue ruling for the bundled MCP server."""
 
 import re
+import time
 from pathlib import Path
 
-from . import backend, cancellation, liveness, prompts, state
+from . import backend, cancellation, liveness, prompts, state, stop_input
+
+_delay_sleep = time.sleep
+
+
+def _reading_delay(cancel_event):
+    seconds = state.stopcontinue_delay_secs()
+    if cancel_event is not None:
+        # Event.wait wakes immediately on Escape, including during the reading window.
+        return cancel_event.wait(seconds)
+    if seconds:
+        _delay_sleep(seconds)
+    return False
+
 
 # The sentinel ending the TRAILING line, alone or as its own sentence after a full stop, `!` or `?`
 # ("...an unrequested code fix. STOP_OK"), tolerating only markdown emphasis / backticks and
@@ -41,7 +55,7 @@ def _register_abort_bypass(cancel_event, root, ticket):
         return False
     register(
         lambda: state.grant_stop_abort_bypass(
-            root, ticket["session_id"], ticket.get("turn_id")
+            root, ticket["session_id"], ticket.get("turn_id"), ticket["operator_generation"]
         )
     )
     return True
@@ -50,7 +64,7 @@ def _register_abort_bypass(cancel_event, root, ticket):
 def _cancelled(root, ticket, abort_callback_registered):
     if not abort_callback_registered:
         state.grant_stop_abort_bypass(
-            root, ticket["session_id"], ticket.get("turn_id")
+            root, ticket["session_id"], ticket.get("turn_id"), ticket["operator_generation"]
         )
     return _result("cancelled", "stopContinue was cancelled")
 
@@ -124,7 +138,17 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
     abort_callback_registered = _register_abort_bypass(cancel_event, root, ticket)
+    with stop_input.watch(root, ticket, cancel_event, enabled=native) as (review_cancel, submitted):
+        return _review_ticket(root, ticket, background_markers, review_cancel, native, fresh,
+                              abort_callback_registered, submitted)
+
+
+def _review_ticket(root, ticket, background_markers, cancel_event, native, fresh,
+                   abort_callback_registered, submitted):
+    session_id = ticket["session_id"]
     try:
+        if submitted() or (native and _reading_delay(cancel_event)) or submitted():
+            return _cancelled(root, ticket, abort_callback_registered)
         prompt = prompts.stop_prompt(
             root, session_id, ticket["final_message"],
             background_markers=background_markers, native=native, fresh=fresh,
@@ -140,7 +164,7 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
                 timeout=backend.STOP_REVIEW_TIMEOUT, cancel_event=cancel_event,
             )
     except Exception as error:
-        if cancel_event is not None and cancel_event.is_set():
+        if submitted() or (cancel_event is not None and cancel_event.is_set()):
             return _cancelled(root, ticket, abort_callback_registered)
         completion = _complete_allowed_stop(cancel_event, root, ticket, outcome="failed_open")
         if completion == "cancelled":
@@ -156,7 +180,7 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
             "stop supervisor failed; the next stop is allowed",
             detail=str(error),
         )
-    if code == backend.CANCELLED_EXIT or (cancel_event and cancel_event.is_set()):
+    if submitted() or code == backend.CANCELLED_EXIT or (cancel_event and cancel_event.is_set()):
         return _cancelled(root, ticket, abort_callback_registered)
     # A commit approval is neither a completion verdict nor executable remaining
     # work. Treat role confusion like an invalid/empty ruling, not a directive.

@@ -21,6 +21,8 @@ DEFAULT_REVIEWER_MODEL = "gpt-5.6-luna"
 DEFAULT_REVIEWER_EFFORT = "xhigh"
 DEFAULT_COMMIT_REVIEW_TIMEOUT = 3600
 DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT = 3
+DEFAULT_STOPCONTINUE_DELAY_SECS = 15
+MAX_STOPCONTINUE_DELAY_SECS = 300
 REVIEW_HISTORY_KEEP = 100
 MIN_COMMIT_REVIEW_TIMEOUT = 60
 MAX_COMMIT_REVIEW_TIMEOUT = 7200
@@ -52,6 +54,41 @@ def load_config():
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def stopcontinue_delay_secs():
+    """Reading window before a native Stop review; env overrides config.json."""
+    return stopcontinue_delay_detail()[0]
+
+
+def stopcontinue_delay_detail():
+    for source, value in (("env REVIEWER_STOPCONTINUE_DELAY_SECS", os.environ.get("REVIEWER_STOPCONTINUE_DELAY_SECS")),
+                          ("config.json stopContinueDelaySecs", load_config().get("stopContinueDelaySecs"))):
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            continue
+        try:
+            return min(MAX_STOPCONTINUE_DELAY_SECS, max(0, int(value))), source
+        except ValueError:
+            continue
+    return DEFAULT_STOPCONTINUE_DELAY_SECS, "default"
+
+
+def save_stopcontinue_delay(value):
+    """Change only the delay key; malformed config must never be silently replaced."""
+    if value is not None and (type(value) is not int or not 0 <= value <= MAX_STOPCONTINUE_DELAY_SECS):
+        raise ValueError("delay expects an integer from 0 to 300")
+    with _mutation_lock():
+        try:
+            config = json.loads(config_file().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            config = {}
+        if not isinstance(config, dict):
+            raise ValueError("config.json must contain an object")
+        if value is None:
+            config.pop("stopContinueDelaySecs", None)
+        else:
+            config["stopContinueDelaySecs"] = value
+        _atomic_write(config_file(), json.dumps(config, indent=2) + "\n")
 
 
 def _setting_file(name):
@@ -565,6 +602,7 @@ def create_stop_ticket(
     shell_markers=None,
     background_markers=None,
     strict_completion=False,
+    operator_generation=None,
 ):
     root = project_root(path)
     if not root or not session_id:
@@ -590,7 +628,8 @@ def create_stop_ticket(
                 "session_id": str(session_id),
                 "final_message": str(final_message or ""),
                 "turn_id": str(turn_id or ""),
-                "operator_generation": stop_generation(root, session_id),
+                "operator_generation": (stop_generation(root, session_id)
+                                        if operator_generation is None else operator_generation),
                 "strict_completion": bool(strict_completion),
                 "work_generation": stop_generation(root, session_id, work=True),
                 "background_markers": normalized,
@@ -833,8 +872,15 @@ def _stop_abort_bypass_file(path, session_id):
     )
 
 
-def grant_stop_abort_bypass(path, session_id, turn_id):
+def grant_stop_abort_bypass(path, session_id, turn_id, operator_generation=None):
     """Allow the immediate host-generated Stop after a cancelled MCP turn."""
+    if operator_generation is not None:
+        # A submitted prompt already owns the next turn. Never let cancellation of its
+        # predecessor recreate the Escape bypass after the prompt hook cleared it.
+        with _mutation_lock():
+            if stop_generation(path, session_id, strict_io=True) == operator_generation:
+                grant_stop_abort_bypass(path, session_id, turn_id)
+        return
     target = _stop_abort_bypass_file(path, session_id)
     current_turn = str(turn_id or "").strip()
     if target is not None and current_turn:

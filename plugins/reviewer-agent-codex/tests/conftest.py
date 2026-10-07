@@ -8,6 +8,12 @@ from reviewer_codex import state
 
 
 @pytest.fixture(autouse=True)
+def _no_reading_delay(monkeypatch):
+    # Delay-specific tests opt in; ordinary reviews should not sleep in the suite.
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _forget_project_lookups():
     # state remembers git's project-root answers briefly; no test may see another test's.
     state._project_lookups.clear()
