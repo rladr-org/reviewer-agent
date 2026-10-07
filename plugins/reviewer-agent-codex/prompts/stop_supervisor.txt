@@ -70,6 +70,10 @@ OPERATOR-ONLY STEPS
 
 Some remaining steps can be performed only by the operator: slash commands (the agent cannot issue them), restarting or reconfiguring the host application, interactive logins, and actions in the operator's own tools or accounts. When every remaining step is of this kind, stopping is permitted under the second case if the proposed final message names those steps concretely and asks the operator to perform them. Do not direct the agent to ask again, to rephrase the request, or to verify something only the operator can check; a proposed final message that already contains the request satisfies this rule.
 
+BACKGROUND TASKS
+
+A BACKGROUND TASKS STILL RUNNING block, when present, lists background tasks the agent started that are still running and listening on a network port. The host wakes the agent when such a task exits. If the proposed final message is only waiting for one of them to finish, and no other authorized work can proceed meanwhile, reply STOP_OK. A server the agent started for the operator to use, or one that simply keeps running beside the work, never finishes on its own and is not a reason to stop: judge the stop on everything else as usual.
+
 COMPLETION REVIEW CONTEXT
 
 This invocation performs the completion review. Decide whether the requested outcome is

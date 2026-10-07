@@ -29,6 +29,7 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -841,35 +842,56 @@ def _job_state_live_task_ids(transcript_path):
 
 
 def has_outstanding_background_task(transcript_path):
-    """True iff, in the CURRENT turn, the agent launched a background task
-    (run_in_background sub-agent or shell) with no matching terminal
-    <task-notification> yet -- i.e. the turn ended to PARK on background work the
-    harness will auto-re-invoke the session for -- OR an armed Monitor is still active
-    (its whole lifecycle suppresses: the harness re-invokes the session on every event,
-    and the window is bounded by TaskStop / terminal status / timeout expiry).
-    Fail-safe: any error -> False, so a detection bug falls through to normal
+    """True iff the agent's stop should be treated as parked on background work: see
+    `background_wait_state`."""
+    return background_wait_state(transcript_path)[0]
+
+
+def background_wait_state(transcript_path):
+    """(suppress, listening). `suppress` is True iff, in the CURRENT turn, the agent launched a
+    background task (run_in_background sub-agent or shell) with no matching terminal
+    <task-notification> yet -- i.e. the turn ended to PARK on background work the harness will
+    auto-re-invoke the session for -- OR an armed Monitor is still active (its whole lifecycle
+    suppresses: the harness re-invokes the session on every event, and the window is bounded by
+    TaskStop / terminal status / timeout expiry), OR a tracked sub-agent or shell from an earlier
+    turn is still live.
+
+    A background SHELL listening on a TCP port (a server) does not count on its own: a server
+    never exits, so it proves nothing about waiting. When every outstanding task is such a
+    shell, `suppress` is False and `listening` describes those shells for the supervisor; in
+    every other case `listening` is empty. See docs/plans/bgwait_server_exception.md.
+
+    Fail-safe: any error -> (False, []), so a detection bug falls through to normal
     supervision rather than wedging the agent."""
     try:
         events = _transcript_events(transcript_path)
         if not events:
-            return False
+            return False, []
+        shells = _background_shell_launches(events)
+        shell_of_tool_use = {info["tool_use_id"]: tid for tid, info in shells.items()
+                             if info.get("tool_use_id")}
+        other = False   # outstanding work that is not a background shell
+        shell_ids = set()
+        ended = _ended_monitor_ids(events)
         # Amendments 4+5: harness-state liveness. For background jobs the job state
         # file authoritatively lists in-flight tasks (monitors, shells, any future
         # kind), so parked-on-live-background-work keeps suppressing for the task's
         # whole lifecycle -- at any event cadence, across turn boundaries, and with no
         # visible launch ack (covering compaction/respawn windows). Transcript terminal
         # evidence (TaskStop / terminal <status>) still WINS over a lingering fan entry.
-        live = _job_state_live_task_ids(transcript_path)
-        if live and live - _ended_monitor_ids(events):
-            return True
+        for tid in _job_state_live_task_ids(transcript_path) - ended:
+            if tid in shells:
+                shell_ids.add(tid)
+            else:
+                other = True
         if _active_monitor_ids(events):
-            return True
+            other = True
         # Amendment 7: async SUBAGENTS, tracked across the whole transcript. This is what
         # covers a FAN-OUT -- the current-turn scan below loses every sibling the moment the
         # first completion notification becomes the turn boundary, so N-1 running subagents
         # went unseen and the agent was nudged to act on findings that did not exist yet.
-        if _live_async_agent_ids(events):
-            return True
+        if not other and _live_async_agent_ids(events):
+            other = True
         # Amendment 6: a background SHELL launched in an EARLIER turn. The job-state layer
         # above covers this only for background-JOB sessions (CLAUDE_JOB_DIR), a shell is not
         # a Monitor, and the current-turn scan below cannot see a launch from a previous
@@ -879,11 +901,8 @@ def has_outstanding_background_task(transcript_path):
         shell_signal = _background_shell_last_signal(events)
         if shell_signal:
             shell_now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-            shell_ended = _ended_monitor_ids(events)
-            if any(tid not in shell_ended
-                   and shell_now - ts <= _bg_shell_stale_secs()
-                   for tid, ts in shell_signal.items()):
-                return True
+            shell_ids.update(tid for tid, ts in shell_signal.items()
+                             if tid not in ended and shell_now - ts <= _bg_shell_stale_secs())
         start = -1  # index of the last turn boundary; -1 => whole transcript in scope
         for i, ev in enumerate(events):
             if _is_human_prompt(ev) or _is_task_notification(ev):
@@ -903,9 +922,9 @@ def has_outstanding_background_task(transcript_path):
             seen_at = _event_epoch_seconds(bev)
             now = datetime.datetime.now(datetime.timezone.utc).timestamp()
             if (tid is not None and seen_at is not None
-                    and tid not in _ended_monitor_ids(events)
+                    and tid not in ended
                     and now - seen_at <= _monitor_stale_secs()):
-                return True
+                other = True
         launched = []
         completed = set()
         for ev in events[start + 1:]:
@@ -916,6 +935,127 @@ def has_outstanding_background_task(transcript_path):
             # discriminator left now that a missing run_in_background means background.
             completed.update(_inline_resolved_tool_use_ids(ev))
             launched.extend(_background_launch_ids(ev))
-        return any(lid not in completed for lid in launched)
+        for lid in launched:
+            if lid in completed:
+                continue
+            if lid in shell_of_tool_use:
+                shell_ids.add(shell_of_tool_use[lid])
+            else:
+                other = True
+        if other:
+            return True, []
+        if not shell_ids:
+            return False, []
+        # Only now, when nothing but shells keeps the wait open, is it worth probing ports.
+        listening = _listening_shell_task_ids(
+            {tid: shells[tid]["output"] for tid in shell_ids
+             if shells.get(tid, {}).get("output")})
+        if shell_ids - listening:
+            return True, []
+        return False, [dict(shells[tid], task_id=tid) for tid in sorted(listening)]
     except Exception:
-        return False
+        return False, []
+
+
+# The launch ack names the task's output file; the shell and every child that inherited its
+# stdout hold it open, which is how the probe below finds the task's processes.
+_BG_SHELL_OUTPUT = re.compile(
+    r"Command running in background with ID:\s*([A-Za-z0-9_-]+)\.\s*"
+    r"Output is being written to:\s*(/\S+?\.output)(?=[.\s]|$)")
+
+
+def _background_shell_launches(events):
+    """task id -> {tool_use_id, output, description, command, started} for every background
+    shell whose launch ack is in the transcript. `output` is kept only when its file name is
+    the task id itself, so a stray path in the ack can never point the probe elsewhere."""
+    inputs = {}
+    for ev in events:
+        c = _event_content(ev)
+        if ev.get("type") == "assistant" and isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id"):
+                    inputs[b["id"]] = b.get("input") or {}
+    launches = {}
+    for ev in events:
+        c = _event_content(ev)
+        if ev.get("type") != "user" or not isinstance(c, list):
+            continue
+        for b in c:
+            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                continue
+            cc = b.get("content")
+            if isinstance(cc, list):
+                cc = " ".join(x.get("text", "") for x in cc if isinstance(x, dict))
+            if not isinstance(cc, str):
+                continue
+            for m in _BG_SHELL_OUTPUT.finditer(cc):
+                tid, out = m.group(1), m.group(2)
+                inp = inputs.get(b.get("tool_use_id")) or {}
+                launches[tid] = {
+                    "tool_use_id": b.get("tool_use_id"),
+                    "output": out if os.path.basename(out) == tid + ".output" else None,
+                    "description": str(inp.get("description") or "")[:200],
+                    "command": str(inp.get("command") or "")[:200],
+                    "started": ev.get("timestamp") or "",
+                }
+    return launches
+
+
+_PORT_PROBE_TIMEOUT_SECS = 5
+
+
+def _probe_run(argv):
+    return subprocess.run(argv, capture_output=True, text=True,
+                          timeout=_PORT_PROBE_TIMEOUT_SECS).stdout
+
+
+def _listening_shell_task_ids(outputs):
+    """Task ids (keys of `outputs`, task id -> output file) whose processes include one
+    listening on a TCP port. A task's processes are those holding its output file open plus
+    all their descendants, so a server that sent its own output elsewhere is still found
+    through its wrapper shell. Any failure (no lsof or ps, a timeout, odd output) finds
+    nothing, which leaves the background wait as it was."""
+    try:
+        lsof, ps = shutil.which("lsof"), shutil.which("ps")
+        paths = {tid: os.path.realpath(p) for tid, p in outputs.items()
+                 if isinstance(p, str) and os.path.isabs(p)
+                 and os.path.basename(p) == tid + ".output"}
+        if not (lsof and ps and paths):
+            return set()
+        holders = {}
+        pid = None
+        for line in _probe_run([lsof, "-n", "-P", "-F", "pn", "--"]
+                               + sorted(set(paths.values()))).splitlines():
+            if line[:1] == "p" and line[1:].isdigit():
+                pid = int(line[1:])
+            elif line[:1] == "n" and pid is not None:
+                holders.setdefault(os.path.realpath(line[1:]), set()).add(pid)
+        if not holders:
+            return set()
+        children = {}
+        for line in _probe_run([ps, "-A", "-o", "pid=", "-o", "ppid="]).splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                children.setdefault(int(parts[1]), []).append(int(parts[0]))
+        trees = {}
+        for tid, path in paths.items():
+            seen = set()
+            todo = list(holders.get(path, ()))
+            while todo:
+                p = todo.pop()
+                if p not in seen:
+                    seen.add(p)
+                    todo.extend(children.get(p, ()))
+            if seen:
+                trees[tid] = seen
+        if not trees:
+            return set()
+        all_pids = sorted(set().union(*trees.values()))
+        listening = set()
+        for line in _probe_run([lsof, "-n", "-P", "-a", "-iTCP", "-sTCP:LISTEN", "-F", "p",
+                                "-p", ",".join(str(p) for p in all_pids)]).splitlines():
+            if line[:1] == "p" and line[1:].isdigit():
+                listening.add(int(line[1:]))
+        return {tid for tid, pids in trees.items() if pids & listening}
+    except Exception:
+        return set()
