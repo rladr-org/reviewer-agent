@@ -5,6 +5,27 @@ All notable changes to this project are documented here. Versions follow
 plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) form
 (`1.2.1-beta.1` and `1.2.1b1` are the same release).
 
+## [1.4.2]
+
+### Added
+
+- Codex: a 15-second reading delay before native stop supervision. Configure integer seconds
+  from 0 through 300 with `stopContinueDelaySecs`, `REVIEWER_STOPCONTINUE_DELAY_SECS`, or
+  `$reviewer-agent-codex:stop-continue delay 30`. `delay status` reports the effective value
+  and `delay clear` removes the saved setting. Escape cancels the delay or active review.
+- Codex: submitting a message cancels the previous stop review once the host delivers
+  `UserPromptSubmit`, suppressing stale continuation prompts while completing the hook response.
+  Cancellation is scoped to that repository and session and leaves no bypass for the new task.
+  Unsent typing is not exposed by the host hooks; commit reviews are unaffected.
+
+### Upgrade
+
+- The Stop-hook timeout increases from 360 to 630 seconds to accommodate the maximum reading
+  delay and review budget. Codex marks the changed hook as modified: after installation, run
+  `/hooks` in an interactive Codex CLI and trust the Stop hook, then restart the host to load
+  the new reviewer code. Supervision cannot resume on an untrusted hook. Existing `STOP_WAIT`
+  behavior for arranged background notifications is preserved.
+
 ## [1.4.1]
 
 ### Added
