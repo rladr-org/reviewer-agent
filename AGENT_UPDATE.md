@@ -36,7 +36,9 @@ So a local update has a prerequisite the GitHub case does not: **the version mus
 the installed copy stays stale with no error. Bumping is the intended fix (see
 [Release procedure](CONTRIBUTING.md#release-procedure) and the checklist at the end of this file);
 a forced reinstall at the same version is the fallback. Determine which source you have at step 1
-and do not skip the version bump for a Directory source.
+and do not skip the version bump for a Directory source. To test commits **before** they are
+released, do not bump; follow
+[*Testing an unreleased build without a version bump*](#testing-an-unreleased-build-without-a-version-bump).
 
 One more Directory-source subtlety worth knowing before you rely on the recorded metadata: an
 install **copies the working tree** at update time (uncommitted edits included), but records the
@@ -311,6 +313,50 @@ plugins. Report these as "requires a human" rather than claiming them green.
 
 Alongside the matrix, the always-run gates for any release are the two unit suites plus the
 structural and parity checks — see [`CONTRIBUTING.md`](CONTRIBUTING.md#running-the-suites).
+
+## Testing an unreleased build without a version bump
+
+A version bump on the public repository tells every user to upgrade, so it waits until testing is
+complete. To try unreleased commits first, install an **export** of them at the version label
+they already carry, test, then return to the GitHub marketplace.
+
+1. **Export to a permanent directory**, named for the commit so a later export can sit beside it.
+   The export copies the **working tree**, so run it from a clean checkout of that commit (a
+   `git worktree add <dir> <sha>` is the simplest), and confirm `git status --short` prints
+   nothing first. Otherwise you test edits the named commit does not contain.
+
+   ```bash
+   git -C <clean-checkout> status --short          # must print nothing
+   python3 <clean-checkout>/tools/release_export.py --target ~/reviewer-agent-builds/<short-sha>
+   ```
+
+   **Never use a scratchpad or anything under `/tmp`.** A Directory marketplace runs the plugin's
+   hooks from that directory, not from a cached copy. macOS deletes `/tmp` files unused for 3 days.
+   On 2026-10-07 that happened to a test build: every hook then exited 127, which Claude Code
+   treats as non-blocking, so stop supervision stopped and **the commit gate failed open**. The
+   export refuses a non-empty target, so a refresh is a new directory, not an overwrite.
+
+2. **Point the marketplace at the export and install from it:**
+
+   ```bash
+   claude plugin marketplace remove reviewer-agent
+   claude plugin marketplace add ~/reviewer-agent-builds/<short-sha>
+   claude plugin install reviewer-agent@reviewer-agent
+   ```
+
+   Run these back to back with no commit in progress; the gate is not guaranteed between them.
+   Then restart the sessions that should test it (step 5).
+
+3. **Test**, then **return to GitHub** the same way:
+
+   ```bash
+   claude plugin marketplace remove reviewer-agent
+   claude plugin marketplace add rladr-org/reviewer-agent
+   claude plugin install reviewer-agent@reviewer-agent
+   ```
+
+   Restart again. Keep the export directory until no session still runs from it; a running
+   session keeps the hook path it started with.
 
 ---
 
