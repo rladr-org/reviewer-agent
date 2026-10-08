@@ -70,6 +70,40 @@ def test_replies_after_the_last_approval_are_included_and_earlier_ones_are_not(t
     assert "ALREADY-APPROVED" not in block
 
 
+def test_the_approved_message_the_operator_answered_is_included(tmp_path):
+    # 2026-10-08: the approved stop ended "Shall I start step 1?", the operator replied "commit
+    # the plan first", and the agent committed and asked again. The window held no replies, so
+    # the supervisor saw "commit the plan first" without the question it answered, and approved.
+    path = _transcript(
+        tmp_path,
+        _human("revise the plan", "2026-10-08T21:30:00Z"),
+        _reply("OLDER reply", "2026-10-08T21:31:00Z"),
+        _reply("Plan revised. Shall I start step 1?", "2026-10-08T21:34:54Z"),
+        _human("commit the plan first", "2026-10-08T21:35:36Z"),
+        _reply("Committed. Step 1 is next. Shall I start?", "2026-10-08T21:43:50Z"),
+    )
+    block = rl.agent_replies_block(path, since_epoch=_epoch("2026-10-08T21:35:03Z"))
+    assert "Shall I start step 1?" in block
+    assert "the operator's next message replies to it" in block
+    assert "OLDER reply" not in block
+    assert "Committed." not in block
+
+
+def test_the_approved_message_is_not_added_when_the_window_has_replies(tmp_path):
+    path = _transcript(
+        tmp_path,
+        _human("go", "2026-09-30T10:00:00Z"),
+        _reply("APPROVED message", "2026-09-30T10:01:00Z"),
+        _human("more", "2026-09-30T10:03:00Z"),
+        _reply("In-window reply.", "2026-09-30T10:04:00Z"),
+        _human("next", "2026-09-30T10:05:00Z"),
+        _reply("current", "2026-09-30T10:06:00Z"),
+    )
+    block = rl.agent_replies_block(path, since_epoch=_epoch("2026-09-30T10:02:00Z"))
+    assert "In-window reply." in block
+    assert "APPROVED message" not in block
+
+
 def test_the_turn_being_judged_is_not_repeated(tmp_path):
     # Its text is already the "proposed final message" in the stop prompt.
     path = _transcript(
