@@ -18,11 +18,39 @@ re-arm its CronCreate recovery cron (the backstop for the `/stopContinueWatchdog
 arming). See docs/plans/stopcontinue_watchdog.md.
 """
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import reviewer_lib as rl  # noqa: E402
+
+
+# A plugin running from a temporary directory loses its files to the OS's cleanup, and then every
+# hook exits 127 -- non-blocking, so the commit gate fails open (2026-10-07). Say so while the
+# files still exist. See docs/plans/temp_plugin_root_warning.md.
+def default_temp_dirs():
+    return ["/tmp", "/var/tmp", "/var/folders", tempfile.gettempdir()]
+
+
+def temp_plugin_root(root, temp_dirs=None):
+    """The temporary directory that `root` lies under, or None. Both sides are compared after
+    realpath, so /tmp and /private/tmp match alike, and by path components, so /tmpfoo is not
+    under /tmp."""
+    real = os.path.realpath(root)
+    for temp in default_temp_dirs() if temp_dirs is None else temp_dirs:
+        base = os.path.realpath(temp)
+        if base not in ("", os.sep) and (real == base or real.startswith(base.rstrip(os.sep) + os.sep)):
+            return base
+    return None
+
+
+def temp_root_warning(root):
+    return ("reviewer-agent is running from a temporary directory ({}). The OS can delete it, and "
+            "then every reviewer-agent hook fails open, the commit gate included. Reinstall from "
+            "a permanent location (AGENT_UPDATE.md, \"Testing an unreleased build without a "
+            "version bump\").".format(root))
 
 
 def _brief_if_active(data, cwd):
@@ -85,11 +113,22 @@ def main():
             _brief_if_active(data, cwd)
         except Exception as e:
             rl.log("[session_start] brief EXCEPTION {}: {}".format(type(e).__name__, e))
+        out = {}
         ctx = _watchdog_rearm_context(cwd, rl.claude_session_key(data))
         if ctx:
             rl.log("[session_start] key={} watchdog re-arm context injected".format(
                 rl.canonical_project_key(cwd)))
-            print(json.dumps(rl.sessionstart_context_output(ctx)))
+            out.update(rl.sessionstart_context_output(ctx))
+        try:
+            root = str(Path(__file__).resolve().parent)
+            if temp_plugin_root(root) is not None:
+                rl.log("[session_start] plugin root {} is under a temporary directory -> "
+                       "warned".format(root))
+                out["systemMessage"] = temp_root_warning(root)
+        except Exception as e:
+            rl.log("[session_start] temp-root check EXCEPTION {}: {}".format(type(e).__name__, e))
+        if out:
+            print(json.dumps(out))
         return 0
     except Exception as e:
         try:
