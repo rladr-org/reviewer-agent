@@ -670,18 +670,28 @@ def agent_replies_block(transcript_path, since_epoch=None, per_reply=None, total
         return ""
     events = _transcript_events(transcript_path)
     replies = []
+    answered = None  # the last reply before the window: what the approval let through
     for ev in events[:_current_turn_start(events)]:
         if ev.get("type") != "assistant" or ev.get("isSidechain"):
-            continue
-        when = _event_epoch_seconds(ev)
-        if since_epoch is not None and (when is None or when <= since_epoch):
             continue
         text = _reply_text(ev)
         if not text:
             continue
         if len(text) > per_reply:
             text = "(trimmed to its last {} characters) ...{}".format(per_reply, text[-per_reply:])
-        replies.append({"text": text, "timestamp": ev.get("timestamp") or ""})
+        reply = {"text": text, "timestamp": ev.get("timestamp") or ""}
+        when = _event_epoch_seconds(ev)
+        if since_epoch is not None and (when is None or when <= since_epoch):
+            answered = reply
+            continue
+        replies.append(reply)
+    # With nothing in the window, the operator's newest message answers the approved message
+    # itself (2026-10-08: "commit the plan first" after "Shall I start step 1?"), so send that.
+    if not replies and answered is not None:
+        answered["text"] = ("(the message your last approval let through; the operator's next "
+                            "message replies to it. It was already judged: what it proposes is "
+                            "remaining work only if that reply approves it) " + answered["text"])
+        replies.append(answered)
     kept, dropped = _clip_operator_messages(replies, total)
     if not kept:
         return ""

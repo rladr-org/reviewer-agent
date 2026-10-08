@@ -85,6 +85,8 @@ def test_the_approved_message_the_operator_answered_is_included(tmp_path):
     block = rl.agent_replies_block(path, since_epoch=_epoch("2026-10-08T21:35:03Z"))
     assert "Shall I start step 1?" in block
     assert "the operator's next message replies to it" in block
+    # Already judged: its proposal is not remaining work unless the operator's reply approves it.
+    assert "remaining work only if that reply approves it" in block
     assert "OLDER reply" not in block
     assert "Committed." not in block
 
