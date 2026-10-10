@@ -211,6 +211,25 @@ def test_directive_hook_handles_the_typed_slash_command(tmp_path, monkeypatch, c
     assert text in listed.get("reason", ""), listed
 
 
+# Claude Code titles every blocked prompt "UserPromptSubmit operation blocked by hook", which reads
+# as a failure even when the directive was recorded. The reason must lead with the real outcome.
+def test_directive_hook_reason_leads_with_success_or_failure(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+
+    ok = json.loads(run_ups(repo, "/reviewerDirective tests must exercise behavior", home).stdout)
+    first = ok["reason"].splitlines()[0]
+    assert "SUCCEEDED" in first and "FAILED" not in first, ok
+    assert "blocked" in first, "the success line must explain the 'blocked' heading: %r" % first
+    assert ok["systemMessage"] == ok["reason"], ok
+
+    bad = json.loads(run_ups(repo, "/reviewerDirective remove 99", home).stdout)
+    first = bad["reason"].splitlines()[0]
+    assert "FAILED" in first and "SUCCEEDED" not in first, bad
+    assert "no directive numbered" in bad["reason"], bad
+
+
 def test_directive_hook_ignores_a_longer_command_name(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
