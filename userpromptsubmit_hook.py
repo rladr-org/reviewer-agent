@@ -58,9 +58,17 @@ def _directive_block(data, cwd):
     # A recognized subcommand needs its tokens; free text is passed as ONE verbatim element so it is
     # recorded exactly as typed (no whitespace normalization, no re-parse).
     args = toks if is_command else [remainder]
-    _code, message = directive_toggle.run(args, cwd)
+    code, message = directive_toggle.run(args, cwd)
     rl.log("[userpromptsubmit] key={} reviewerDirective handled".format(
         rl.canonical_project_key(cwd)))
+    # Claude Code titles every blocked prompt "UserPromptSubmit operation blocked by hook", which
+    # reads as a failure; lead with the real outcome so a recorded directive is visibly a success.
+    if code == 0:
+        status = ("reviewerDirective SUCCEEDED (\"blocked\" above only means the command was handled "
+                  "here and not sent to the model).")
+    else:
+        status = "reviewerDirective FAILED:"
+    message = status + "\n" + message
     return {"decision": "block", "reason": message, "systemMessage": message}
 
 
