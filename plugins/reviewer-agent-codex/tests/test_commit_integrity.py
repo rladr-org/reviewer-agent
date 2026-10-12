@@ -193,6 +193,25 @@ def test_legacy_cursor_without_modes_does_not_claim_nothing_changed(ready):
     assert block == "", "legacy evidence must cause a fresh audit"
 
 
+def test_stage_snapshot_keys_a_rename_by_its_new_name(ready):
+    git(ready, "commit", "-qm", "base")
+    git(ready, "mv", "change.txt", "moved.txt")
+    assert commit_tool._stage_snapshot(ready) == {
+        "moved.txt": "100644 " + git(ready, "rev-parse", ":moved.txt")}
+
+
+def test_stage_snapshot_survives_more_paths_than_one_command_line_holds(git_repo):
+    # Passing every staged path to one git invocation died with E2BIG ("Argument list too
+    # long") past ~8800 files on macOS. Index entries need no working-tree files, so ~4 MB
+    # of names -- over ARG_MAX on macOS and Linux alike -- stages in well under a second.
+    blob = git(git_repo, "hash-object", "-w", "--stdin", input="x\n")
+    names = ["many/{:04d}/".format(i) + "/".join(["p" * 200] * 7) for i in range(3000)]
+    git(git_repo, "update-index", "--index-info",
+        input="".join("100644 {}\t{}\n".format(blob, n) for n in names))
+    snapshot = commit_tool._stage_snapshot(git_repo)
+    assert snapshot == {n: "100644 " + blob for n in names}
+
+
 def payload(repo, options):
     return {"cwd": str(repo), "session_id": "session", "tool_name": "Bash",
             "tool_input": {"command": "git -C {} commit {}".format(repo, options)}}

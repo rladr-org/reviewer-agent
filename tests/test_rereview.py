@@ -106,6 +106,28 @@ def test_a_deleted_staged_file_is_recorded(repo):
     assert "base.py" in rl.staged_blob_shas(repo)
 
 
+def test_a_renamed_file_is_keyed_by_its_new_name(repo):
+    subprocess.run(["git", "-C", repo, "mv", "base.py", "moved.py"], check=True)
+    shas = rl.staged_blob_shas(repo)
+    assert shas == {"moved.py": subprocess.run(
+        ["git", "-C", repo, "rev-parse", ":moved.py"],
+        capture_output=True, text=True, check=True).stdout.strip()}
+
+
+def test_a_stage_too_large_for_one_command_line_is_still_indexed(repo):
+    # Passing every staged path to one git invocation died with E2BIG ("Argument list too
+    # long") past ~8800 files on macOS. Index entries need no working-tree files, so ~4 MB
+    # of names -- over ARG_MAX on macOS and Linux alike -- stages in well under a second.
+    blob = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"], input="x\n",
+                          capture_output=True, text=True, check=True).stdout.strip()
+    names = ["many/{:04d}/".format(i) + "/".join(["p" * 200] * 7) for i in range(3000)]
+    subprocess.run(["git", "-C", repo, "update-index", "--index-info"], check=True, text=True,
+                   input="".join("100644 {}\t{}\n".format(blob, n) for n in names))
+    shas = rl.staged_blob_shas(repo)
+    assert len(shas) == len(names)
+    assert set(shas.values()) == {blob}
+
+
 # --------------------------------------------------------------------------
 # the annotation
 # --------------------------------------------------------------------------
