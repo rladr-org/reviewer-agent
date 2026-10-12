@@ -31,9 +31,6 @@ from reviewer_base import (
     reviewer_home,
     short,
 )
-from reviewer_git import (
-    staged_files,
-)
 from reviewer_manifest import (
     session_manifest_block,
 )
@@ -840,27 +837,32 @@ def directives_block(proj):
 # --------------------------------------------------------------------------
 def _staged_index(path):
     """({path: blob sha}, {path: file mode}) for the files in `git diff --cached`, or ({}, {})
-    outside a repo. Deleted paths map to the "-" sentinel in both."""
-    names = staged_files(path)
-    if not names:
-        return {}, {}
-    shas = {name: "-" for name in names}
-    modes = dict(shas)
+    outside a repo. Deleted paths map to the "-" sentinel in both.
+
+    One `--raw` diff carries each file's new mode and sha, so no path goes on the command
+    line: listing them as arguments died with E2BIG past ~8800 staged files on macOS. Names
+    keep `staged_files`' quoting (no -z), and a rename lists only its new name, as there."""
     try:
         p = subprocess.run(
-            ["git", "-C", str(path), "ls-files", "--stage", "--"] + names,
+            ["git", "-C", str(path), "diff", "--cached", "--raw", "--no-abbrev", "--no-color"],
             capture_output=True, text=True,
         )
     except FileNotFoundError:
-        return shas, modes
+        return {}, {}
     if p.returncode != 0:
-        return shas, modes
+        return {}, {}
+    shas, modes = {}, {}
     for line in p.stdout.splitlines():
-        # "<mode> <sha> <stage>\t<path>"
-        meta, _, name = line.partition("\t")
+        # ":<old mode> <new mode> <old sha> <new sha> <status>\t<path>[\t<new path>]"
+        meta, _, names = line.partition("\t")
         parts = meta.split()
-        if name and len(parts) >= 2:
-            modes[name], shas[name] = parts[0], parts[1]
+        if not names or len(parts) < 5:
+            continue
+        name = names.split("\t")[-1]
+        if parts[3].strip("0"):
+            modes[name], shas[name] = parts[1], parts[3]
+        else:  # deleted, or unmerged: no index blob
+            modes[name] = shas[name] = "-"
     return shas, modes
 
 

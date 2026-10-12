@@ -104,33 +104,28 @@ _DISPOSITION_INSTRUCTION = (
 
 
 def _stage_snapshot(cwd):
-    names_result = subprocess.run(
-        ["git", "-C", str(cwd), "diff", "--cached", "--name-only", "-z"],
+    # One --raw diff carries each file's new mode and sha, so no path goes on the command
+    # line: listing them as arguments died with E2BIG past ~8800 staged files on macOS.
+    result = subprocess.run(
+        ["git", "-C", str(cwd), "diff", "--cached", "--raw", "--no-abbrev", "--no-color", "-z"],
         capture_output=True,
     )
-    if names_result.returncode != 0:
+    if result.returncode != 0:
         return None
-    names = [
-        item.decode("utf-8", "surrogateescape")
-        for item in names_result.stdout.split(b"\0")
-        if item
-    ]
-    snapshot = {name: "-" for name in names}
-    if not names:
-        return snapshot
-    index = subprocess.run(
-        ["git", "-C", str(cwd), "ls-files", "--stage", "-z", "--"] + names,
-        capture_output=True,
-    )
-    if index.returncode != 0:
-        return None
-    for record in index.stdout.split(b"\0"):
-        if not record or b"\t" not in record:
-            continue
-        metadata, raw_name = record.split(b"\t", 1)
-        parts = metadata.split()
-        if len(parts) >= 2:
-            snapshot[raw_name.decode("utf-8", "surrogateescape")] = b" ".join(parts[:2]).decode("ascii")
+    # ":<old mode> <new mode> <old sha> <new sha> <status>\0<path>\0", with a second path
+    # for a rename or copy; like --name-only, key it by the new one.
+    snapshot = {}
+    fields = result.stdout.split(b"\0")
+    i = 0
+    while i < len(fields) and fields[i].startswith(b":"):
+        parts = fields[i].split()
+        count = 2 if parts[-1][:1] in (b"R", b"C") else 1
+        if len(parts) < 5 or i + count >= len(fields):
+            return None
+        name = fields[i + count].decode("utf-8", "surrogateescape")
+        sha = parts[3].decode("ascii")
+        snapshot[name] = parts[1].decode("ascii") + " " + sha if sha.strip("0") else "-"
+        i += 1 + count
     return snapshot
 
 
