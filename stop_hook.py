@@ -136,10 +136,13 @@ def _main(data):
     # (a run_in_background sub-agent/shell the harness auto-re-invokes on completion)? If so
     # the stop is pure-suppressed below: allowed immediately with NO supervisor call and NO
     # nudge (the parked agent needs no prodding; it resumes when the harness wakes it).
+    # A shell listening on a port (a server) never exits, so it alone is no proof of a wait:
+    # `bg_servers` lists such shells when they are all that keeps the wait open, and the stop is
+    # then reviewed with them named (docs/plans/bgwait_server_exception.md).
     try:
-        bg_wait = rl.has_outstanding_background_task(data.get("transcript_path"))
+        bg_wait, bg_servers = rl.background_wait_state(data.get("transcript_path"))
     except Exception:
-        bg_wait = False
+        bg_wait, bg_servers = False, []
 
     # ENTER trace: proof-of-invocation, emitted for EVERY stop before any early return.
     # bg=1 marks a background job (CLAUDE_JOB_DIR set) so we can see whether the Stop event
@@ -179,6 +182,10 @@ def _main(data):
             "no supervisor call".format(key)
         )
         return 0
+    if bg_servers:
+        rl.log("[stop] key={} only listening background shells remain ({}) -> not a background "
+               "wait, supervisor review".format(
+                   key, ",".join(t.get("task_id", "?") for t in bg_servers)))
 
     # A tick that found the pause marker and replied `ok`: the operator has the turn, so there is
     # nothing to supervise. Sending that `ok` to the supervisor let it push the agent back to
@@ -250,7 +257,7 @@ def _main(data):
             _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
             return 0
     prompt = rl.apply_context(
-        rl.STOP_SUPERVISE_PROMPT.format(text),
+        rl.background_tasks_block(bg_servers) + rl.STOP_SUPERVISE_PROMPT.format(text),
         cwd,
         transcript_path,
         claude_sid,

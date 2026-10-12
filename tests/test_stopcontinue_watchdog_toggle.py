@@ -230,7 +230,9 @@ def test_sessionstart_injects_nothing_when_flag_off(tmp_path, monkeypatch):
     enable_stopcontinue(proj, home)  # stopContinue on, but watchdog OFF
     p = run_session_start(proj, home)
     assert p.returncode == 0, p.stderr
-    assert p.stdout.strip() == ""  # no additionalContext emitted
+    # No additionalContext emitted. (A temp-directory plugin-root warning may still appear when
+    # the suite runs from a temp copy, so check the context, not that stdout is empty.)
+    assert "hookSpecificOutput" not in (json.loads(p.stdout) if p.stdout.strip() else {})
 
 
 # --------------------------------------------------------------------------
@@ -260,7 +262,8 @@ def test_sessionstart_injects_nothing_when_stopcontinue_off_even_if_flag_on(tmp_
     disable_stopcontinue(proj, home)
     p = run_session_start(proj, home)
     assert p.returncode == 0, p.stderr
-    assert p.stdout.strip() == ""  # no re-arm context despite the flag being set
+    # No re-arm context despite the flag being set.
+    assert "hookSpecificOutput" not in (json.loads(p.stdout) if p.stdout.strip() else {})
 
 
 # --------------------------------------------------------------------------

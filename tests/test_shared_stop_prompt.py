@@ -90,6 +90,38 @@ def test_the_output_rule_says_only_the_agent_reads_a_directive():
     assert "never write to the operator" in text.lower()
 
 
+def test_an_operator_reply_that_adds_a_step_first_approves_the_proposal():
+    # 2026-10-08: "Shall I start step 1?" -> operator: "commit the plan first" -> the agent
+    # committed and asked "Shall I start?" again, and the supervisor approved the stop.
+    text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
+    assert "as a reply to the agent message just before it" in text
+    assert '"X first"' in text
+    # ...only for work that is already authorized, never to settle an open decision by inference,
+    # and never as approval of a commit, push or other AUTHORITY LIMITS action.
+    assert "whether to start authorized work that needs no AUTHORITY LIMITS action" in text
+    assert "do not invent an answer, make the choice on the operator's behalf, or infer authorization" in text
+    assert "never authorizes an AUTHORITY LIMITS action" in text
+
+
+def test_a_handover_step_awaiting_the_operators_word_is_not_authorized_by_continue():
+    # 2026-10-08: after "please read the handover file and let's continue" and "new audit for your
+    # evaluation", the agent evaluated the audit and ended "Next step on your word: step 1". The
+    # handover marked step 1 "Needs the operator's word"; the supervisor ordered it anyway, and the
+    # agent edited committed files during what the operator called a discussion.
+    text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
+    assert "records work; it does not approve it" in text
+    assert 'A general "continue" or "let\'s continue" resumes what the operator was doing' in text
+    assert "the answer is the deliverable" in text
+
+
+def test_preparing_for_compaction_is_the_whole_request():
+    # 2026-10-08: asked to write a handover because "we need to compact", the agent did and
+    # stopped; the supervisor directed it to run the next step the handover listed.
+    text = " ".join((ROOT / PLUGIN / RESOURCE).read_text(encoding="utf-8").split())
+    assert "PREPARING FOR COMPACTION OR A NEW SESSION" in text
+    assert "are for after the compaction" in text
+
+
 def test_work_promised_in_earlier_replies_counts_as_remaining_work():
     # Replayed live 2026-09-30: shown the AGENT'S OWN EARLIER REPLIES block with "3. Recording the
     # Linux to-dos ... in HANDOVER.md" undone, the supervisor still approved the stop (2 of 2),

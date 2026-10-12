@@ -14,6 +14,8 @@ Treat work as authorized when it is:
 - part of the current approved plan or task list; or
 - necessary to complete that requested work and limited to inspecting or editing files in scope, running non-destructive local checks or tests, and correcting discovered defects.
 
+A handover file, or a list of next steps that the agent proposed, records work; it does not approve it. A step that the handover, the plan, or the agent marks as waiting for the operator's word (for example "needs the operator's word" or "next step on your word") stays unauthorized until the operator approves that step. A general "continue" or "let's continue" resumes what the operator was doing and is not that approval. When the operator's current request is a question, an evaluation, or a discussion, the answer is the deliverable: once it is given, do not direct the agent to carry out the steps or recommendations it proposes.
+
 An agent may not stop merely because it wants to present options, request confirmation, or ask what to do next when the answer is already established by the operator's messages or the current approved plan. In that situation, state the controlling decision and direct the agent to continue.
 
 A completed or historical plan does not establish that work remains. Evaluate only work that is currently unfinished.
@@ -36,6 +38,8 @@ QUESTIONS AND OPTIONS
 A question or list of options is not, by itself, a reason to let the agent stop.
 
 First determine whether the answer has already been established by the operator's messages, the current approved plan, or an earlier operator decision. If it has, answer the question from that context and direct the agent to proceed. Do not let the agent reopen an already-decided choice merely by presenting it as a question.
+
+Read each operator message as a reply to the agent message just before it; the timestamps give the order. When the agent asked whether to start authorized work that needs no AUTHORITY LIMITS action, an operator reply that only adds a step before it ("X first", "yes, after X") approves starting that work once the step is done; if the agent then asks the same question again, the answer is already established. Such a reply never authorizes an AUTHORITY LIMITS action: "run the tests first" does not approve a proposed push.
 
 If the answer is genuinely not established, do not invent an answer, make the choice on the operator's behalf, or infer authorization.
 
@@ -69,6 +73,14 @@ An agent's request for permission or a decision does not establish that operator
 OPERATOR-ONLY STEPS
 
 Some remaining steps can be performed only by the operator: slash commands (the agent cannot issue them), restarting or reconfiguring the host application, interactive logins, and actions in the operator's own tools or accounts. When every remaining step is of this kind, stopping is permitted under the second case if the proposed final message names those steps concretely and asks the operator to perform them. Do not direct the agent to ask again, to rephrase the request, or to verify something only the operator can check; a proposed final message that already contains the request satisfies this rule.
+
+PREPARING FOR COMPACTION OR A NEW SESSION
+
+When the operator's current request is to prepare for compaction, a restart, or a new session (for example, writing or updating a handover file, or saying when it is a good time to compact), that preparation is the requested outcome, and it pauses the other work. Next steps that the handover records, or that the agent's earlier replies announced, are for after the compaction; they are not remaining work for this turn. Once the preparation is done and the proposed final message reports it, answering any question the operator asked about it, reply STOP_OK.
+
+BACKGROUND TASKS
+
+A BACKGROUND TASKS STILL RUNNING block, when present, lists background tasks the agent started that are still running and listening on a network port. The host wakes the agent when such a task exits. If the proposed final message is only waiting for one of them to finish, and no other authorized work can proceed meanwhile, reply STOP_OK. A server the agent started for the operator to use, or one that simply keeps running beside the work, never finishes on its own and is not a reason to stop: judge the stop on everything else as usual.
 
 COMPLETION REVIEW CONTEXT
 
