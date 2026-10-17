@@ -420,8 +420,8 @@ In each repository to protect:
    `/reviewer-agent:stopContinue on acceptRisk` instruction.
 
    Each stop waits 60 seconds before the supervisor reviews it, so you can read the reply first.
-   Replying during the wait skips the review. Meanwhile the spinner reads "stopContinue: reading
-   delay, then supervisor review (reply to skip)". `/reviewer-agent:stopContinue delay 30` changes the
+   Replying during the wait skips the review. The spinner and blocking-feedback label read
+   "stopContinue supervisor (reply to skip the review)". `/reviewer-agent:stopContinue delay 30` changes the
    wait (0–300 seconds, 0 turns it off), `delay status` shows it, and `delay clear` restores the
    default.
 

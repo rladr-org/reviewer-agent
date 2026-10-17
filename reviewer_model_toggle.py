@@ -270,8 +270,9 @@ def _set_timeout(token):
     if token.lower() == "clear":
         rl.clear_commit_timeout()
         rl.log("[model] commit timeout cleared")
-        print("reviewerModel: commit-audit timeout cleared -> default {}s".format(
-            rl.DEFAULT_COMMIT_TIMEOUT))
+        seconds, source = rl.commit_review_timeout_detail()
+        print("reviewerModel: commit-audit timeout slot cleared -> {}s (from {})".format(
+            seconds, source))
         return 0
     secs, err = _parse_timeout(token)
     if err:

@@ -17,8 +17,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Claude Code: `/reviewer-agent:stopContinue delay [<0..300>|status|clear]` shows or sets the
   wait for every project. `REVIEWER_STOPCONTINUE_DELAY_SECS` overrides it, and it overrides
   `stopContinueDelaySecs` in `config.json`. `0` turns the wait off. While a stop waits or is
-  reviewed, Claude Code's spinner reads "stopContinue: reading delay, then supervisor review
-  (reply to skip)" instead of "running Stop hook".
+  reviewed, Claude Code's spinner reads "stopContinue supervisor (reply to skip the review)"
+  instead of "running Stop hook". The same fixed label also introduces blocking feedback.
 - Stop supervisor, both hosts: an operator reply is read as the answer to the agent message just
   before it. "X first" after "Shall I start step 1?" approves step 1 once X is done, but never an
   action under the authority limits. A handover's next steps are not approved by a general
@@ -35,6 +35,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Fixed
 
+- Claude Code: `/reviewerModel timeout clear` reports the effective timeout and its source
+  after clearing the command override, including an environment or config-file value that
+  still applies, instead of always reporting the built-in 900-second default.
 - `/reviewerDirective` output now starts with `reviewerDirective SUCCEEDED` or
   `reviewerDirective FAILED:`. Claude Code titles every hook-handled prompt "UserPromptSubmit
   operation blocked by hook", which made a recorded directive look like an error.
