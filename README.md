@@ -385,6 +385,11 @@ Install from the marketplace:
 Restart Claude Code after installation. Claude Code snapshots hooks when a session starts; an
 existing session may otherwise keep the previous hook set.
 
+If you install from a local checkout instead (a Directory marketplace), keep that checkout in a
+permanent location. Claude Code runs a Directory plugin's hooks from the checkout itself, and the
+OS cleans temporary directories such as `/tmp`: once the files are gone, every hook fails open,
+the commit gate included. A session started from a temporary directory shows a warning saying so.
+
 In each repository to protect:
 
 1. Copy `reviewerAgent.md.template` to `reviewerAgent.md` at the repository root and edit it for

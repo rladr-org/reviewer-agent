@@ -17,12 +17,31 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Claude Code: `/reviewer-agent:stopContinue delay [<0..300>|status|clear]` shows or sets the
   wait for every project. `REVIEWER_STOPCONTINUE_DELAY_SECS` overrides it, and it overrides
   `stopContinueDelaySecs` in `config.json`. `0` turns the wait off.
+- Stop supervisor, both hosts: an operator reply is read as the answer to the agent message just
+  before it. "X first" after "Shall I start step 1?" approves step 1 once X is done, but never an
+  action under the authority limits. A handover's next steps are not approved by a general
+  "continue", and when the request was a question or a discussion, the answer is the
+  deliverable. A request to prepare for compaction or a new session is complete once the
+  handover is written. Claude Code also shows the supervisor the approved message the operator's
+  newest reply answers, when no later agent reply exists.
+
+### Added
+
+- Claude Code: session start warns when the plugin runs from a temporary directory such as
+  `/tmp`. The OS can delete those files, and every hook then fails open, the commit gate
+  included.
 
 ### Fixed
 
 - `/reviewerDirective` output now starts with `reviewerDirective SUCCEEDED` or
   `reviewerDirective FAILED:`. Claude Code titles every hook-handled prompt "UserPromptSubmit
   operation blocked by hook", which made a recorded directive look like an error.
+- Claude Code: a background shell listening on a port (a dev server) no longer skips the stop
+  review. A server never exits, so the stop was treated as waiting on background work forever.
+  The supervisor is now told which servers are running.
+- Both hosts: the commit gate no longer crashes on a large stage. It passed every staged path to
+  `git ls-files`, which failed with "Argument list too long" past about 8,800 files. It now reads
+  the staged index from one `git diff --cached --raw` call.
 
 ## [1.4.2]
 
