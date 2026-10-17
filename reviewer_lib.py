@@ -466,9 +466,14 @@ from reviewer_stopcontinue import (  # noqa: F401
     stopcontinue_effort,
     stopcontinue_effort_config,
     stopcontinue_delay_secs,
+    stopcontinue_delay_detail,
+    stopcontinue_delay_file,
+    set_stopcontinue_delay,
+    clear_stopcontinue_delay,
     apply_stopcontinue_delay,
     HOOK_BUDGET_S,
     DELAY_MARGIN_S,
+    DELAY_MAX_S,
 )
 # `_TRANSCRIPT_CACHE` is shared MUTABLE state: this name and reviewer_transcript's are one
 # object, so every writer must mutate it and never rebind it (LIB_SPLIT_PLAN.md 5.1, pinned by

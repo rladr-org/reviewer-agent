@@ -43,7 +43,7 @@ from reviewer_state import (
 # stopContinue: read the agent's last message; decide if it's a user question
 # --------------------------------------------------------------------------
 _sleep = time.sleep  # module-level seam so tests can fake the flush-race retry delay
-_delay_sleep = time.sleep  # separate seam for the stopContinue pre-enactment delay (below)
+_delay_sleep = time.sleep  # separate seam for the stopContinue reading delay (below)
 
 
 def _assistant_event_text(ev):
@@ -387,32 +387,73 @@ def stopcontinue_effort_config():
 
 
 # --------------------------------------------------------------------------
-# stopContinue pre-enactment delay: pause BEFORE enacting a supervised verdict (a continue
-# directive OR a stop approval) so the operator has a window to intervene even when the model's
-# call is wrong. Default 0 (no delay); the Stop hook budget-caps it so it can never overrun host
-# cancellation (which would fail the stop OPEN). See docs/plans/stopcontinue_delay_and_prompt_hardening.md.
+# stopContinue reading delay: wait BEFORE the supervisor reviews a stop, so the operator can read
+# the agent's reply first; a reply typed during the wait skips the review and spends no reviewer
+# tokens. Default 60 s; the Stop hook caps it so the review that follows still fits before host
+# cancellation (which would fail the stop OPEN). See docs/plans/stopcontinue_reading_delay.md.
 # --------------------------------------------------------------------------
-DELAY_MAX_S = 300  # a single intervention window; also the ceiling the hook budget is sized for
-DELAY_MARGIN_S = 30  # leave this much of the hook budget for emitting the decision after the sleep
+DEFAULT_DELAY_S = 60
+DELAY_MAX_S = 300  # the longest reading window; also the ceiling the hook budget is sized for
+DELAY_MARGIN_S = 30  # leave this much of the hook budget for emitting the decision after the review
 HOOK_BUDGET_S = 630  # MUST match the Stop hook timeout in hooks/hooks.json (pinned by a test):
-#                      STOP_TIMEOUT (300) + DELAY_MAX_S (300) + DELAY_MARGIN_S (30).
+#                      DELAY_MAX_S (300) + STOP_TIMEOUT (300) + DELAY_MARGIN_S (30).
+
+
+def stopcontinue_delay_file():
+    return reviewer_home() / "state" / "stopcontinue_delay"
+
+
+def _delay_value(raw):
+    """`raw` as whole seconds clamped to 0..DELAY_MAX_S, or None when it is not a whole number."""
+    if isinstance(raw, bool):
+        return None
+    try:
+        return min(DELAY_MAX_S, max(0, int(str(raw).strip())))
+    except (TypeError, ValueError):
+        return None
+
+
+def stopcontinue_delay_detail():
+    """(seconds, source) for the reading delay: env REVIEWER_STOPCONTINUE_DELAY_SECS, then the
+    state file `/stopContinue delay` writes, then config.json stopContinueDelaySecs, then
+    DEFAULT_DELAY_S. An unusable value is skipped; 0 turns the wait off."""
+    try:
+        saved = stopcontinue_delay_file().read_text(encoding="utf-8")
+    except OSError:
+        saved = None
+    for source, raw in (
+        ("env REVIEWER_STOPCONTINUE_DELAY_SECS", os.environ.get("REVIEWER_STOPCONTINUE_DELAY_SECS")),
+        (str(stopcontinue_delay_file()), saved),
+        ("config.json stopContinueDelaySecs", config_get("stopContinueDelaySecs")),
+    ):
+        if raw is None:
+            continue
+        secs = _delay_value(raw)
+        if secs is not None:
+            return secs, source
+    return DEFAULT_DELAY_S, "default"
 
 
 def stopcontinue_delay_secs():
-    """Seconds to pause before enacting a stopContinue verdict (env
-    REVIEWER_STOPCONTINUE_DELAY_SECS or config stopContinueDelaySecs, default 0 = no delay,
-    floored at 0 and capped at DELAY_MAX_S). Applies to BOTH a continue directive and a stop
-    approval."""
-    return min(DELAY_MAX_S, _tunable_int("REVIEWER_STOPCONTINUE_DELAY_SECS", "stopContinueDelaySecs", 0, 0))
+    return stopcontinue_delay_detail()[0]
 
 
-def apply_stopcontinue_delay(decision, budget_remaining=None, should_cancel=None):
-    """Pause before enacting a stopContinue `decision` ("continue" or "stop-approval"), if
-    configured. Announces on stderr BEFORE sleeping so an operator can Escape during the window,
-    then sleeps via the `_delay_sleep` seam. `budget_remaining`, when given, caps the sleep against
-    the time left before the host cancels the Stop hook, so the decision is always emitted.
-    `should_cancel`, when given, is asked every half second; True is returned if it fired, so the
-    caller can drop the decision."""
+def set_stopcontinue_delay(seconds):
+    f = stopcontinue_delay_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(str(int(seconds)) + "\n", encoding="utf-8")
+
+
+def clear_stopcontinue_delay():
+    stopcontinue_delay_file().unlink(missing_ok=True)
+
+
+def apply_stopcontinue_delay(budget_remaining=None, should_cancel=None):
+    """Wait the reading delay before the supervisor review, if configured. Announces on stderr
+    BEFORE sleeping, then sleeps via the `_delay_sleep` seam. `budget_remaining`, when given, caps
+    the wait so the review still fits before the host cancels the Stop hook. `should_cancel`, when
+    given, is asked every half second; True is returned if it fired, so the caller can skip the
+    review."""
     secs = stopcontinue_delay_secs()
     if budget_remaining is not None:
         secs = min(secs, max(0, int(budget_remaining)))
@@ -420,9 +461,9 @@ def apply_stopcontinue_delay(decision, budget_remaining=None, should_cancel=None
         return False
     try:
         sys.stderr.write(
-            "[stopContinue] applying {} in {}s -- interrupt now to override.\n".format(decision, secs))
+            "[stopContinue] supervisor review in {}s -- reply to skip it.\n".format(secs))
         sys.stderr.flush()
-    except Exception:  # a heads-up must never be the reason the decision is not enacted
+    except Exception:  # a heads-up must never be the reason the review does not run
         pass
     if should_cancel is None:
         _delay_sleep(secs)
@@ -436,7 +477,7 @@ def apply_stopcontinue_delay(decision, budget_remaining=None, should_cancel=None
             if should_cancel():
                 return True
         except Exception:
-            pass  # a broken check must not cut the window short or stop the decision
+            pass  # a broken check must not cut the window short or skip the review
     return False
 
 

@@ -414,6 +414,11 @@ In each repository to protect:
    first one enabled, its plain `on` invocation gives the corresponding
    `/reviewer-agent:stopContinue on acceptRisk` instruction.
 
+   Each stop waits 60 seconds before the supervisor reviews it, so you can read the reply first.
+   Replying during the wait skips the review. `/reviewer-agent:stopContinue delay 30` changes the
+   wait (0–300 seconds, 0 turns it off), `delay status` shows it, and `delay clear` restores the
+   default.
+
 The flags are stored by canonical repository root, apply to linked worktrees, and persist across
 Claude Code restarts. `/reviewer-agent:reviewerAgent off` and `/reviewer-agent:stopContinue off`
 disable them independently.
@@ -443,7 +448,7 @@ See the package's [CLI completion checks](plugins/reviewer-agent-codex/README.md
 
 Codex stopContinue runs automatically when Codex emits its Stop event, without an
 agent-initiated early review. Request receipt and ordinary tool execution only record context.
-The native plugin waits 15 seconds before starting that review so you can read the response;
+The native plugin waits 60 seconds before starting that review so you can read the response;
 `stopContinueDelaySecs` in its config or `REVIEWER_STOPCONTINUE_DELAY_SECS` adjusts this reading
 window (0–300 seconds). Escape cancels the window or the running review. Unsent typing alone
 does not trigger a documented host hook, so first-keystroke cancellation requires a host change.
@@ -708,6 +713,7 @@ convention for namespaced commands).
 |---|---|
 | `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review. First enablement requires the operator's exact `acceptRisk` invocation. |
 | `/reviewer-agent:stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
+| `/reviewer-agent:stopContinue delay [<0..300>\|status\|clear]` | Show or set how long each stop waits before its review (default 60 seconds, every project). Replying during the wait skips the review. |
 | `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. A tick does not start work while you have the turn: after an approved stop or your interrupt it replies `ok` until your next message. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. |
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
@@ -1006,7 +1012,7 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_STOPCONTINUE_EFFORT` | `low` | Stop-supervisor reasoning effort. |
 | `REVIEWER_STOPCONTINUE_MAX_NUDGES` | `8` | Maximum forced continuations per user turn. Kept below Claude Code's own limit of 9 consecutive Stop-hook blocks, which ends the turn with an error. |
 | `REVIEWER_STOP_ROTATE_EVERY` | `6` | Retire the stop supervisor's session after this many completed reviews, bounding the context each resumed review re-sends; `0` never retires it. Also `stopRotateEvery` in `config.json`. Changing the model or effort with `/reviewerModel` also retires this project's reviewer sessions for the current Claude session. |
-| `REVIEWER_STOPCONTINUE_DELAY_SECS` | `0` (max 300) | Seconds to pause before enacting either stopContinue verdict — a continue directive or a stop approval — giving you a window to intervene (Escape). Announced on stderr first, then capped against the remaining Stop-hook budget. Also `stopContinueDelaySecs` in `config.json`. |
+| `REVIEWER_STOPCONTINUE_DELAY_SECS` | `60` (0–300) | Seconds a stop waits before the supervisor reviews it, so you can read the reply; replying during the wait skips the review. `0` turns it off. Overrides `/reviewer-agent:stopContinue delay`, which overrides `stopContinueDelaySecs` in `config.json`. |
 | `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |
 | `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |
 | `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
@@ -1021,15 +1027,15 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
 Stop supervision uses a separate 300-second reviewer limit and fails open. The `AskUserQuestion`
 reroute is a `PreToolUse` hook (a 60-second host timeout) that makes no reviewer call of its own;
-the rerouted question is answered by stop supervision. When `REVIEWER_STOPCONTINUE_DELAY_SECS`
-(or `stopContinueDelaySecs`) is set, the Stop hook pauses before enacting either verdict; its own
-host timeout is 630 s to fit the reviewer plus a full delay, and the delay is capped against the
-remaining budget so it never overruns cancellation (which would fail the stop open).
+the rerouted question is answered by stop supervision. Before that review, the Stop hook waits
+the reading delay (60 seconds by default); its own host timeout is 630 s to fit a full delay plus
+the reviewer, and the delay is capped so the review still fits before cancellation (which would
+fail the stop open). An approved stop ends as soon as the review approves it.
 
 A reply you submit (Enter) while the agent's turn is still ending wins over the supervisor, with
 no Escape needed: Claude Code queues it, and the Stop hook sees it in the transcript. Queued
-before the review, the review is skipped; during the review, the reviewer is killed within about
-half a second; during the delay, or as the verdict arrives, a continue directive is dropped. Each
+before or during the reading delay, the review is skipped; during the review, the reviewer is
+killed within about half a second; as the verdict arrives, a continue directive is dropped. Each
 case allows the stop with a notice, and the dropped directive is shown to you, not to the agent.
 
 The streaming, scratch, and idle-threshold behavior below is specific to **this Claude Code plugin

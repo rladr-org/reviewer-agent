@@ -29,7 +29,7 @@ $reviewer-agent-codex:stop-continue delay clear
 
 `delay` (or `delay status`) reports the effective value and source. An integer from 0 through
 300 saves `stopContinueDelaySecs` in the plugin's `config.json`; 0 disables the delay. `clear`
-removes that key, restoring the 15-second default unless the environment overrides it.
+removes that key, restoring the 60-second default unless the environment overrides it.
 `REVIEWER_STOPCONTINUE_DELAY_SECS` takes precedence. This setting applies across repositories
 and does not enable supervision. The hook result reports any override.
 

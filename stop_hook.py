@@ -39,8 +39,8 @@ STOP_TIMEOUT = 300
 # One is not enough: "sure, I'll do that" followed by a stop is the premature stop to catch.
 DECLINED_DIRECTIVES_LIMIT = 2
 
-# Wall clock for the pre-enactment delay's remaining-budget cap. A seam so a test can drive
-# elapsed time deterministically.
+# Wall clock for the reading delay's remaining-budget cap. A seam so a test can drive elapsed
+# time deterministically.
 _hook_now = time.monotonic
 
 
@@ -121,7 +121,7 @@ def _allow_for_operator_reply(key, when, outcome, directive=""):
 
 
 def _main(data):
-    hook_start = _hook_now()  # for the pre-enactment delay's remaining-budget cap
+    hook_start = _hook_now()  # for the reading delay's remaining-budget cap
     cwd = data.get("cwd") or rl.project_dir()
     key = rl.canonical_project_key(cwd)
     claude_sid = rl.claude_session_key(data)
@@ -207,8 +207,8 @@ def _main(data):
 
     transcript_path = rl.resolve_transcript_path(data)
     # The operator pressed Enter on a reply while this turn was still running: they have the
-    # turn, so the review gives way at every point it can -- skipped here, killed while it runs,
-    # or its directive dropped before it is enacted. Without this the directive won and the
+    # turn, so the review gives way at every point it can -- skipped here or during the reading
+    # delay, killed while it runs, or its directive dropped as it arrives. Without this the directive won and the
     # operator had to press Escape as well (2026-09-02: "no continue" queued 4s after the reply,
     # pushed anyway 39s later).
     watch = rl.operator_reply_watch(transcript_path)
@@ -256,6 +256,18 @@ def _main(data):
             # Waiting on the operator is idle, not stalled: a tick must not re-open the push.
             _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
             return 0
+
+    # Reading delay: the operator is often still reading the reply this stop ends with, so wait
+    # before the review rather than push the agent on mid-read. A reply during the wait skips the
+    # review, which then costs no reviewer tokens. Capped so the full review still fits before
+    # Claude Code cancels the hook, which would fail the stop OPEN.
+    budget = rl.HOOK_BUDGET_S - (_hook_now() - hook_start) - STOP_TIMEOUT - rl.DELAY_MARGIN_S
+    delay = min(rl.stopcontinue_delay_secs(), max(0, int(budget)))
+    if delay > 0:
+        rl.log("[stop] key={} reading delay {}s before the supervisor review".format(key, delay))
+    if rl.apply_stopcontinue_delay(budget_remaining=budget, should_cancel=watch.replied):
+        return _allow_for_operator_reply(key, "during the reading delay", "supervisor call skipped")
+
     prompt = rl.apply_context(
         rl.background_tasks_block(bg_servers) + rl.STOP_SUPERVISE_PROMPT.format(text),
         cwd,
@@ -381,20 +393,6 @@ def _main(data):
             "already answered; letting it stop so the operator can respond:\n" + rl.short(out))))
         rl.clear_directive(cwd, claude_sid)
         return 0
-
-    # Pre-enactment delay: when the supervisor produced a verdict (a continue directive OR a
-    # STOP_OK approval), pause BEFORE emitting it so the operator has a window to intervene. The
-    # fail-open no-verdict paths (empty / failed reviewer) skip this. Budget-capped so the sleep
-    # can never run past host cancellation of the Stop hook, which would fail the stop OPEN.
-    produced_verdict = keep_going or (code == 0 and bool(out.strip()) and rl.is_stop_ok(out))
-    if produced_verdict:
-        budget = rl.HOOK_BUDGET_S - (_hook_now() - hook_start) - rl.DELAY_MARGIN_S
-        cut_short = rl.apply_stopcontinue_delay(
-            "continue" if keep_going else "stop-approval", budget_remaining=budget,
-            should_cancel=watch.replied)
-        if cut_short and keep_going:
-            return _allow_for_operator_reply(
-                key, "during the pre-enactment delay", "directive dropped", out)
 
     if keep_going:
         rl.bump_nudge_count(cwd, claude_sid)

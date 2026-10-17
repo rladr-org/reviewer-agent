@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""`/stopContinue on [acceptRisk]|off` implementation.
+"""`/stopContinue on [acceptRisk]|off|delay [<seconds>|status|clear]` implementation.
 
 Toggles a SEPARATE per-project flag that enables the Stop hook (stop_hook.py): when the
 audited agent ends its turn with a prose question instead of calling AskUserQuestion, the
@@ -65,12 +65,44 @@ def _on(proj, accept_risk=False):
     return 0
 
 
+_USAGE = "usage: stopcontinue_toggle.py on [acceptRisk]|off|delay [<0..{}>|status|clear]".format(
+    rl.DELAY_MAX_S)
+
+
+def _delay(args):
+    """`delay [<seconds>|status|clear]`: show or set how long a stop waits before its review.
+    User-wide, like the commit timeout; it never turns stopContinue on."""
+    value = args[0] if args else "status"
+    number = value.isascii() and value.isdigit()
+    if len(args) > 1 or not (value in ("status", "clear") or number):
+        print("stopContinue: ERROR - delay expects a whole number of seconds from 0 to {}, "
+              "status, or clear.".format(rl.DELAY_MAX_S), file=sys.stderr)
+        return 2
+    if number:
+        if int(value) > rl.DELAY_MAX_S:
+            print("stopContinue: ERROR - delay expects a whole number of seconds from 0 to "
+                  "{}.".format(rl.DELAY_MAX_S), file=sys.stderr)
+            return 2
+        rl.set_stopcontinue_delay(int(value))
+        rl.log("[stopcontinue] delay set {}s".format(int(value)))
+    elif value == "clear":
+        rl.clear_stopcontinue_delay()
+        rl.log("[stopcontinue] delay cleared")
+    seconds, source = rl.stopcontinue_delay_detail()
+    print("stopContinue: delay {} seconds (from {}; applies to every project). The supervisor "
+          "waits this long before reviewing a stop; replying during the wait skips the review."
+          .format(seconds, source))
+    return 0
+
+
 def main(argv):
     action = argv[1].strip().lower() if len(argv) > 1 else ""
+    if action == "delay":
+        return _delay(argv[2:])
     proj = rl.project_dir()
     if action == "on" and len(argv) in (2, 3):
         if len(argv) == 3 and argv[2] != "acceptRisk":
-            print("usage: stopcontinue_toggle.py on [acceptRisk]|off", file=sys.stderr)
+            print(_USAGE, file=sys.stderr)
             return 2
         return _on(proj, accept_risk=len(argv) == 3)
     if action == "off" and len(argv) == 2:
@@ -79,7 +111,7 @@ def main(argv):
         rl.log("[stopcontinue] off root={}".format(root))
         print("stopContinue: OFF for {}".format(root))
         return 0
-    print("usage: stopcontinue_toggle.py on [acceptRisk]|off", file=sys.stderr)
+    print(_USAGE, file=sys.stderr)
     return 2
 
 

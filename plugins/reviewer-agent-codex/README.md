@@ -591,7 +591,7 @@ prompt or routine success warning, preserving the original final answer. An inco
 adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
 The plugin cannot force the app's previous-message dropdown to remain expanded.
 
-Before starting a completion review, the native Stop hook waits **15 seconds** to give you time
+Before starting a completion review, the native Stop hook waits **60 seconds** to give you time
 to read the agent's response. Set `stopContinueDelaySecs` in
 `~/.codex/reviewer-agent-codex/config.json`, or the overriding environment variable
 `REVIEWER_STOPCONTINUE_DELAY_SECS`, to change the window (integer seconds, 0 disables it,
