@@ -44,9 +44,15 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
 - [ ] Retain the existing five-scenario live matrix result (53 checks passed on the candidate
   before the spinner change). Rerun affected scenarios when behavior changes; validate the
   final distribution from the release artifact.
-- [ ] Activate the current Codex candidate, compare installed bytes to source, restart, trust
-  `/hooks`, and verify bare-commit redirection, reject/fix/approve, and cancellation without a
-  stale continuation. A host restart and interactive hook trust require the operator.
+- [x] Activate the current Codex candidate, compare installed bytes to source, restart, and
+  verify commit redirection and reject/fix/approve in the desktop host. Verify commit-review
+  Escape makes no commit, leaves the edit staged, and allows a successful gated retry.
+- [ ] Finish desktop stop-supervision and cancellation checks, distinguishing reading-delay
+  cancellation from cancellation during backend review. Check interactive `/hooks` trust when
+  testing the CLI host.
+- [ ] Resolve the desktop reply-cancellation acceptance failure: timely host input delivery is
+  required, but the tested desktop delivered the reply after review finished. Decide whether
+  to require a host fix or accept the documented Escape workaround before release.
 - [ ] In the real hosts, verify Escape during a commit review and a successful retry,
   `AskUserQuestion` rerouting, and uninstall preservation of unrelated settings/plugins.
 - [ ] On the operator's clean Linux server, exercise manual/agent installation, smoke tests
@@ -95,6 +101,14 @@ Version identity is still 1.4.2. Keep the human acceptance gates pending until a
   publishing an export remains distinct from exposing all repository history.
 - [Draft release notes](../release-1.4.3.md) are prepared locally. No version bump or publication
   has occurred.
+- Desktop acceptance on 2026-10-17 passed restart/persistence, commit rejection and correction,
+  and commit-review Escape/retry in a detached disposable worktree. The release branch was not
+  changed by these fixture commits. Reply cancellation failed: the timed observer saw the
+  reviewer exit at +79.299 seconds and the operator input hook arrive at +79.504 seconds.
+  The 16 focused submit-cancellation tests pass when that hook is delivered. This establishes
+  a desktop delivery limitation rather than proving cancellation during the actual GUI check.
+  Both READMEs and the draft release notes now qualify the behavior. The local timing report
+  and remaining operator checks are recorded in the uncommitted handover.
 
 ### Supervisor diagnosis
 

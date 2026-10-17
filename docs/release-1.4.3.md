@@ -6,9 +6,11 @@ large staged-index handling and several command and supervision details.
 
 ## Changes
 
-- Both hosts wait 60 seconds before reviewing a stop. Replying during the window skips the
-  review. Set a delay from 0 through 300 seconds with the host's stop-continue command; 0 turns
-  the wait off. Existing explicit settings remain in effect.
+- Both hosts wait 60 seconds before reviewing a stop. In Claude Code, replying during the
+  window skips the review. In Codex, this requires the host to deliver the message while the
+  check is pending; use Escape for immediate interruption. Set a delay from 0 through 300
+  seconds with the host's stop-continue command; 0 turns the wait off. Existing explicit
+  settings remain in effect.
 - Claude Code labels both the spinner and blocking feedback
   `stopContinue supervisor (reply to skip the review)`.
 - The commit gate reads the staged index without putting every path on a command line, avoiding
@@ -35,6 +37,10 @@ The hosts are installed independently. Their configuration files and some key na
 use the [README](https://github.com/rladr-org/reviewer-agent#documentation) for the correct host.
 
 ## Known limitations
+
+In the tested Codex desktop host, submitted replies reached the plugin only after completion
+review finished, so they did not interrupt the reading window or review. Press Escape to
+interrupt immediately. Reply cancellation depends on timely host delivery of `UserPromptSubmit`.
 
 Stop supervision can misjudge scope, revive completed requests, or return prose instead of its
 required stop token, producing an unwanted continuation. Captured incidents remain under

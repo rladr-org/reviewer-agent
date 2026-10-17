@@ -654,13 +654,15 @@ uses the existing reviewer process-tree cleanup and suppresses the old continuat
 It does not cancel commit reviews or reviews belonging to another repository or session, and
 generated continuation prompts do not count as operator submissions. A submission leaves no
 Escape bypass that could skip supervision for the new task. If a host queues the message without
-delivering the hook until later, the plugin cannot react until that delivery; Escape remains the
-immediate interruption mechanism.
+delivering the hook until later, the plugin cannot react until that delivery. Desktop acceptance
+observed replies reaching the plugin only after the completion review finished. Use Escape for
+immediate interruption in Codex desktop; sending a reply alone may leave the check running.
 
 Typing into an unsent draft does **not** itself cancel a review. The
 [documented host hooks](https://learn.chatgpt.com/docs/hooks) expose
 `Interrupt` and `UserPromptSubmit`, but no draft-typing event. Cancellation on the first keystroke
-would require a host change. Submit the reply or press Escape to cancel the current check.
+would require a host change. Press Escape for immediate cancellation; a submitted reply cancels
+only if Codex delivers its hook while the check is still pending.
 
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
 Completion supervision is invoked only by the Stop hook. The developer model remains suspended

@@ -462,6 +462,8 @@ does not trigger a documented host hook, so first-keystroke cancellation require
 Use `$reviewer-agent-codex:stop-continue delay 30` to save the delay, `delay status` to inspect it,
 or `delay clear` to restore the default. Submitting a message cancels the old stop review once
 Codex delivers its `UserPromptSubmit` event; it does not cancel commit reviews.
+A desktop host may queue the message until the check finishes. Use Escape for immediate
+interruption; sending a reply alone did not interrupt the tested desktop host's check.
 A rejected response may already be visible, and continuation can collapse desktop history.
 A question answer also ends a turn; the Stop event alone cannot distinguish that from stopping
 an active work assignment. Reviewer failure or exhausted retries allow stopping under the
