@@ -16,7 +16,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   the wait comes first and an approved stop ends at once. Codex's wait was 15 seconds.
 - Claude Code: `/reviewer-agent:stopContinue delay [<0..300>|status|clear]` shows or sets the
   wait for every project. `REVIEWER_STOPCONTINUE_DELAY_SECS` overrides it, and it overrides
-  `stopContinueDelaySecs` in `config.json`. `0` turns the wait off.
+  `stopContinueDelaySecs` in `config.json`. `0` turns the wait off. While a stop waits or is
+  reviewed, Claude Code's spinner reads "stopContinue: reading delay, then supervisor review
+  (reply to skip)" instead of "running Stop hook".
 - Stop supervisor, both hosts: an operator reply is read as the answer to the agent message just
   before it. "X first" after "Shall I start step 1?" approves step 1 once X is done, but never an
   action under the authority limits. A handover's next steps are not approved by a general

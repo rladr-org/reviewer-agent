@@ -44,7 +44,8 @@
             "type": "command",
             "command": "/bin/sh",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/run_hook.sh", "${CLAUDE_PLUGIN_ROOT}/stop_hook.py"],
-            "timeout": 630
+            "timeout": 630,
+            "statusMessage": "stopContinue: reading delay, then supervisor review (reply to skip)"
           }
         ]
       }
