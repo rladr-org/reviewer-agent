@@ -169,15 +169,13 @@ def test_hook_budget_matches_hooks_json_stop_timeout():
     assert sc.HOOK_BUDGET_S == timeouts[0]
 
 
-def test_the_spinner_says_the_stop_is_waiting_and_a_reply_skips_it():
-    # Claude Code does not show a Stop hook's stderr, so the heads-up never reached the operator:
-    # a 60 s wait looked exactly like a hung "running Stop hook" (2026-10-17). The hook's
-    # statusMessage replaces that spinner text.
+def test_the_spinner_also_reads_sensibly_as_the_blocking_feedback_label():
+    # Claude Code uses the same fixed statusMessage for the spinner AND the label on blocking
+    # feedback. Naming a phase there implies it is still running when the verdict has arrived.
     hooks = json.loads(HOOKS_JSON.read_text())
     (stop,) = [h for group in hooks["hooks"]["Stop"] for h in group["hooks"]]
     message = stop.get("statusMessage", "")
-    assert message.startswith("stopContinue:")
-    assert "reading delay" in message and "reply to skip" in message
+    assert message == "stopContinue supervisor (reply to skip the review)"
 
 
 def test_hook_budget_fits_the_longest_delay_and_review():

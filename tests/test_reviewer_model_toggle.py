@@ -159,6 +159,29 @@ def test_timeout_clear_reverts_to_the_default(tmp_path, monkeypatch):
     assert _effective_timeout(home, monkeypatch) == 900
 
 
+@pytest.mark.parametrize("overrides,seconds,source", [
+    ({"REVIEWER_COMMIT_TIMEOUT_SECS": "1800"}, 1800,
+     "env REVIEWER_COMMIT_TIMEOUT_SECS"),
+    ({}, 1200, "config.json commitReviewTimeoutSecs"),
+])
+def test_timeout_clear_reports_the_effective_value_and_source(
+    tmp_path, overrides, seconds, source
+):
+    home = str(tmp_path / "rh")
+    run_toggle(["timeout", "1500"], home)
+    config = {"commitReviewTimeoutSecs": 1200, "model": "kept-model"}
+    config_path = Path(home) / "config.json"
+    config_path.write_text(json.dumps(config))
+
+    result = run_toggle(["timeout", "clear"], home, overrides)
+
+    assert result.returncode == 0, result.stderr
+    assert "{}s".format(seconds) in result.stdout, result.stdout
+    assert source in result.stdout, result.stdout
+    assert not (Path(home) / "state" / "commit_timeout").exists()
+    assert json.loads(config_path.read_text()) == config
+
+
 def test_model_clear_does_not_touch_the_timeout(tmp_path, monkeypatch):
     # `clear` has always meant "clear the model override"; it must keep that meaning.
     home = str(tmp_path / "rh")
