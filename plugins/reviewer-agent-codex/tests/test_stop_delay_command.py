@@ -29,7 +29,7 @@ def test_delay_command_persists_config_without_enabling_supervision(git_repo, is
     assert "30" in json.loads(command(git_repo, isolated_state, " status").stdout)["stopReason"]
     command(git_repo, isolated_state, " clear")
     assert state.load_config() == {"model": "keep-this", "other": {"x": 1}}
-    assert state.stopcontinue_delay_secs() == 15
+    assert state.stopcontinue_delay_secs() == 60
 
 
 @pytest.mark.parametrize("value", ["-1", "301", "1.5", "oops", "30 extra"])

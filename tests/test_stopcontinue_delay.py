@@ -1,25 +1,28 @@
 # SPDX-License-Identifier: MPL-2.0
-"""RED tests for the stopContinue pre-enactment delay + the stop-prompt hardening.
+"""The stopContinue reading delay + the stop-prompt hardening.
 
-Part B (delay): a user-configurable pause applied to BOTH supervised verdicts -- a continue
-directive and a stop approval -- BEFORE the decision is emitted, so the operator has a real window
-to intervene. It announces before sleeping, is capped against the REMAINING Stop-hook budget
-(reduced by however long the reviewer took) so it can never overrun host cancellation (which would
-fail the stop open), and is skipped entirely on the fail-open paths (empty output / reviewer
-failure) that produce no verdict. Part A (prompt): the supervisor classifies a polite go-ahead
-request for named in-scope work as remaining work, and verifies a claimed approval requirement
-rather than taking it at face value. See docs/plans/stopcontinue_delay_and_prompt_hardening.md.
+Part B (delay): before the supervisor reviews a stop, the hook waits (default 60 s) so the
+operator can read the agent's reply first. A reply typed during the wait skips the review, so no
+reviewer tokens are spent on a turn the operator has already taken. The wait is capped so the full
+review still fits in the Stop-hook budget, and it is skipped on every path that needs no review.
+`/reviewer-agent:stopContinue delay` sets it. Part A (prompt): the supervisor classifies a polite
+go-ahead request for named in-scope work as remaining work, and verifies a claimed approval
+requirement rather than taking it at face value. See docs/plans/stopcontinue_reading_delay.md and
+docs/plans/stopcontinue_delay_and_prompt_hardening.md.
 """
 import json
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import reviewer_lib as rl
 
 _BASE = Path(__file__).resolve().parent.parent
 ROOT = _BASE / "scripts" if (_BASE / "scripts").is_dir() else _BASE
 HOOKS_JSON = _BASE / "hooks" / "hooks.json"
+SKILL = _BASE / "skills" / "stopContinue" / "SKILL.md"
 
 # The five polite go-ahead phrasings the hardened prompt must name as remaining work. "i'll do
 # that next" is the generic form of the observed "...I'll do the brief next" case.
@@ -36,52 +39,79 @@ def make_repo(tmp_path, name="repo"):
     return str(repo)
 
 
-def _transcript(tmp_path, final_text, name="transcript.jsonl"):
+def _transcript(tmp_path, final_text, name="transcript.jsonl", extra=()):
     p = tmp_path / name
-    p.write_text(json.dumps({"type": "assistant", "message": {
-        "role": "assistant", "content": [{"type": "text", "text": final_text}]}}) + "\n")
+    events = [{"type": "assistant", "message": {
+        "role": "assistant", "content": [{"type": "text", "text": final_text}]}}] + list(extra)
+    p.write_text("".join(json.dumps(e) + "\n" for e in events))
     return str(p)
 
 
-def _input(cwd, transcript_path, session_id="claude-stop"):
+def _input(cwd, transcript_path, session_id="claude-stop", stop_hook_active=False):
     return {"cwd": cwd, "session_id": session_id, "transcript_path": transcript_path,
-            "hook_event_name": "Stop", "stop_hook_active": False}
+            "hook_event_name": "Stop", "stop_hook_active": stop_hook_active}
 
 
-# --------------------------------------------------------------------------
-# Part B: configuration
-# --------------------------------------------------------------------------
-def test_delay_defaults_to_zero(tmp_path, monkeypatch):
-    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """An isolated reviewer home with no config file and no delay override."""
+    h = tmp_path / "rh"
+    h.mkdir()
+    monkeypatch.setenv("REVIEWER_HOME", str(h))
+    monkeypatch.setenv("REVIEWER_CONFIG_FILE", str(h / "config.json"))
     monkeypatch.delenv("REVIEWER_STOPCONTINUE_DELAY_SECS", raising=False)
-    assert rl.stopcontinue_delay_secs() == 0
+    return h
 
 
-def test_delay_from_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
-    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "45")
-    assert rl.stopcontinue_delay_secs() == 45
+# --------------------------------------------------------------------------
+# Part B: configuration -- env > state file (the command) > config.json > default 60
+# --------------------------------------------------------------------------
+def test_delay_defaults_to_sixty(home):
+    assert rl.stopcontinue_delay_detail() == (60, "default")
+    assert rl.stopcontinue_delay_secs() == 60
 
 
-def test_delay_from_config_file(tmp_path, monkeypatch):
-    home = tmp_path / "rh"
-    home.mkdir()
+def test_delay_from_config_file(home):
     (home / "config.json").write_text(json.dumps({"stopContinueDelaySecs": 12}))
-    monkeypatch.setenv("REVIEWER_HOME", str(home))
-    monkeypatch.delenv("REVIEWER_STOPCONTINUE_DELAY_SECS", raising=False)
     assert rl.stopcontinue_delay_secs() == 12
 
 
-def test_delay_capped_at_300(tmp_path, monkeypatch):
-    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
-    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "9999")
-    assert rl.stopcontinue_delay_secs() == 300
+def test_saved_delay_beats_config(home):
+    (home / "config.json").write_text(json.dumps({"stopContinueDelaySecs": 12}))
+    rl.set_stopcontinue_delay(20)
+    seconds, source = rl.stopcontinue_delay_detail()
+    assert seconds == 20 and source == str(rl.stopcontinue_delay_file())
 
 
-def test_delay_floored_at_zero(tmp_path, monkeypatch):
-    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
-    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "-5")
+def test_saved_zero_turns_the_delay_off(home):
+    rl.set_stopcontinue_delay(0)
     assert rl.stopcontinue_delay_secs() == 0
+
+
+def test_env_beats_saved_delay(home, monkeypatch):
+    rl.set_stopcontinue_delay(20)
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "45")
+    assert rl.stopcontinue_delay_detail() == (45, "env REVIEWER_STOPCONTINUE_DELAY_SECS")
+
+
+def test_clearing_the_saved_delay_restores_the_default(home):
+    rl.set_stopcontinue_delay(20)
+    rl.clear_stopcontinue_delay()
+    assert rl.stopcontinue_delay_detail() == (60, "default")
+
+
+def test_unusable_values_are_skipped(home, monkeypatch):
+    (home / "config.json").write_text(json.dumps({"stopContinueDelaySecs": "soon"}))
+    rl.stopcontinue_delay_file().parent.mkdir(parents=True, exist_ok=True)
+    rl.stopcontinue_delay_file().write_text("abc\n")
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "later")
+    assert rl.stopcontinue_delay_detail() == (60, "default")
+
+
+@pytest.mark.parametrize("raw,expected", [("9999", 300), ("-5", 0)])
+def test_delay_clamped_to_0_through_300(home, monkeypatch, raw, expected):
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", raw)
+    assert rl.stopcontinue_delay_secs() == expected
 
 
 # --------------------------------------------------------------------------
@@ -93,7 +123,7 @@ def test_apply_delay_zero_does_not_sleep(monkeypatch):
     seen = []
     monkeypatch.setattr(sc, "_delay_sleep", lambda n: seen.append(n), raising=False)
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "0")
-    sc.apply_stopcontinue_delay("continue")
+    assert sc.apply_stopcontinue_delay() is False
     assert seen == []
 
 
@@ -113,12 +143,12 @@ def test_apply_delay_announces_before_sleeping(monkeypatch):
     monkeypatch.setattr(sc, "_delay_sleep", lambda n: events.append(("sleep", n)), raising=False)
     monkeypatch.setattr(sys, "stderr", _RecStderr())
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "20")
-    sc.apply_stopcontinue_delay("continue")
+    sc.apply_stopcontinue_delay()
     # The heads-up must be written BEFORE the sleep -- sleeping first would deny the operator
     # any notice while still "announcing".
     assert [e[0] for e in events] == ["write", "sleep"]
     assert events[1] == ("sleep", 20)
-    assert "continue" in events[0][1] and "20" in events[0][1]
+    assert "supervisor review in 20s" in events[0][1]
 
 
 def test_apply_delay_capped_by_remaining_budget(monkeypatch):
@@ -127,7 +157,7 @@ def test_apply_delay_capped_by_remaining_budget(monkeypatch):
     seen = []
     monkeypatch.setattr(sc, "_delay_sleep", lambda n: seen.append(n), raising=False)
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "300")
-    sc.apply_stopcontinue_delay("stop-approval", budget_remaining=10)
+    sc.apply_stopcontinue_delay(budget_remaining=10)
     assert seen == [10]  # the remaining hook budget wins over the configured 300
 
 
@@ -139,14 +169,22 @@ def test_hook_budget_matches_hooks_json_stop_timeout():
     assert sc.HOOK_BUDGET_S == timeouts[0]
 
 
+def test_hook_budget_fits_the_longest_delay_and_review():
+    import reviewer_stopcontinue as sc
+    import stop_hook as h
+
+    assert sc.HOOK_BUDGET_S >= sc.DELAY_MAX_S + h.STOP_TIMEOUT + sc.DELAY_MARGIN_S
+
+
 # --------------------------------------------------------------------------
-# Part B: stop_hook applies the delay BEFORE the emit, on BOTH verdicts, passing the
-# remaining budget (reduced by elapsed reviewer time), and skips it on the fail-open paths.
+# Part B: stop_hook waits BEFORE calling the supervisor, never after its verdict, passes the
+# budget left for the review, and skips the wait on every path that needs no review.
 # --------------------------------------------------------------------------
-def _run_stop(tmp_path, monkeypatch, pi_result, session_id, reviewer_secs=0.0):
-    """Run stop_hook._main with a faked pi verdict under a CONTROLLED clock (the fake reviewer
-    advances it by `reviewer_secs`). Record the ORDER of the delay call vs the decision emit.
-    Returns (code, events): ("delay", decision, kwargs) and ("emit", kind), in occurrence order."""
+def _run_stop(tmp_path, monkeypatch, pi_result, session_id, entry_to_delay_secs=0.0,
+              extra_events=(), stop_hook_active=False, prepare=None):
+    """Run stop_hook._main with a faked pi verdict under a CONTROLLED clock: the first clock read
+    is hook entry, every later read is `entry_to_delay_secs` after it. Records, in order,
+    ("delay", kwargs), ("review",) and ("emit", kind)."""
     import stop_hook as h
 
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
@@ -154,73 +192,172 @@ def _run_stop(tmp_path, monkeypatch, pi_result, session_id, reviewer_secs=0.0):
     repo = make_repo(tmp_path, session_id)
     rl.set_stopcontinue_active(repo)
     tr = _transcript(tmp_path, "Still pending from HANDOVER: update the brief. Say the word.",
-                     name=session_id + ".jsonl")
+                     name=session_id + ".jsonl", extra=extra_events)
+    if prepare:
+        prepare(repo, session_id)
 
-    clock = [1000.0]
-    monkeypatch.setattr(h, "_hook_now", lambda: clock[0], raising=False)
+    reads = []
+
+    def now():
+        reads.append(1)
+        return 1000.0 if len(reads) == 1 else 1000.0 + entry_to_delay_secs
+
+    monkeypatch.setattr(h, "_hook_now", now, raising=False)
+
+    events = []
 
     def fake_pi(*a, **k):
-        clock[0] += reviewer_secs      # the reviewer "took" reviewer_secs seconds
+        events.append(("review",))
         return pi_result
 
     monkeypatch.setattr(h.rl, "run_pi_review", fake_pi)
-
-    events = []
     real_block, real_info = rl.stop_block_output, rl.info_output
     monkeypatch.setattr(h.rl, "apply_stopcontinue_delay",
-                        lambda decision, **k: events.append(("delay", decision, k)), raising=False)
+                        lambda **k: events.append(("delay", k)) or False, raising=False)
     monkeypatch.setattr(h.rl, "stop_block_output",
                         lambda reason, msg: (events.append(("emit", "block")), real_block(reason, msg))[1])
     monkeypatch.setattr(h.rl, "info_output",
                         lambda msg: (events.append(("emit", "info")), real_info(msg))[1])
-    code = h._main(_input(repo, tr, session_id=session_id))
+    code = h._main(_input(repo, tr, session_id=session_id, stop_hook_active=stop_hook_active))
     return code, events
 
 
-def _delay_kwargs(events):
-    return [e for e in events if e[0] == "delay"][0][2]
+def _kinds(events):
+    return [e[0] for e in events]
 
 
-def test_stop_hook_delays_before_a_continue_directive(tmp_path, monkeypatch):
+def test_stop_hook_waits_before_reviewing_a_continue(tmp_path, monkeypatch):
     code, events = _run_stop(tmp_path, monkeypatch, (0, "Continue: update the brief.", ""), "dcont")
     assert code == 0
-    assert [e[0] for e in events] == ["delay", "emit"]     # delay ENACTED before the block emit
-    assert events[0][1] == "continue"
-    assert events[1] == ("emit", "block")
+    assert _kinds(events) == ["delay", "review", "emit"]
+    assert events[-1] == ("emit", "block")
 
 
-def test_stop_hook_delays_before_a_stop_approval(tmp_path, monkeypatch):
+def test_stop_hook_waits_before_reviewing_an_approval_and_not_after(tmp_path, monkeypatch):
     code, events = _run_stop(tmp_path, monkeypatch, (0, "STOP_OK", ""), "dstop")
     assert code == 0
-    assert [e[0] for e in events] == ["delay", "emit"]     # delay ENACTED before the approval emit
-    assert events[0][1] == "stop-approval"
-    assert events[1] == ("emit", "info")
+    assert _kinds(events) == ["delay", "review", "emit"]  # nothing holds the approval back
+    assert events[-1] == ("emit", "info")
 
 
-def test_stop_hook_passes_remaining_budget_reduced_by_elapsed(tmp_path, monkeypatch):
+def test_stop_hook_leaves_the_review_its_full_timeout(tmp_path, monkeypatch):
     import reviewer_stopcontinue as sc
+    import stop_hook as h
 
-    # A fast (0 s) reviewer leaves the full budget minus the safety margin; a 50 s reviewer leaves
-    # exactly 50 s less. Pinning BOTH proves the hook passes the REMAINING budget, not the constant.
-    _, fast = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dfast", reviewer_secs=0.0)
-    assert _delay_kwargs(fast)["budget_remaining"] == sc.HOOK_BUDGET_S - sc.DELAY_MARGIN_S
+    _, fast = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dfast")
+    assert fast[0][1]["budget_remaining"] == sc.HOOK_BUDGET_S - h.STOP_TIMEOUT - sc.DELAY_MARGIN_S
+    _, slow = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dslow",
+                        entry_to_delay_secs=7.0)
+    assert slow[0][1]["budget_remaining"] == (
+        sc.HOOK_BUDGET_S - 7 - h.STOP_TIMEOUT - sc.DELAY_MARGIN_S)
+    assert callable(slow[0][1]["should_cancel"])
 
-    _, slow = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dslow", reviewer_secs=50.0)
-    assert _delay_kwargs(slow)["budget_remaining"] == sc.HOOK_BUDGET_S - 50 - sc.DELAY_MARGIN_S
 
-
-def test_stop_hook_skips_delay_on_empty_verdict(tmp_path, monkeypatch):
-    # Empty output is a fail-open allow with no verdict -> the stop proceeds silently, NO delay.
-    code, events = _run_stop(tmp_path, monkeypatch, (0, "", ""), "dempty")
+def test_stop_hook_skips_the_wait_when_a_reply_is_already_queued(tmp_path, monkeypatch):
+    queued = {"type": "queue-operation", "operation": "enqueue",
+              "timestamp": "2026-10-17T12:00:00.000Z", "sessionId": "dq", "content": "yes"}
+    code, events = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dq",
+                             extra_events=[queued])
     assert code == 0
-    assert [e for e in events if e[0] == "delay"] == []
+    assert events == [("emit", "info")]  # the operator-reply notice only
 
 
-def test_stop_hook_skips_delay_on_reviewer_failure(tmp_path, monkeypatch):
-    # A reviewer failure is fail-open with no verdict -> the stop proceeds, NO delay.
-    code, events = _run_stop(tmp_path, monkeypatch, (1, "", "boom"), "dfail")
+def test_stop_hook_skips_the_wait_at_the_nudge_cap(tmp_path, monkeypatch):
+    def at_cap(repo, sid):
+        for _ in range(rl.max_nudges()):
+            rl.bump_nudge_count(repo, sid)
+
+    code, events = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "dcap",
+                             stop_hook_active=True, prepare=at_cap)
     assert code == 0
-    assert [e for e in events if e[0] == "delay"] == []
+    assert "delay" not in _kinds(events) and "review" not in _kinds(events)
+
+
+def test_stop_hook_skips_the_wait_when_stopcontinue_is_off(tmp_path, monkeypatch):
+    def off(repo, sid):
+        rl.clear_stopcontinue_active(repo)
+
+    code, events = _run_stop(tmp_path, monkeypatch, (0, "Continue: x.", ""), "doff", prepare=off)
+    assert code == 0
+    assert events == []
+
+
+def test_a_reply_during_the_wait_skips_the_review(tmp_path, monkeypatch, capsys):
+    import stop_hook as h
+
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    monkeypatch.setenv("REVIEWER_BACKEND", "pi")
+    repo = make_repo(tmp_path, "dwait")
+    rl.set_stopcontinue_active(repo)
+    tr = _transcript(tmp_path, "Shall I go ahead with A?", name="dwait.jsonl")
+    reviews = []
+    monkeypatch.setattr(h.rl, "run_pi_review", lambda *a, **k: reviews.append(1) or (0, "x", ""))
+    monkeypatch.setattr(h.rl, "apply_stopcontinue_delay", lambda **k: True, raising=False)
+    assert h._main(_input(repo, tr, session_id="dwait")) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out.get("decision") != "block"
+    assert "during the reading delay" in out["systemMessage"]
+    assert reviews == []
+
+
+# --------------------------------------------------------------------------
+# Part B: /reviewer-agent:stopContinue delay [<0..300>|status|clear]
+# --------------------------------------------------------------------------
+def _delay_cmd(capsys, *args):
+    import reviewer_cmd
+
+    code = reviewer_cmd.main(["reviewer_cmd.py", "stopcontinue", " ".join(("delay",) + args)])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+@pytest.mark.parametrize("args", [(), ("status",)])
+def test_delay_command_reports_the_default(home, capsys, args):
+    code, out, _ = _delay_cmd(capsys, *args)
+    assert code == 0
+    assert out.startswith("stopContinue: delay 60 seconds (from default")
+
+
+def test_delay_command_saves_and_clears(home, capsys):
+    code, out, _ = _delay_cmd(capsys, "30")
+    assert code == 0 and "stopContinue: delay 30 seconds" in out
+    assert rl.stopcontinue_delay_secs() == 30
+    assert "delay 30 seconds" in _delay_cmd(capsys)[1]
+    code, out, _ = _delay_cmd(capsys, "0")
+    assert code == 0 and rl.stopcontinue_delay_secs() == 0
+    code, out, _ = _delay_cmd(capsys, "clear")
+    assert code == 0 and "delay 60 seconds (from default" in out
+    assert not rl.stopcontinue_delay_file().exists()
+
+
+def test_delay_command_does_not_turn_stopcontinue_on(home, tmp_path, monkeypatch, capsys):
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", repo)
+    _delay_cmd(capsys, "30")
+    assert not rl.is_stopcontinue_active(repo)
+
+
+def test_delay_command_names_an_environment_override(home, monkeypatch, capsys):
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "5")
+    code, out, _ = _delay_cmd(capsys, "30")
+    assert code == 0
+    assert "delay 5 seconds" in out and "REVIEWER_STOPCONTINUE_DELAY_SECS" in out
+    assert rl.stopcontinue_delay_file().read_text().strip() == "30"
+
+
+@pytest.mark.parametrize("args", [("-1",), ("301",), ("1.5",), ("oops",), ("30", "extra")])
+def test_invalid_delay_command_changes_nothing(home, capsys, args):
+    code, out, err = _delay_cmd(capsys, *args)
+    assert code == 2
+    assert "stopContinue: ERROR" in err
+    assert not rl.stopcontinue_delay_file().exists()
+
+
+def test_skill_documents_the_delay_command():
+    text = SKILL.read_text()
+    head = text.split("---", 2)[1]
+    assert "delay" in head  # description and argument hint
+    assert "stopContinue: delay" in text  # the relay instruction names its output
 
 
 # --------------------------------------------------------------------------

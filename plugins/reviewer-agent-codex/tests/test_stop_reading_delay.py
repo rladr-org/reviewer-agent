@@ -15,9 +15,9 @@ def event(repo):
 
 
 @pytest.mark.parametrize("env,configured,expected", [
-    (None, None, 15), (None, 30, 30), ("5", 30, 5), ("0", 30, 0),
+    (None, None, 60), (None, 30, 30), ("5", 30, 5), ("0", 30, 0),
     ("-1", None, 0), ("999", None, 300), ("invalid", 30, 30),
-    (None, "invalid", 15), (None, True, 15), ("nan", None, 15),
+    (None, "invalid", 60), (None, True, 60), ("nan", None, 60),
 ])
 def test_reading_delay_configuration(isolated_state, monkeypatch, env, configured, expected):
     monkeypatch.delenv("REVIEWER_STOPCONTINUE_DELAY_SECS", raising=False)

@@ -149,7 +149,7 @@ def test_pi_and_claude_reviews_hand_the_cancel_check_to_the_runner(tmp_path, mon
     assert seen == [cancel, cancel]
 
 
-def test_the_pre_enactment_delay_ends_when_the_caller_cancels(monkeypatch):
+def test_the_reading_delay_ends_when_the_caller_cancels(monkeypatch):
     import reviewer_stopcontinue as sc
 
     slept = []
@@ -161,7 +161,7 @@ def test_the_pre_enactment_delay_ends_when_the_caller_cancels(monkeypatch):
         checks.append(1)
         return len(checks) >= 3
 
-    assert sc.apply_stopcontinue_delay("continue", should_cancel=should_cancel) is True
+    assert sc.apply_stopcontinue_delay(should_cancel=should_cancel) is True
     assert sum(slept) < 30
 
 
@@ -304,10 +304,12 @@ def test_a_dropped_directive_is_shown_to_the_operator_not_sent_to_the_agent(
     assert rl.read_nudge_count(repo, "claude-stop") == 0
 
 
-def test_enter_during_the_pre_enactment_delay_drops_the_verdict(tmp_path, monkeypatch, capsys):
+def test_enter_during_the_reading_delay_skips_the_supervisor(tmp_path, monkeypatch, capsys):
     import reviewer_stopcontinue as sc
 
-    h, repo, tr, home = _in_process(tmp_path, monkeypatch, lambda tr, k: (0, _DIRECTIVE, ""))
+    calls = []
+    h, repo, tr, home = _in_process(
+        tmp_path, monkeypatch, lambda tr, k: calls.append(k) or (0, _DIRECTIVE, ""))
     monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "30")
     slept = []
 
@@ -321,3 +323,5 @@ def test_enter_during_the_pre_enactment_delay_drops_the_verdict(tmp_path, monkey
     out = json.loads(capsys.readouterr().out)
     assert out.get("decision") != "block"
     assert sum(slept) < 30
+    assert calls == []  # the reply came first, so no review tokens were spent
+    assert "during the reading delay" in _log_text(home)

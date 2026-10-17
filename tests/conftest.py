@@ -41,3 +41,10 @@ def _never_spend_a_real_reviewer_call(monkeypatch):
     monkeypatch.setenv("REVIEWER_PI_BIN", fake)
 
 
+@pytest.fixture(autouse=True)
+def _no_stop_reading_delay(monkeypatch):
+    """The stop review waits 60 s by default so the operator can read the reply first. No test
+    may sit through that wait; tests of the delay set the variable themselves."""
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "0")
+
+
