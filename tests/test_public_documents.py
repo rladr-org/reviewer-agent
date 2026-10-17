@@ -31,6 +31,45 @@ def _local_link_targets(text):
         yield match.group(1).strip().strip("<>")
 
 
+def _git_repo(tmp_path):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # The runner's own global excludes must not decide the result (one operator's ignores
+    # `.gitignore` itself), so this repository points at an excludes file that does not exist.
+    subprocess.run(["git", "-C", str(tmp_path), "config", "core.excludesFile",
+                    str(tmp_path / "no-global-excludes")], check=True)
+    (tmp_path / ".gitignore").write_text("logs/\n")
+    (tmp_path / "README.md").write_text("[ok](README.md)\n")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "OLD.md").write_text("[gone](../MISSING.md)\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "NEW.md").write_text("[new](../README.md)\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "README.md", ".gitignore"], check=True)
+    return tmp_path
+
+
+def test_markdown_scan_skips_git_ignored_files_but_keeps_new_ones(tmp_path):
+    # A local snapshot under an ignored directory is not shipped, so its links are not checked;
+    # a doc that is new and not yet staged is, so a broken link cannot wait for the commit.
+    root = _git_repo(tmp_path)
+    assert _markdown_files(root) == [root / "README.md", root / "docs" / "NEW.md"]
+
+
+def test_markdown_scan_skips_a_tracked_file_deleted_from_disk(tmp_path):
+    root = _git_repo(tmp_path)
+    (root / "README.md").unlink()
+    assert _markdown_files(root) == [root / "docs" / "NEW.md"]
+
+
+def test_markdown_scan_without_git_checks_every_file(tmp_path):
+    # An exported tree has no repository to ask; scanning everything keeps the check on.
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "OLD.md").write_text("x\n")
+    (tmp_path / "README.md").write_text("x\n")
+    assert _markdown_files(tmp_path) == [tmp_path / "README.md", tmp_path / "logs" / "OLD.md"]
+
+
 def test_every_local_markdown_link_resolves():
     """Local links fail silently on GitHub, so verify destinations rather than prose wording."""
     markdown = sorted(
