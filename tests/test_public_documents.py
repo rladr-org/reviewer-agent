@@ -31,6 +31,36 @@ def _local_link_targets(text):
         yield match.group(1).strip().strip("<>")
 
 
+def _scanned(path, root):
+    return (
+        "node_modules" not in path.parts
+        and ".git" not in path.parts
+        and (root / "docs" / "internal") not in path.parents
+    )
+
+
+def _markdown_files(root):
+    """Every Markdown file a checkout of `root` ships or is about to: tracked or new, never
+    git-ignored. A git-ignored local snapshot (`logs/release-*`) copies only part of the tree, so
+    its links point outside the copy and fail without saying anything about the published docs.
+    Without a repository at `root` (an exported tree), every file is scanned."""
+    import subprocess
+
+    try:
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+             "--", "*.md"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        top, listed = None, None
+    if top is None or Path(top).resolve() != Path(root).resolve():
+        paths = Path(root).rglob("*.md")
+    else:
+        paths = (Path(root) / name for name in set(listed.split("\0")) if name)
+    return sorted(p for p in paths if p.is_file() and _scanned(p, Path(root)))
+
+
 def _git_repo(tmp_path):
     import subprocess
 
@@ -72,14 +102,7 @@ def test_markdown_scan_without_git_checks_every_file(tmp_path):
 
 def test_every_local_markdown_link_resolves():
     """Local links fail silently on GitHub, so verify destinations rather than prose wording."""
-    markdown = sorted(
-        path for path in ROOT.rglob("*.md")
-        if (
-            "node_modules" not in path.parts
-            and ".git" not in path.parts
-            and (ROOT / "docs" / "internal") not in path.parents
-        )
-    )
+    markdown = _markdown_files(ROOT)
     assert markdown
 
     broken = []
