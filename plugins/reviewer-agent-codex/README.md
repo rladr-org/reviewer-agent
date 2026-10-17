@@ -1,7 +1,7 @@
 # reviewer-agent-codex
 
 
-> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has been run in one person's private installation on macOS Tahoe and nowhere else. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
+> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has daily private use on macOS Tahoe; an Ubuntu installation produced issue reports, and clean-host acceptance of the current fixes remains pending. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
 
 > **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
 
@@ -48,13 +48,14 @@ The Codex GUI on macOS is tested. On macOS, Codex CLI 0.154.0 has also been exer
 host for stop supervision through automatic Stop rejection and retry. These smoke checks do not establish coverage of every
 interactive terminal, key binding, or the CLI commit-gate flow. See
 [CLI completion checks](#cli-completion-checks) for the repeatable procedure.
-Native Linux and Windows through WSL2 remain untested live-host beta platforms. Unit tests run
-in Linux and macOS CI; live Linux/WSL2 host coverage is still absent. Native
+Native Ubuntu installation has produced issue reports; clean-host acceptance of the current
+Linux fixes remains pending. Windows through WSL2 is untested. Unit tests run in Linux and
+macOS CI, including Git 2.25 on Ubuntu. Native
 Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
 will not work because [Codex's Linux sandbox](https://learn.chatgpt.com/docs/windows/wsl) uses
 `bubblewrap`, which requires WSL2.
 
-### Native Linux (untested)
+### Native Linux (current acceptance pending)
 
 Install Git, `curl`, and Python 3.9 or newer using the distribution's package manager. If Codex is
 not already installed and authenticated, use the
@@ -487,7 +488,8 @@ The persistent JSON configuration is `~/.codex/reviewer-agent-codex/config.json`
   "reasoningEffort": "xhigh",
   "commitReviewTimeoutSeconds": 3600,
   "reviewerSessionAuditLimit": 3,
-  "reviewHistoryKeep": 100
+  "reviewHistoryKeep": 100,
+  "stopContinueDelaySecs": 60
 }
 ```
 
@@ -495,6 +497,33 @@ Resolution order is `REVIEWER_CODEX_MODEL` or `REVIEWER_CODEX_EFFORT`, then a se
 the reviewer-model skill, then `config.json`, then the built-in defaults. Invalid model tokens or
 effort values are skipped. Valid effort values are `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `max`, and `ultra`.
+
+All six JSON controls and their environment equivalents are listed here. These settings apply
+across repositories; feature flags and retained history remain repository-scoped. Missing,
+unreadable or malformed JSON is read as empty configuration. Unknown keys are ignored.
+
+| JSON key | Default | Environment override | Values and command behavior |
+|---|---|---|---|
+| `model` | `gpt-5.6-luna` | `REVIEWER_CODEX_MODEL` | One model token; environment, then reviewer-model command slot, then JSON, then default. |
+| `reasoningEffort` | `xhigh` | `REVIEWER_CODEX_EFFORT` | Levels listed above; the same precedence as model. Applies to commit and stop reviews. |
+| `commitReviewTimeoutSeconds` | `3600` | `REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS` | Integer 60–7200 seconds. Invalid candidates are skipped. Set via JSON/environment, not the reviewer-model command. |
+| `reviewerSessionAuditLimit` | `3` | `REVIEWER_CODEX_SESSION_AUDIT_LIMIT` | Integer 0–1000; 0 disables rotation. Environment, then reviewer-session command slot, then JSON, then default. |
+| `reviewHistoryKeep` | `100` | `REVIEWER_CODEX_REVIEW_HISTORY_KEEP` | Retained entries per project, minimum 1. An invalid environment value uses the built-in default; it does not fall through to JSON. |
+| `stopContinueDelaySecs` | `60` | `REVIEWER_STOPCONTINUE_DELAY_SECS` | Runtime values clamp to 0–300 seconds; 0 disables the wait. The delay command accepts only 0–300 and edits this JSON key directly. |
+
+`clear` for model, effort and session limit removes that command's saved override; environment
+and JSON values may still apply. Delay `clear` removes the JSON key itself. A valid environment
+override always wins, including over command changes. Model/effort and rotation-limit resolvers
+skip invalid candidates; integer delay candidates clamp to the supported range.
+
+Additional environment-only controls:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REVIEWER_CODEX_STATE_DIR` | `~/.codex/reviewer-agent-codex` | Configuration and state directory. |
+| `REVIEWER_CODEX_BIN` | `codex` on `PATH`, then the local Codex path | Reviewer executable override. |
+| `REVIEWER_LIVENESS_TTL_SECONDS` | `86400` | Liveness-marker expiry in seconds, minimum 60. |
+| `REVIEWER_STOP_MAX_NUDGES` | `10` | Continuation budget per operator request, minimum 1. |
 
 Commit reviews default to a 3,600-second (one-hour) fail-closed backend limit. Set
 `commitReviewTimeoutSeconds` in that same JSON file, or set

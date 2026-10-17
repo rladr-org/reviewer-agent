@@ -1,7 +1,7 @@
 ---
 name: reviewerAgent
 description: Toggle the reviewer agent for the current project (it gates git commits via the configured backend - codex by default, or pi or claude). First enablement requires the operator's exact /reviewerAgent on acceptRisk invocation after reading DISCLAIMER.md.
-argument-hint: on | off
+argument-hint: on [acceptRisk] | off
 disable-model-invocation: true
 allowed-tools: Bash(python3:*)
 ---

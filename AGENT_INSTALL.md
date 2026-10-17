@@ -107,8 +107,9 @@ if test -n "${WSL_DISTRO_NAME:-}" || grep -qi microsoft /proc/sys/kernel/osrelea
 fi
 ```
 
-**Check:** the platform, interpreter, version, and conditional WSL2 checks all succeed. macOS is
-tested. Native Linux and Windows through WSL2 are an **untested Linux/WSL2 beta** that is expected
+**Check:** the platform, interpreter, version, and conditional WSL2 checks all succeed. macOS has
+daily use. Native Ubuntu installations produced issue reports; acceptance of the current fixes
+on a clean Linux host remains pending. Windows through WSL2 is an **untested beta** that is expected
 to work; tell the operator that before proceeding and continue only when the original request
 includes that beta platform or the operator confirms it.
 For WSL2, the executable guard above must pass. The operator must also run

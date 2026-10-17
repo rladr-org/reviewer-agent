@@ -23,7 +23,7 @@ What may be sent depends on the call and backend:
 |---|---|
 | Session brief | The project's `reviewerAgent.md` and package-owned reviewer instructions. |
 | Commit audit | The staged diff, typed session messages, standing directives, retry context and repository files the reviewer reads. A Codex reviewer may also run repository commands. |
-| Stop supervision | The proposed final message (for a rerouted `AskUserQuestion`, this includes the question and its options), typed operator messages, directives and available plan, task or liveness context. |
+| Stop supervision | The proposed final message (for a rerouted `AskUserQuestion`, this includes the question and its options), typed operator messages, directives and available plan, task or liveness context. On Claude Code, this also includes earlier agent text replies since the last approved stop, or the approved reply the operator is answering when the window is empty. |
 
 The exact content can change with the selected host, backend and provider version. Inspect the
 source and provider settings if a particular data boundary matters.
@@ -43,10 +43,24 @@ Under `~/.claude/reviewer-agent/` (override with `REVIEWER_STATE_DIR`), and
   quote the diffs they judged**, so this directory contains excerpts of your source code. For
   Claude Code it also holds `<project>.audits.jsonl`, one record per commit audit (the reviewer
   command line, model, token counts, commit hashes and staged file names), and `prompt_parts/`,
-  the prompt components those records point to. A prompt part can contain a diff of reviewed code.
+  the prompt components those records point to. Prompt parts can contain reviewed code and
+  relayed operator text, in addition to package instructions.
 - **`logs/reviewer.log`** — one line per gated action, including bounded tails of the verdict and
   of stderr.
 - **`config.json`** — your settings, if you made one.
+
+On Claude Code, `operatorTranscript` is on by default and its default character budget is 40,000,
+keeping the newest messages and always retaining the newest even when oversized. The stop
+supervisor's earlier-agent-reply block defaults to 1,500 characters per reply and an 8,000-character
+total budget, also keeping the newest reply when oversized; setting either reply limit to zero
+disables that block. These control new prompt composition; they do not erase context already
+stored in a resumed reviewer conversation or previously retained files.
+
+Optional `logOperatorContext` (environment override `REVIEWER_LOG_OPERATOR_CONTEXT`) is off by
+default. When enabled, `logs/reviewer.log` additionally records relay counts, the message cutoff,
+the directive count, and up to 80 characters of the latest relayed operator message. Disabling
+it stops that diagnostic output; use the removal procedures below to remove retained data.
+See the [Claude configuration reference](README.md#claude-code-configuration) for the controls.
 
 The current project code stores these files without application-level encryption or obfuscation.
 Anything with access to the relevant state directory may be able to read them. The project is not

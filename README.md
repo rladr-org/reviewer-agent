@@ -242,9 +242,10 @@ audits, rejections and approvals, stop supervision, cancellation, process cleanu
 run is not the same as living with something. Nothing selects them for you: `codex` is the
 fallback when nothing is configured.
 
-Nothing has been installed or used on any platform other than macOS Tahoe. Linux is exercised by
-CI unit tests only (Ubuntu, Python 3.9/3.12/3.14), with no installation behind it; WSL2 has had
-neither; other macOS versions have not been tried. **Even the top two rows are not guaranteed to
+Both packages have also been installed on native Ubuntu 20.04, where installation and runtime
+issues were reported. Fixes have automated coverage, including Git 2.25, but clean-host acceptance
+of the current candidate is still pending. WSL2 has had neither installation nor CI coverage;
+other macOS versions have not been tried. **Even the top two rows are not guaranteed to
 work** — they worked on my machine but may not work on yours.
 
 **No maintenance or response is promised.** This is a personal project published as-is. Nothing
@@ -370,7 +371,7 @@ and leaves only the unavoidable human-only checkpoint.
 
 Prerequisites:
 
-- macOS (where it has actually been run), or native Linux/WSL2 (never run there), with a
+- macOS (daily use), native Linux (current acceptance pending), or WSL2 (unverified), with a
   Claude Code that has plugin support;
 - `python3` 3.9 or newer on `PATH`; the runtime is standard-library-only;
 - one authenticated reviewer backend: `codex`, `pi`, or the `claude` CLI you already have.
@@ -724,8 +725,10 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
 | `/reviewer-agent:reviewerModel <model>` | Set the model for the selected backend. |
-| `/reviewer-agent:reviewerModel effort <level>` | Set reasoning effort for the selected backend. |
-| `/reviewer-agent:reviewerModel timeout <seconds>` | Set the fail-closed commit-audit timeout. |
+| `/reviewer-agent:reviewerModel <model> <seconds>` | Set that backend's model and the shared commit-audit timeout together. |
+| `/reviewer-agent:reviewerModel clear` | Remove only the selected backend's saved model override; environment/config defaults may still apply. |
+| `/reviewer-agent:reviewerModel effort <level>\|clear` | Set or clear the selected backend's saved audit-effort override. |
+| `/reviewer-agent:reviewerModel timeout <seconds>\|clear` | Set or clear the shared fail-closed commit-audit timeout. Minimum 60 seconds; the command rejects a budget at or above the installed commit hook's timeout. Clearing reports the remaining effective value and source. |
 | `/reviewer-agent:reviewerModel firstOutputTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit — how long to wait for the reviewer's first event before treating it as hung. Default 30 s (floor 5). |
 | `/reviewer-agent:reviewerModel idleTimeout <seconds>\|clear` | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit — the longest silent gap allowed between reviewer events; must exceed the longest legitimate silence (e.g. a test run). Default 900 s (floor 60). |
 | `/reviewer-agent:reviewerSession` | Show reviewer and stop-supervisor sessions for the current Claude Code session. |
@@ -733,6 +736,12 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerSession limit <N\|off\|clear>` | Override, disable, or restore automatic rotation after completed non-retry audits. |
 | `/reviewer-agent:reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
 | `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews, saved rulings, audit log, and the stored prompt parts no other project uses. |
+
+Bare `/reviewer-agent:reviewerDirective` also lists directives. Model and audit-effort overrides
+are global per backend; timeout, reading delay and automatic commit-reviewer rotation settings
+apply across repositories. Feature flags, directives and review history are per repository.
+`clear` removes only the command-written override, exposing any remaining environment or config
+setting; it does not necessarily restore the built-in default.
 
 > `/reviewer-agent:reviewerDirective` is handled by a `UserPromptSubmit` hook that reads its text
 > from JSON rather than a shell, so shell syntax in a directive no longer matters. Its content is
@@ -996,16 +1005,72 @@ package writes no log; its `review_commit` result carries the same detail, and
 `$reviewer-agent-codex:reviewer-history status` finds the retained verdicts. Please report what
 you find -- see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+**Known stop-supervisor limitations.** Captured calls have revived completed requests, demanded
+evidence only available after a stop, or emitted reasoning instead of a valid ruling. In two
+observed cases the reply said "stopping is permitted" but omitted the required `STOP_OK` token,
+so the hook relayed it as a continuation. These model/context incidents remain unresolved;
+the parser does not infer approval from prose or a conditional mention of the token. Escape
+returns control, and `/reviewer-agent:stopContinue off` disables supervision for this repository.
+Record the current request, proposed final, supervisor output and host/backend versions when
+reporting a recurrence; remove private project content before posting them.
+
 ## Claude Code configuration
 
 These settings apply to the repository-root Claude Code plugin, not the Codex package.
+
+The JSON file defaults to `~/.claude/reviewer-agent/config.json`, under `REVIEWER_STATE_DIR`
+when set. `REVIEWER_CONFIG_FILE` selects a different file. A missing, malformed or unreadable
+file is read as empty configuration. Do not copy the native Codex package's differently named
+timeout key here.
+
+For model, audit effort, timeouts, rotation limit and reading delay, precedence is environment
+override, then the command-written state file, then JSON, then the built-in default. Backend
+selection uses environment, per-project backend file, global backend file, JSON, then `codex`.
+The remaining JSON settings use environment then JSON then default. Invalid-value handling is
+setting-specific: model/effort and timeout resolvers skip unusable candidates; integer tunables
+clamp to their minimum, and an invalid highest-priority integer/boolean falls back to its default.
+
+| JSON key | Default | Values and effect |
+|---|---|---|
+| `backend` | `codex` | `codex`, `pi` or `claude`; backend files and `REVIEWER_BACKEND` take precedence. |
+| `codexBin` | local Codex executable, then `PATH` | Executable path; see `REVIEWER_CODEX_BIN` below. |
+| `piBin` | `pi` | Pi executable path. |
+| `claudeBin` | `claude` | Claude reviewer executable path. |
+| `model` | Codex CLI default | Codex backend only; one model token. Pi/Claude model selection uses its own command slot or environment override, with no JSON model key. |
+| `reasoningEffort` | Codex CLI default | Codex audit effort only; accepted levels are listed above. Pi/Claude use their own command slots or environment overrides. |
+| `commitReviewTimeoutSecs` | `900` | Shared audit budget in seconds; positive values clamp to at least 60 at runtime. The command additionally checks the host-hook ceiling. |
+| `firstOutputTimeoutSecs` | `30` | Codex audit time to first output, at least 5 seconds. |
+| `idleTimeoutSecs` | `900` | Codex audit gap between outputs, at least 60 seconds; exceed the longest expected silent test run. |
+| `reviewerSessionAuditLimit` | `3` | Completed non-retry audits before rotation; integer 0–1000, with 0 disabling automatic rotation. |
+| `stopContinueEffort` | `low` | Separate supervisor effort for the selected backend; choose a level that backend/model accepts. |
+| `stopContinueDelaySecs` | `60` | Reading delay in seconds; runtime values clamp to 0–300, with 0 disabling the wait. The command accepts only 0–300. |
+| `stopRotateEvery` | `6` | Completed supervisor reviews before retirement; minimum 0, with 0 disabling retirement. |
+| `maxNudges` | `8` | Forced continuations per operator turn; minimum 1. Use the feature toggle to disable supervision. |
+| `reviewHistoryKeep` | `100` | Retained verdict/outcome entries per project; minimum 1. |
+| `operatorTranscript` | `true` | Include typed operator messages in reviewer context. Boolean, or `1/0`, `true/false`, `yes/no`, `on/off`. |
+| `operatorTranscriptMaxChars` | `40000` | Character budget keeping newest messages; minimum 0. The newest message is always retained even if oversized; 0 keeps only the newest. Use `operatorTranscript: false` to disable the relay. |
+| `stopAgentReplyChars` | `1500` | Maximum characters per earlier agent reply sent to the stop supervisor; minimum 0. |
+| `stopAgentRepliesMaxChars` | `8000` | Total earlier-reply character budget; the newest reply is retained even when oversized. Setting this or `stopAgentReplyChars` to 0 disables that block. |
+| `logOperatorContext` | `false` | Diagnostic logging of relay counts, cutoff, directive count and up to 80 characters of the latest relayed operator message. |
+| `asyncAgentStaleSecs` | `14400` | Subagent liveness-marker lifetime in seconds; minimum 60. |
+| `bgShellStaleSecs` | `43200` | Background-shell liveness-marker lifetime in seconds; minimum 60. |
+| `monitorStaleSecs` | `3600` | Monitor liveness-marker lifetime in seconds; minimum 60. |
+| `deltaInlineMax` | `48000` | Retry diff bytes per path; minimum 0, with 0 disabling inline deltas. |
+| `deltaInlineTotalMax` | `96000` | Retry diff bytes in total; minimum 0, with 0 disabling inline deltas. |
+
+The environment controls below map to those JSON keys where applicable. Binary selection,
+scratch management, interpreter discovery and staged-patch limits also have environment-only
+controls. An environment value is visible only if the host process passes it to its hooks.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `REVIEWER_STATE_DIR` | `~/.claude/reviewer-agent` | Flags, session IDs, logs, reviews, and configuration. |
 | `REVIEWER_HOME` | — | Legacy alias for `REVIEWER_STATE_DIR`. |
+| `REVIEWER_CONFIG_FILE` | `<state directory>/config.json` | Select a JSON configuration file independently of the state directory. |
 | `REVIEWER_BACKEND` | `codex` fallback | One-call/process override: `codex`, `pi` or `claude`. |
 | `REVIEWER_CODEX_BIN` | `~/.local/bin/codex` if it exists, else `codex` on `PATH` | Codex executable override; `codexBin` in `config.json` is more reliable for hooks. |
+| `REVIEWER_CODEX_MODEL` | Codex CLI default | Override `model` and the Codex model command slot. |
+| `REVIEWER_CODEX_EFFORT` | Codex CLI default | Override `reasoningEffort` and the Codex audit-effort command slot; the supervisor keeps its separate effort. |
 | `REVIEWER_PI_BIN` | `pi` on `PATH` | Pi executable override; `piBin` in `config.json` is more reliable for hooks. |
 | `REVIEWER_PI_MODEL` | Pi default | Value passed to `pi --model`. |
 | `REVIEWER_PI_EFFORT` | `medium` | Value passed to `pi --thinking`. |
@@ -1020,6 +1085,12 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_STOP_ROTATE_EVERY` | `6` | Retire the stop supervisor's session after this many completed reviews, bounding the context each resumed review re-sends; `0` never retires it. Also `stopRotateEvery` in `config.json`. Changing the model or effort with `/reviewerModel` also retires this project's reviewer sessions for the current Claude session. |
 | `REVIEWER_STOPCONTINUE_DELAY_SECS` | `60` (0–300) | Seconds a stop waits before the supervisor reviews it, so you can read the reply; replying during the wait skips the review. `0` turns it off. Overrides `/reviewer-agent:stopContinue delay`, which overrides `stopContinueDelaySecs` in `config.json`. |
 | `REVIEWER_REVIEW_HISTORY_KEEP` | `100` | History entries retained per project (verdicts and `OUTCOME:` records share the cap). |
+| `REVIEWER_SESSION_AUDIT_LIMIT` | `3` | Override `reviewerSessionAuditLimit` and the command slot; 0 disables automatic commit-reviewer rotation. |
+| `REVIEWER_OPERATOR_TRANSCRIPT` | `true` | Override `operatorTranscript`; controls the operator-message relay. |
+| `REVIEWER_OPERATOR_TRANSCRIPT_MAX_CHARS` | `40000` | Override `operatorTranscriptMaxChars`; the newest message is retained even when oversized. |
+| `REVIEWER_STOP_AGENT_REPLY_CHARS` | `1500` | Override `stopAgentReplyChars`; 0 disables the earlier-agent-reply block. |
+| `REVIEWER_STOP_AGENT_REPLIES_MAX_CHARS` | `8000` | Override `stopAgentRepliesMaxChars`; 0 disables that block. |
+| `REVIEWER_LOG_OPERATOR_CONTEXT` | `false` | Override `logOperatorContext`; diagnostic logging includes an operator-message excerpt. |
 | `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |
 | `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
 | `REVIEWER_MONITOR_STALE_SECS` | `3600` | Live monitor marker window. |
@@ -1029,6 +1100,8 @@ These settings apply to the repository-root Claude Code plugin, not the Codex pa
 | `REVIEWER_SCRATCH_ROOT` | `<system temp>/reviewer-agent-scratch` | Codex backend: root for per-reviewer-session scratch dirs. `TMPDIR` is scoped to one on each codex audit; the dir is reclaimed at rotation and by a lease sweep. |
 | `REVIEWER_SCRATCH_TTL_S` | `43200` (12 h) | Codex backend: orphan-sweep lease — at SessionStart, scratch dirs whose mtime is older than this are reclaimed (covers sessions that ended without rotating). |
 | `REVIEWER_DISK_WARN_BYTES` | `2147483648` (2 GiB) | Codex backend: warn-only free-space threshold; below it the audit prints a low-disk warning and never blocks the commit. `0` disables. |
+| `REVIEWER_NODE_BIN` | `node` | Executable used for the optional Pi backend's Node version probe; it does not select the runtime used by the Pi executable. |
+| `REVIEWER_HOOK_PYTHONS` | `python3 /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3` | Advanced launcher override: whitespace-separated executable candidates, first available wins. Candidate paths cannot contain spaces. This selects an interpreter; it does not install or upgrade Python. |
 
 The commit timeout is shared by all three Claude Code backends. A timeout blocks the commit.
 Stop supervision uses a separate 300-second reviewer limit and fails open. The `AskUserQuestion`
@@ -1093,13 +1166,15 @@ system interpreter without anyone having to install Python first. Development de
 **No platform is supported.** What differs between them is only how much evidence exists, and on
 every one of them the answer is "not much".
 
-- **macOS Tahoe** — the only platform where this has been installed and used. The release matrix
+- **macOS Tahoe** — the platform used daily. The release matrix
   (install, reject, approve, cancel, stop, uninstall) is run there by hand, and two configurations
   have had daily use. That is evidence it can work on one machine, not assurance it will work on
   yours.
 - **Other macOS versions** — never tried.
-- **Linux** — CI unit tests only (Ubuntu, Python 3.9/3.12/3.14). No installation has ever been
-  performed on a Linux host. Automated coverage is not evidence that installing it works.
+- **Linux** — both packages were installed on Ubuntu 20.04, producing reports of installation,
+  command-detection, launcher and filesystem issues. Subsequent fixes have CI coverage (Ubuntu,
+  Python 3.9/3.12/3.14 and Git 2.25), but clean-host acceptance of the current candidate remains
+  pending. The earlier installation is evidence of use and findings, not a passing acceptance run.
 - **WSL2** — no CI, no manual run, nothing.
 - **Native Windows and WSL1** — the code is not written for them. The Claude Code package's
   Bash-oriented commands and both packages' POSIX process control have not been ported to native
@@ -1112,7 +1187,7 @@ Linux and WSL2 are expected to work, because the runtime and process control use
 interfaces — but expected is not the same as tried, and this section exists to keep those apart.
 The host's own platform coverage says nothing about whether this project has ever been run there.
 
-### Native Linux (never run there)
+### Native Linux (current acceptance pending)
 
 These directions apply to both hosts. Install Git, `curl`, and Python 3.9 or newer with the Linux
 distribution's package manager, and confirm that the interpreter is named `python3`:
@@ -1190,7 +1265,7 @@ useful report names the distribution and version, native Linux or WSL2, Claude C
 version, Python version, reviewer backend, the failed command or hook, and the complete error after
 removing credentials or private repository content. Reports may be read and acted upon, or may
 not — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Filing one is worth doing anyway: it is the only
-way a platform this has never run on could ever get evidence behind it.
+way to build evidence for platforms with limited or no live coverage.
 
 The Codex and Pi backends are external dependencies and neither is bundled; the Claude backend runs the `claude` CLI you already have, on your own subscription quota.
 
@@ -1244,7 +1319,7 @@ PI_GIT_READ_LIVE=1 node pi-extensions/git-read-only/test/live.mjs
 
 ## Backlog
 
-- Add Linux and WSL2 CI plus live-host coverage before claiming either platform has been run; treat
+- Finish current Linux host acceptance and add WSL2 CI/live-host coverage; treat
   native Windows process control as a separate portability project.
 - Add an explicit opt-in Pi shell mode if Pi gains a permission model that can prevent writes and
   shell redirection. Pi remains shell-free by default.

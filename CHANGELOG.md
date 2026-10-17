@@ -29,6 +29,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Added
 
+- Complete configuration references for both hosts, including transcript/logging controls,
+  environment overrides, command clear forms and the remaining Linux acceptance status.
 - Claude Code: session start warns when the plugin runs from a temporary directory such as
   `/tmp`. The OS can delete those files, and every hook then fails open, the commit gate
   included.

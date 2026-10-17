@@ -16,9 +16,11 @@ MPL-2.0.
 
 ## Reporting
 
-Use the issue templates: defect, installation failure, platform compatibility, or documentation.
+Open a blank GitHub issue for a defect, installation failure, platform compatibility problem,
+or documentation correction. Include a minimal reproduction, expected and actual behavior,
+and the relevant error output with private code, credentials and local identifiers removed.
 Always include the host and version (`claude --version`, `codex --version`), the backend (Codex
-or Pi), your OS, and what `/reviewerModel` reports. For anything security-sensitive, use private
+or Pi or Claude), your OS, and what `/reviewerModel` reports. For anything security-sensitive, use private
 vulnerability reporting instead — see [`SECURITY.md`](SECURITY.md).
 
 ## Running the suites
@@ -30,8 +32,11 @@ python3 -m pytest -p no:cacheprovider                      # from the repository
 cd plugins/reviewer-agent-codex && python3 -m pytest -p no:cacheprovider
 ```
 
-Install the development dependencies first with `pip install -r requirements-dev.txt`; the
-installed runtime itself is standard-library-only on both hosts, and it needs to stay that way.
+Use a Python 3.9+ interpreter and install development dependencies with that same interpreter:
+`python3 -m pip install -r requirements-dev.txt`. If needed, create and activate a virtual
+environment first. No named conda environment is required; when using conda, verify that
+`python3` resolves inside the intended environment before running either suite. The installed
+runtime itself is standard-library-only on both hosts, and it needs to stay that way.
 
 The Pi extension has its own:
 

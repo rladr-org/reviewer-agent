@@ -33,8 +33,9 @@ worse; other sessions keep resuming theirs, on the new setting.
 
 `timeout` is shared: one setting, applied by every backend. `firstOutputTimeout` and
 `idleTimeout` tune only the codex commit audit's `--json` hang detection -- N1 kills a reviewer
-that never produced any output, N2 one that fell silent mid-run; each retries the audit once
-before the total timeout's fail-closed block. Set `idleTimeout` above the slowest test run.
+that never produced any output, N2 one that fell silent mid-run. Idle kills retry while the total
+audit budget remains, up to eight retries, before a fail-closed block. Set `idleTimeout` above
+the slowest test run.
 
 Levels differ by backend and the sets are NOT interchangeable:
 
