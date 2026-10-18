@@ -457,13 +457,10 @@ Codex stopContinue runs automatically when Codex emits its Stop event, without a
 agent-initiated early review. Request receipt and ordinary tool execution only record context.
 The native plugin waits 60 seconds before starting that review so you can read the response;
 `stopContinueDelaySecs` in its config or `REVIEWER_STOPCONTINUE_DELAY_SECS` adjusts this reading
-window (0–300 seconds). Escape cancels the window or the running review. Unsent typing alone
-does not trigger a documented host hook, so first-keystroke cancellation requires a host change.
+window (0–300 seconds). **Currently, in Codex, you must press Escape to interrupt the reading
+window or running completion review.** Typing or submitting a reply does not interrupt the check.
 Use `$reviewer-agent-codex:stop-continue delay 30` to save the delay, `delay status` to inspect it,
-or `delay clear` to restore the default. Submitting a message cancels the old stop review once
-Codex delivers its `UserPromptSubmit` event; it does not cancel commit reviews.
-A desktop host may queue the message until the check finishes. Use Escape for immediate
-interruption; sending a reply alone did not interrupt the tested desktop host's check.
+or `delay clear` to restore the default. Codex may queue a submitted reply until the check finishes.
 A rejected response may already be visible, and continuation can collapse desktop history.
 A question answer also ends a turn; the Stop event alone cannot distinguish that from stopping
 an active work assignment. Reviewer failure or exhausted retries allow stopping under the

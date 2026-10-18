@@ -647,22 +647,13 @@ setting, the result shows both values. The CLI equivalent is
 {"stopContinueDelaySecs": 30}
 ```
 
-Submitting a new operator message cancels the pending reading window or running stop reviewer
-when Codex delivers `UserPromptSubmit`. The reviewer watches the hook's repository/session input
-generation every 0.1 seconds and checks it again before applying a verdict. The cancellation
-uses the existing reviewer process-tree cleanup and suppresses the old continuation or approval.
-It does not cancel commit reviews or reviews belonging to another repository or session, and
-generated continuation prompts do not count as operator submissions. A submission leaves no
-Escape bypass that could skip supervision for the new task. If a host queues the message without
-delivering the hook until later, the plugin cannot react until that delivery. Desktop acceptance
-observed replies reaching the plugin only after the completion review finished. Use Escape for
-immediate interruption in Codex desktop; sending a reply alone may leave the check running.
+**Currently, in Codex, you must press Escape to interrupt the reading window or running
+completion review.** Typing or submitting a reply does not interrupt the check. Codex may queue
+the reply until the check finishes, as observed during desktop acceptance.
 
-Typing into an unsent draft does **not** itself cancel a review. The
-[documented host hooks](https://learn.chatgpt.com/docs/hooks) expose
-`Interrupt` and `UserPromptSubmit`, but no draft-typing event. Cancellation on the first keystroke
-would require a host change. Press Escape for immediate cancellation; a submitted reply cancels
-only if Codex delivers its hook while the check is still pending.
+The plugin receives new input through the
+[documented host hooks](https://learn.chatgpt.com/docs/hooks), but it cannot act on a reply before
+Codex delivers it. Use Escape rather than submitting a reply when you want to cancel the check.
 
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
 Completion supervision is invoked only by the Stop hook. The developer model remains suspended

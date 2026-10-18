@@ -50,9 +50,10 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
 - [ ] Finish desktop stop-supervision and cancellation checks, distinguishing reading-delay
   cancellation from cancellation during backend review. Check interactive `/hooks` trust when
   testing the CLI host.
-- [ ] Resolve the desktop reply-cancellation acceptance failure: timely host input delivery is
-  required, but the tested desktop delivered the reply after review finished. Decide whether
-  to require a host fix or accept the documented Escape workaround before release.
+- [x] Resolve the release requirement for desktop reply cancellation: the operator accepted
+  documenting that Codex currently requires Escape to interrupt the reading window or review.
+  Keep the failed reply-cancellation result as evidence of the known limitation; no runtime
+  fix is required for this release scope.
 - [ ] In the real hosts, verify Escape during a commit review and a successful retry,
   `AskUserQuestion` rerouting, and uninstall preservation of unrelated settings/plugins.
 - [ ] On the operator's clean Linux server, exercise manual/agent installation, smoke tests

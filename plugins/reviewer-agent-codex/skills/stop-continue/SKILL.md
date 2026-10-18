@@ -33,5 +33,6 @@ removes that key, restoring the 60-second default unless the environment overrid
 `REVIEWER_STOPCONTINUE_DELAY_SECS` takes precedence. This setting applies across repositories
 and does not enable supervision. The hook result reports any override.
 
-Submitting an operator message cancels a pending stop review once the host delivers
-`UserPromptSubmit`. Unsent typing is not exposed to the plugin. Escape also cancels the check.
+Currently, in Codex, you must press Escape to interrupt the reading window or running completion
+review. Typing or submitting a reply does not interrupt the check; Codex may queue the reply until
+the check finishes.

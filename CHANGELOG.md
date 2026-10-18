@@ -10,8 +10,10 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 ### Changed
 
 - **Each stop now waits 60 seconds before the supervisor reviews it, on both hosts**, so the
-  supervisor no longer pushes the agent on while you are still reading its reply. Replying during
-  the wait skips the review, so it spends no reviewer tokens. Claude Code previously had no wait
+  supervisor no longer pushes the agent on while you are still reading its reply. In Claude Code,
+  replying during the wait skips the review, so it spends no reviewer tokens. **Codex currently
+  requires Escape to interrupt the wait or running review; typing or submitting a reply does
+  not interrupt the check.** Claude Code previously had no wait
   by default, and its optional delay ran after the review, holding back approved stops too. Now
   the wait comes first and an approved stop ends at once. Codex's wait was 15 seconds.
 - Claude Code: `/reviewer-agent:stopContinue delay [<0..300>|status|clear]` shows or sets the
