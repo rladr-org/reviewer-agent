@@ -196,18 +196,19 @@ gated by the new scripts before the restart. Restart to make the hook list and t
 per-repo enablement are unchanged, because state was never touched.
 
 If `stopContinue` and `stopContinueWatchdog` are active for a repository, the watchdog recovery cron
-is re-armed automatically and you do not re-arm it by hand — but **not by `SessionStart`, and not at
-the restart itself.** The restart destroys the cron (it lives in the host session's memory, not on
-disk), and `SessionStart` emits an arm instruction that the host does **not** deliver on a resumed
-session, so nothing has re-armed it by the time the new session opens.
+needs no re-arming by hand. Whether it survives the restart depends on the host. On Claude Code
+2.1.302 (2026-10-17), a session resumed after the restart still listed its watchdog cron, with the
+same job id, and it kept ticking. On a host that does not carry crons across a restart, the cron is
+gone (it lives in the host session's memory). **`SessionStart` does not bring it back**: its arm
+instruction is not delivered on a resumed session.
 
-What recovers it is tick liveness, and the timing is **bounded rather than immediate**. The
-`tick_seen` marker is on disk and survives the restart that killed the cron, so a prompt only
-triggers the re-arm once that marker is older than two watchdog intervals (14 minutes at the default
-7). Restart shortly after a tick and the marker still looks fresh: the cron is genuinely gone, yet
-the next prompt will *not* re-arm it. So:
+What recovers a lost cron is tick liveness, and the timing is **bounded rather than immediate**. The
+`tick_seen` marker is on disk and survives the restart, so a prompt only triggers the re-arm once
+that marker is older than two watchdog intervals (14 minutes at the default 7). Restart shortly
+after a tick and the marker still looks fresh: the cron is genuinely gone, yet the next prompt will
+*not* re-arm it. So:
 
-- an empty `CronList` immediately after a restart is expected, not a fault;
+- exactly one task in `CronList` after a restart is expected, and so is an empty one;
 - so is an empty one after your first prompt, if that prompt came soon after the last tick;
 - within about two intervals a prompt re-arms it, and `CronList` then shows exactly one task.
 
