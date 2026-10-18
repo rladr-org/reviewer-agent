@@ -32,7 +32,9 @@ continuation or start a new turn when they finish.
    packaging checks. Commit runtime and documentation together after review.
 
 Use `dev-env`. Keep HANDOVER.md and the operator's Linux reports uncommitted.
-Do not push or alter the installed plugin as part of this source change.
+After the reviewed source commit, refresh the local Codex installation using the
+existing installer so the operator can test this candidate after hook trust and
+restart. Preserve retained state and unrelated plugins/settings. Do not push.
 
 ## Acceptance
 
@@ -44,3 +46,14 @@ Do not push or alter the installed plugin as part of this source change.
 - After installing the candidate and restarting Codex, verify the extra minute is
   gone and observe answer/progress visibility. A clean turn cannot prove that an
   intermittent display issue is resolved; retain that issue until evidence does.
+
+## Verification
+
+- Plan commit: `ad3dee1`; combined test commit: `9508a50`.
+- All 23 focused regressions failed on the old implementation before code edits.
+- After removal, all 38 immediate-review, retired-command and submit-cancellation
+  checks passed. The full Codex suite passed 901 tests in 160.16 seconds.
+- The root suite passed 1,703 tests with 8 skips in 426.79 seconds. Layering,
+  version parity, shipping-content scanning, and diff whitespace checks passed.
+- Installed-candidate GUI startup, modified-hook trust and visibility acceptance
+  remain separate from these source checks; no display fix is claimed.

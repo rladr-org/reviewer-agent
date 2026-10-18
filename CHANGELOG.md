@@ -9,13 +9,18 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
-- **Each stop now waits 60 seconds before the supervisor reviews it, on both hosts**, so the
-  supervisor no longer pushes the agent on while you are still reading its reply. In Claude Code,
-  replying during the wait skips the review, so it spends no reviewer tokens. **Codex currently
-  requires Escape to interrupt the wait or running review; typing or submitting a reply does
-  not interrupt the check.** Claude Code previously had no wait
-  by default, and its optional delay ran after the review, holding back approved stops too. Now
-  the wait comes first and an approved stop ends at once. Codex's wait was 15 seconds.
+- **Claude Code stops now wait 60 seconds before the supervisor reviews them**, so the
+  supervisor no longer pushes the agent on while you are still reading its reply.
+  Replying during the wait skips the review, so it spends no reviewer tokens. Claude Code
+  previously had no wait by default, and its optional delay ran after the review, holding back
+  approved stops too. Now
+  the wait comes first and an approved stop ends at once.
+- Codex: remove the blocking Stop reading window. Completion reviews start immediately;
+  legacy delay config/environment values are ignored and old delay commands report removal
+  without changing settings. The host provides no documented post-display signal, and the
+  wait added a silent minute in a captured desktop incident. The Stop-hook timeout returns to
+  360 seconds; trust the modified hook and restart after updating. Intermittent disappearing
+  text remains unresolved. Escape is still required to interrupt a running completion review.
 - Claude Code: `/reviewer-agent:stopContinue delay [<0..300>|status|clear]` shows or sets the
   wait for every project. `REVIEWER_STOPCONTINUE_DELAY_SECS` overrides it, and it overrides
   `stopContinueDelaySecs` in `config.json`. `0` turns the wait off. While a stop waits or is

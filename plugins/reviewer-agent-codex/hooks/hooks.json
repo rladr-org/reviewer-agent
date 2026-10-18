@@ -74,7 +74,7 @@
               "stop_hook_active": "${stop_hook_active}",
               "last_assistant_message": "${last_assistant_message}"
             },
-            "timeout": 630,
+            "timeout": 360,
             "statusMessage": "Checking completion"
           }
         ]

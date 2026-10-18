@@ -21,8 +21,6 @@ DEFAULT_REVIEWER_MODEL = "gpt-5.6-luna"
 DEFAULT_REVIEWER_EFFORT = "xhigh"
 DEFAULT_COMMIT_REVIEW_TIMEOUT = 3600
 DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT = 3
-DEFAULT_STOPCONTINUE_DELAY_SECS = 60
-MAX_STOPCONTINUE_DELAY_SECS = 300
 REVIEW_HISTORY_KEEP = 100
 MIN_COMMIT_REVIEW_TIMEOUT = 60
 MAX_COMMIT_REVIEW_TIMEOUT = 7200
@@ -54,41 +52,6 @@ def load_config():
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def stopcontinue_delay_secs():
-    """Reading window before a native Stop review; env overrides config.json."""
-    return stopcontinue_delay_detail()[0]
-
-
-def stopcontinue_delay_detail():
-    for source, value in (("env REVIEWER_STOPCONTINUE_DELAY_SECS", os.environ.get("REVIEWER_STOPCONTINUE_DELAY_SECS")),
-                          ("config.json stopContinueDelaySecs", load_config().get("stopContinueDelaySecs"))):
-        if isinstance(value, bool) or not isinstance(value, (str, int)):
-            continue
-        try:
-            return min(MAX_STOPCONTINUE_DELAY_SECS, max(0, int(value))), source
-        except ValueError:
-            continue
-    return DEFAULT_STOPCONTINUE_DELAY_SECS, "default"
-
-
-def save_stopcontinue_delay(value):
-    """Change only the delay key; malformed config must never be silently replaced."""
-    if value is not None and (type(value) is not int or not 0 <= value <= MAX_STOPCONTINUE_DELAY_SECS):
-        raise ValueError("delay expects an integer from 0 to 300")
-    with _mutation_lock():
-        try:
-            config = json.loads(config_file().read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            config = {}
-        if not isinstance(config, dict):
-            raise ValueError("config.json must contain an object")
-        if value is None:
-            config.pop("stopContinueDelaySecs", None)
-        else:
-            config["stopContinueDelaySecs"] = value
-        _atomic_write(config_file(), json.dumps(config, indent=2) + "\n")
 
 
 def _setting_file(name):

@@ -2,23 +2,9 @@
 """Cancellable minimal stopContinue ruling for the bundled MCP server."""
 
 import re
-import time
 from pathlib import Path
 
 from . import backend, cancellation, liveness, prompts, state, stop_input
-
-_delay_sleep = time.sleep
-
-
-def _reading_delay(cancel_event):
-    seconds = state.stopcontinue_delay_secs()
-    if cancel_event is not None:
-        # Event.wait wakes immediately on Escape, including during the reading window.
-        return cancel_event.wait(seconds)
-    if seconds:
-        _delay_sleep(seconds)
-    return False
-
 
 # The sentinel ending the TRAILING line, alone or as its own sentence after a full stop, `!` or `?`
 # ("...an unrequested code fix. STOP_OK"), tolerating only markdown emphasis / backticks and
@@ -147,7 +133,7 @@ def _review_ticket(root, ticket, background_markers, cancel_event, native, fresh
                    abort_callback_registered, submitted):
     session_id = ticket["session_id"]
     try:
-        if submitted() or (native and _reading_delay(cancel_event)) or submitted():
+        if submitted() or (cancel_event is not None and cancel_event.is_set()):
             return _cancelled(root, ticket, abort_callback_registered)
         prompt = prompts.stop_prompt(
             root, session_id, ticket["final_message"],

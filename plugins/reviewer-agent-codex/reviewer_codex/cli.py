@@ -10,7 +10,6 @@ from . import controls, state
 def _usage():
     print(
         "usage: toggle.py reviewer|stop on|off|status | "
-        "stop delay [0..300|status|clear] | "
         "model [<model> [<effort>] | clear | effort <level>|clear]",
         file=sys.stderr,
     )

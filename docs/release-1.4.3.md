@@ -1,16 +1,18 @@
 # Draft release notes for 1.4.3
 
 Reviewer Agent provides separate commit review and stop supervision for Claude Code and Codex.
-This update gives you time to read an agent's response before its stop review starts and fixes
-large staged-index handling and several command and supervision details.
+This update adds a reading window in Claude Code, removes Codex's blocking reading delay,
+and fixes large staged-index handling and several command and supervision details.
 
 ## Changes
 
-- Both hosts wait 60 seconds before reviewing a stop. In Claude Code, replying during the
-  window skips the review. In Codex, you must currently press Escape to interrupt the reading
-  window or running completion review; typing or submitting a reply does not interrupt it.
-  Set a delay from 0 through 300 seconds with the host's stop-continue command; 0 turns the wait
-  off. Existing explicit settings remain in effect.
+- Claude Code waits 60 seconds before reviewing a stop; replying during the window skips the
+  review. Its stop-continue command sets a delay from 0 through 300 seconds; 0 disables the wait.
+- Codex starts completion review immediately. Its blocking reading window is removed because
+  the hook cannot confirm that an answer reached the screen. Old delay configuration and
+  environment values are ignored; legacy delay commands report removal without changing settings.
+  The Stop-hook timeout returns to 360 seconds. Escape interrupts a running review; typing or
+  submitting a reply does not interrupt it.
 - Claude Code labels both the spinner and blocking feedback
   `stopContinue supervisor (reply to skip the review)`.
 - The commit gate reads the staged index without putting every path on a command line, avoiding
@@ -39,8 +41,11 @@ use the [README](https://github.com/rladr-org/reviewer-agent#documentation) for 
 ## Known limitations
 
 In Codex, interruption currently requires Escape. Typing or submitting a reply does not interrupt
-the reading window or completion review; the desktop host delivered submitted replies only after
+the completion review; the desktop host delivered submitted replies only after
 the review finished during acceptance testing.
+
+Removing the blocking wait does not establish that intermittent missing or disappearing
+desktop text is fixed. That display issue remains under investigation.
 
 Stop supervision can misjudge scope, revive completed requests, or return prose instead of its
 required stop token, producing an unwanted continuation. Captured incidents remain under

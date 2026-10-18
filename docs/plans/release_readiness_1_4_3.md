@@ -28,8 +28,10 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
   optional context logging, liveness expiry and backend-specific model/effort behavior.
 - [x] Complete the Claude command forms, including model plus timeout and all clear forms.
   Align skill hints and retry wording with the implementation.
-- [x] Complete the Codex configuration reference: all six JSON settings and environment
+- [x] Complete the Codex configuration reference: all five active JSON settings and environment
   controls, including `REVIEWER_CODEX_SESSION_AUDIT_LIMIT`.
+- [x] Remove Codex's blocking Stop reading window and retire its config/environment controls
+  and commands. Native reviews start immediately; old commands report removal without edits.
 - [x] Replace claims that Linux has never been installed with the actual Ubuntu findings and
   remaining acceptance status. Keep WSL2 unverified.
 - [x] Correct CONTRIBUTING's references to nonexistent issue templates and describe the actual
@@ -47,11 +49,11 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
 - [x] Activate the current Codex candidate, compare installed bytes to source, restart, and
   verify commit redirection and reject/fix/approve in the desktop host. Verify commit-review
   Escape makes no commit, leaves the edit staged, and allows a successful gated retry.
-- [ ] Finish desktop stop-supervision and cancellation checks, distinguishing reading-delay
-  cancellation from cancellation during backend review. Check interactive `/hooks` trust when
+- [ ] Install/restart the candidate with Codex's reading delay removed; confirm immediate
+  review startup and Escape during backend review. Check interactive `/hooks` trust when
   testing the CLI host.
 - [x] Resolve the release requirement for desktop reply cancellation: the operator accepted
-  documenting that Codex currently requires Escape to interrupt the reading window or review.
+  documenting that Codex currently requires Escape to interrupt a running review.
   Keep the failed reply-cancellation result as evidence of the known limitation; no runtime
   fix is required for this release scope.
 - [ ] In the real hosts, verify Escape during a commit review and a successful retry,
@@ -61,9 +63,13 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
   failure, directives, watchdog status and history cleanup. Record results against the reports;
   do not create a second local profile or change the operator's running hosts for these tests.
 - [ ] Verify command/config show, set, show and clear; override precedence; invalid input;
-  global versus repository scope; delays 0 through 300; and the timeout reporting regression.
+  global versus repository scope; Claude delays 0 through 300; Codex legacy-delay removal
+  errors; and the timeout reporting regression.
 - [ ] Verify completed-work and compaction-handover stops, continuation of unfinished authorized
-  work, and stop review with a background server. Preserve the operator's chosen delay afterward.
+  work, and stop review with a background server. Preserve the operator's chosen Claude delay
+  afterward.
+- [ ] Keep the intermittent Codex desktop text-visibility incident open until its cause and
+  resolution are established. Removing the wait does not prove that display behavior is fixed.
 - [ ] After acceptance passes, cut 1.4.3 and refresh the Codex cachebuster; verify version parity,
   both full suites, packaging and an installed-artifact smoke check. Do not bump early.
 - [x] Review what will become public, including history if changing repository visibility.

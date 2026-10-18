@@ -488,8 +488,7 @@ The persistent JSON configuration is `~/.codex/reviewer-agent-codex/config.json`
   "reasoningEffort": "xhigh",
   "commitReviewTimeoutSeconds": 3600,
   "reviewerSessionAuditLimit": 3,
-  "reviewHistoryKeep": 100,
-  "stopContinueDelaySecs": 60
+  "reviewHistoryKeep": 100
 }
 ```
 
@@ -498,7 +497,7 @@ the reviewer-model skill, then `config.json`, then the built-in defaults. Invali
 effort values are skipped. Valid effort values are `none`, `minimal`, `low`, `medium`, `high`,
 `xhigh`, `max`, and `ultra`.
 
-All six JSON controls and their environment equivalents are listed here. These settings apply
+All five JSON controls and their environment equivalents are listed here. These settings apply
 across repositories; feature flags and retained history remain repository-scoped. Missing,
 unreadable or malformed JSON is read as empty configuration. Unknown keys are ignored.
 
@@ -509,12 +508,10 @@ unreadable or malformed JSON is read as empty configuration. Unknown keys are ig
 | `commitReviewTimeoutSeconds` | `3600` | `REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS` | Integer 60–7200 seconds. Invalid candidates are skipped. Set via JSON/environment, not the reviewer-model command. |
 | `reviewerSessionAuditLimit` | `3` | `REVIEWER_CODEX_SESSION_AUDIT_LIMIT` | Integer 0–1000; 0 disables rotation. Environment, then reviewer-session command slot, then JSON, then default. |
 | `reviewHistoryKeep` | `100` | `REVIEWER_CODEX_REVIEW_HISTORY_KEEP` | Retained entries per project, minimum 1. An invalid environment value uses the built-in default; it does not fall through to JSON. |
-| `stopContinueDelaySecs` | `60` | `REVIEWER_STOPCONTINUE_DELAY_SECS` | Runtime values clamp to 0–300 seconds; 0 disables the wait. The delay command accepts only 0–300 and edits this JSON key directly. |
 
 `clear` for model, effort and session limit removes that command's saved override; environment
-and JSON values may still apply. Delay `clear` removes the JSON key itself. A valid environment
-override always wins, including over command changes. Model/effort and rotation-limit resolvers
-skip invalid candidates; integer delay candidates clamp to the supported range.
+and JSON values may still apply. A valid environment override always wins, including over
+command changes. Model/effort and rotation-limit resolvers skip invalid candidates.
 
 Additional environment-only controls:
 
@@ -620,35 +617,21 @@ prompt or routine success warning, preserving the original final answer. An inco
 adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
 The plugin cannot force the app's previous-message dropdown to remain expanded.
 
-Before starting a completion review, the native Stop hook waits **60 seconds** to give you time
-to read the agent's response. Set `stopContinueDelaySecs` in
-`~/.codex/reviewer-agent-codex/config.json`, or the overriding environment variable
-`REVIEWER_STOPCONTINUE_DELAY_SECS`, to change the window (integer seconds, 0 disables it,
-maximum 300). Invalid values fall through to the next source and then the default. The Stop
-hook's 630-second timeout accommodates the maximum window plus the 300-second review budget.
-Escape cancels both the reading window and a running review, with no late continuation.
-The host may display `Checking completion` during the window; the plugin cannot delay that UI.
+The native Stop hook starts its completion review immediately. The blocking reading window
+has been removed: Codex does not provide a documented signal confirming that the answer has
+reached the screen, so waiting inside the hook could add a silent minute without giving the
+operator time to read or reply. Removing the wait does not establish that intermittent missing
+or disappearing text in the desktop app is resolved.
 
-Set or inspect the same config option from the chat composer:
+Legacy `stopContinueDelaySecs` configuration and `REVIEWER_STOPCONTINUE_DELAY_SECS` values
+are ignored. Old `$reviewer-agent-codex:stop-continue delay` invocations (including set, status
+and clear) and `python3 scripts/toggle.py stop delay` report that the feature was removed and
+leave settings unchanged. The Stop hook's 360-second timeout covers the 300-second review
+budget and overhead. After upgrading, trust the modified Stop hook through interactive CLI
+`/hooks` and restart the host.
 
-```text
-$reviewer-agent-codex:stop-continue delay 30
-$reviewer-agent-codex:stop-continue delay status
-$reviewer-agent-codex:stop-continue delay clear
-```
-
-`delay` alone also shows the effective delay and its source; `clear` removes the config key.
-The command accepts integer seconds from 0 to 300 and preserves other config entries. It applies
-across repositories and does not enable supervision. If the environment overrides the saved
-setting, the result shows both values. The CLI equivalent is
-`python3 scripts/toggle.py stop delay 30`. The corresponding config fragment is:
-
-```json
-{"stopContinueDelaySecs": 30}
-```
-
-**Currently, in Codex, you must press Escape to interrupt the reading window or running
-completion review.** Typing or submitting a reply does not interrupt the check. Codex may queue
+**Currently, in Codex, you must press Escape to interrupt a running completion review.**
+Typing or submitting a reply does not interrupt the check. Codex may queue
 the reply until the check finishes, as observed during desktop acceptance.
 
 The plugin receives new input through the
