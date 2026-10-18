@@ -26,23 +26,12 @@ def submit(repo, isolated_state, **changes):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("phase", ["delay", "review"])
 def test_submitted_message_cancels_pending_stop_without_bypassing_next_task(
-    git_repo, isolated_state, monkeypatch, phase
+    git_repo, isolated_state, monkeypatch
 ):
     state.set_feature(git_repo, "stop")
-    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "300" if phase == "delay" else "0")
     started = threading.Event()
     calls, results = [], []
-
-    original_delay = stop_tool._reading_delay
-
-    def delay(token):
-        if phase == "delay":
-            started.set()
-        return original_delay(token)
-
-    monkeypatch.setattr(stop_tool, "_reading_delay", delay)
     token = Cancellation()
 
     def review(*args, **kwargs):
@@ -61,7 +50,7 @@ def test_submitted_message_cancels_pending_stop_without_bypassing_next_task(
         assert not worker.is_alive(), "submitted message did not cancel the pending review"
         assert not token.is_set(), "submission must let the host receive an empty hook result"
         assert results == [{}]
-        assert calls == ([] if phase == "delay" else [True])
+        assert calls == [True]
         assert not state.consume_stop_permit(git_repo, "submit")
         assert not state.consume_stop_abort_bypass(git_repo, "submit", "new-turn")
     finally:

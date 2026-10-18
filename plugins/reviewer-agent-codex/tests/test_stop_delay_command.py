@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MPL-2.0
+"""Retired delay commands must not silently continue changing settings."""
+
 import json
 
 import pytest
@@ -7,58 +9,53 @@ from reviewer_codex import cli, state
 from test_hook_scripts import _run
 
 
-def command(repo, isolated_state, value=""):
-    return _run("hook_prompt.py", dict(cwd=str(repo), session_id="delay-settings",
-                hook_event_name="UserPromptSubmit",
-                prompt="$reviewer-agent-codex:stop-continue delay" + value), isolated_state)
-
-
-def test_delay_command_persists_config_without_enabling_supervision(git_repo, isolated_state, monkeypatch):
-    monkeypatch.delenv("REVIEWER_STOPCONTINUE_DELAY_SECS")
+@pytest.mark.parametrize("value", ["", " status", " 0", " 30", " 300", " clear", " -1", " oops"])
+def test_retired_delay_prompt_reports_removal_without_mutating_state(
+    git_repo, isolated_state, monkeypatch, value
+):
+    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "300")
     isolated_state.mkdir()
-    state.config_file().write_text(json.dumps({"model": "keep-this", "other": {"x": 1}}))
-    result = command(git_repo, isolated_state, " 30")
+    config = json.dumps({"model": "keep-this", "other": {"x": 1}, "stopContinueDelaySecs": 30})
+    state.config_file().write_text(config)
+    result = _run("hook_prompt.py", dict(
+        cwd=str(git_repo), session_id="retired-delay", hook_event_name="UserPromptSubmit",
+        prompt="$reviewer-agent-codex:stop-continue delay" + value,
+    ), isolated_state)
+
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert output["continue"] is False
-    assert "30" in output["stopReason"]
-    assert state.load_config() == {"model": "keep-this", "other": {"x": 1}, "stopContinueDelaySecs": 30}
-    assert state.stopcontinue_delay_secs() == 30
+    assert "removed" in output["stopReason"].lower()
+    assert "immediately" in output["stopReason"].lower()
+    assert state.config_file().read_text() == config
     assert not state.feature_enabled(git_repo, "stop")
-    assert "30" in json.loads(command(git_repo, isolated_state).stdout)["stopReason"]
-    assert "30" in json.loads(command(git_repo, isolated_state, " status").stdout)["stopReason"]
-    command(git_repo, isolated_state, " clear")
-    assert state.load_config() == {"model": "keep-this", "other": {"x": 1}}
-    assert state.stopcontinue_delay_secs() == 60
 
 
-@pytest.mark.parametrize("value", ["-1", "301", "1.5", "oops", "30 extra"])
-def test_invalid_delay_command_does_not_write_config(git_repo, isolated_state, value):
-    result = command(git_repo, isolated_state, " " + value)
-    assert "ERROR" in json.loads(result.stdout)["stopReason"]
+@pytest.mark.parametrize("config", [None, '{"broken":', '[1,2]'])
+def test_retired_delay_prompt_does_not_create_or_repair_config(git_repo, isolated_state, config):
+    if config is not None:
+        isolated_state.mkdir()
+        state.config_file().write_text(config)
+    result = _run("hook_prompt.py", dict(
+        cwd=str(git_repo), session_id="retired-delay", hook_event_name="UserPromptSubmit",
+        prompt="$reviewer-agent-codex:stop-continue delay 30",
+    ), isolated_state)
+    assert "removed" in json.loads(result.stdout)["stopReason"].lower()
+    if config is None:
+        assert not state.config_file().exists()
+    else:
+        assert state.config_file().read_text() == config
+
+
+@pytest.mark.parametrize("args", [[], ["0"], ["status"], ["clear"]])
+def test_retired_delay_cli_reports_removal(git_repo, isolated_state, monkeypatch, capsys, args):
+    monkeypatch.chdir(git_repo)
+    assert cli.main(["stop", "delay"] + args) == 1
+    message = capsys.readouterr().err.lower()
+    assert "removed" in message and "immediately" in message
     assert not state.config_file().exists()
 
 
-def test_delay_command_reports_environment_override(git_repo, isolated_state, monkeypatch):
-    monkeypatch.setenv("REVIEWER_STOPCONTINUE_DELAY_SECS", "5")
-    result = command(git_repo, isolated_state, " 30")
-    message = json.loads(result.stdout)["stopReason"]
-    assert "30" in message and "5" in message and "REVIEWER_STOPCONTINUE_DELAY_SECS" in message
-    assert state.load_config()["stopContinueDelaySecs"] == 30
-
-
-@pytest.mark.parametrize("config", ['{"broken":', '[1,2]'])
-def test_delay_command_does_not_replace_invalid_config(git_repo, isolated_state, config):
-    isolated_state.mkdir()
-    state.config_file().write_text(config)
-    assert "ERROR" in json.loads(command(git_repo, isolated_state, " 30").stdout)["stopReason"]
-    assert state.config_file().read_text() == config
-
-
-def test_delay_cli_uses_same_setting(git_repo, isolated_state, monkeypatch, capsys):
-    monkeypatch.chdir(git_repo)
-    monkeypatch.delenv("REVIEWER_STOPCONTINUE_DELAY_SECS")
-    assert cli.main(["stop", "delay", "0"]) == 0
-    assert state.stopcontinue_delay_secs() == 0
-    assert cli.main(["stop", "delay"]) == 0
-    assert "0" in capsys.readouterr().out
+def test_cli_usage_does_not_advertise_retired_delay(capsys):
+    assert cli.main([]) == 2
+    assert "stop delay" not in capsys.readouterr().err
