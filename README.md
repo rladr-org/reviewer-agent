@@ -517,12 +517,17 @@ claude plugin update reviewer-agent
 
 Then **restart Claude Code** — hooks are snapshotted per session, so a running session keeps the
 old code until it restarts. An update does not touch `~/.claude/reviewer-agent/`, so per-repository
-enablement and the accepted-risk receipt survive: you do not re-accept or re-enable. If the
-reviewer-agent marketplace is a **local directory** source (a checkout you added by path) rather
-than GitHub, `claude plugin update` compares the manifest **version string** and prints `already at
-the latest version` when it is unchanged — even if the files on disk changed. Bump the version (see
-[*Release procedure*](CONTRIBUTING.md#release-procedure)) or reinstall to force a re-copy. The Pi
-extension, if you use the `pi` backend, is not refreshed by an update.
+enablement and the accepted-risk receipt survive: you do not re-accept or re-enable.
+`claude plugin update` compares the manifest **version string**, whether the marketplace is GitHub
+or a local directory (a checkout you added by path). It prints `already at the latest version` when
+the version is unchanged, even if newer commits or changed files exist. Releases bump the version,
+so a normal update picks them up. To install commits between releases, or a local checkout whose
+version you have not bumped (see [*Release procedure*](CONTRIBUTING.md#release-procedure)),
+reinstall to force a re-copy:
+`claude plugin uninstall reviewer-agent` then `claude plugin install reviewer-agent@reviewer-agent`.
+Run them back to back and do not commit in between: the repository is not gated until the install
+finishes.
+The Pi extension, if you use the `pi` backend, is not refreshed by an update.
 
 For the full step-by-step procedure with checks — the local-checkout version-bump trap, the
 Codex-native host, and testing an update across every supported backend — see

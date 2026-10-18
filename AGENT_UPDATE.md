@@ -20,24 +20,25 @@ is shorter.
 
 ## The one thing that trips up every local update
 
-**How `claude plugin update` decides whether there is anything to do depends on the marketplace
-source, and the two behave differently:**
+**`claude plugin update` decides whether there is anything to do by comparing the `version` string
+in the manifest, not the file contents and not the Git commit. This holds for both marketplace
+sources:**
 
-- A **GitHub marketplace** source updates by **upstream commit**. `claude plugin marketplace
-  update` fetches, then `claude plugin update` installs whatever the new commit resolves to. This
-  is the normal end-user case and it just works.
+- A **GitHub marketplace** source (the normal end-user case). `claude plugin marketplace update`
+  fetches the latest commit. But if that commit carries the same `version` as the installed copy,
+  `claude plugin update` prints `already at the latest version` and copies nothing. Verified with
+  Claude Code 2.1.302 on 2026-10-17: main had moved from `1de0d8f` to `fffa4f5` under the same
+  1.4.2 label, and the update was a no-op. End users are unaffected, because every release bumps
+  the version. Commits pushed between releases are what it misses.
 - A **local Directory** source — a checkout you `marketplace add`ed by path, i.e. the developer
-  case — updates by comparing the **`version` string in the manifest**, not the file contents and
-  not the Git commit. **If the version string has not changed, `claude plugin update` prints
-  `already at the latest version` and copies nothing, even though the files on disk have
-  changed.** A day of committed work behind an unchanged `version` is invisible to it.
+  case. **If the version string has not changed, `claude plugin update` copies nothing, even
+  though the files on disk have changed.** A day of committed work behind an unchanged `version`
+  is invisible to it.
 
-So a local update has a prerequisite the GitHub case does not: **the version must be bumped**, or
-the installed copy stays stale with no error. Bumping is the intended fix (see
-[Release procedure](CONTRIBUTING.md#release-procedure) and the checklist at the end of this file);
-a forced reinstall at the same version is the fallback. Determine which source you have at step 1
-and do not skip the version bump for a Directory source. To test commits **before** they are
-released, do not bump; follow
+So **a release must bump the version**, or installed copies stay stale with no error (see
+[Release procedure](CONTRIBUTING.md#release-procedure) and the checklist at the end of this file).
+A forced reinstall at the same version is the fallback. Determine which source you have at step 1.
+To test commits **before** they are released, do not bump; follow
 [*Testing an unreleased build without a version bump*](#testing-an-unreleased-build-without-a-version-bump).
 
 One more Directory-source subtlety worth knowing before you rely on the recorded metadata: an
@@ -55,7 +56,7 @@ An update writes outside the repository. The full list, before the first command
 | `~/.claude/plugins/installed_plugins.json` | the `reviewer-agent` entry's `version`, `installPath`, `gitCommitSha` and `lastUpdated` are rewritten | yes, reinstall |
 | `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **nothing** — an update does not touch state. Per-repo enablement and the accepted-risk receipt survive, so you do **not** re-accept or re-enable after an update | n/a |
 | `~/.pi/agent/extensions/git-read-only/` | **nothing** — a plugin update does **not** refresh the Pi extension. If the extension changed and you use the `pi` backend, refresh it by hand (step 6) | yes, delete the directory |
-| the **running** Claude Code session | **nothing takes effect until restart** — hooks are snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted | n/a |
+| the **running** Claude Code session | after a version bump, **nothing takes effect until restart** — the hook list is snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted. A same-version reinstall is the exception: it replaces the scripts in place, so the live session runs the new scripts under its old hook list (step 5) | n/a |
 
 **What this gates is a fail-closed commit gate.** An update never disables it. Throughout the
 version-bump update the repository stays gated on the old code, and after the restart it is gated on
@@ -135,11 +136,12 @@ claude plugin update reviewer-agent
 
 **Check:** it reports `updated from <old> to <new>`. That is success.
 
-**If instead it prints `already at the latest version`:** for a GitHub source, you are genuinely
-current. For a **Directory source whose files you changed, this means the version string did not
-change** — the update compared the string, saw no difference, and did nothing. Bump the version
-(appendix) and repeat from step 3. If you cannot bump it, force a re-copy by reinstalling at the
-same version:
+**If instead it prints `already at the latest version`:** the installed version string matches the
+marketplace's. That does **not** prove the installed files are current. For either source, newer
+commits under an unchanged version are skipped. The update compared the string, saw no difference,
+and did nothing. For a Directory source you are publishing, bump the version (appendix) and repeat
+from step 3. If you cannot bump it, or you are deliberately installing newer commits under the
+same label, force a re-copy by reinstalling at the same version:
 
 ```bash
 claude plugin uninstall reviewer-agent
@@ -150,21 +152,45 @@ Uninstall-then-install preserves `~/.claude/reviewer-agent/` state, so the repo 
 the risk receipt survives — but the repository is briefly un-gated between the two commands, so do
 it deliberately and prefer the version bump.
 
-**Optional check — confirm the copy is actually current.** Compare a file you know changed against
-the freshly installed copy (substitute the reported `<new>` version):
+A same-version reinstall replaces the files **in place**, in the same `…/<version>/` cache
+directory. Sessions already running that version keep the hook list they started with, but from
+then on they run the new scripts until they restart. Sessions on older versions are unaffected:
+their cache directories stay on disk.
+
+**Optional check — confirm the copy is actually current.** First print what was installed:
 
 ```bash
 python3 -c "import json,os;e=json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0];print(e['version'], e['installPath'], e['gitCommitSha'])"
+```
+
+For a **Directory** source, compare a file you know changed against the installed copy:
+
+```bash
 diff -q <PLUGIN_DIR>/stop_hook.py "$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0]['installPath'])")/stop_hook.py" && echo "IN SYNC"
 ```
 
-**Check:** the version is the new one and `stop_hook.py` reports `IN SYNC`.
+For a **GitHub** source there is no local checkout. Check that `gitCommitSha` is the commit you
+expect, i.e. the head of `main` on GitHub. For a full comparison from any clone that has that
+commit, unpack it into an empty directory and diff it against the `installPath` printed above:
+
+```bash
+mkdir <empty-dir>
+git -C <any-clone> archive <gitCommitSha> | tar -x -C <empty-dir>
+diff -rq <empty-dir> <installPath>
+```
+
+**Check:** the version is the new one and the files match. For a Directory source, `stop_hook.py`
+reports `IN SYNC`. For a GitHub source, `gitCommitSha` is the expected commit, and the full diff
+lists only the host's own `.in_use` marker and `__pycache__`.
 
 ## Step 5 — restart Claude Code
 
-`claude plugin update` prints `Restart to apply changes` for a reason: **hooks are snapshotted per
-session.** The session you are in keeps the old hook code until Claude Code restarts. Nothing you
-did in steps 3–4 reaches a running session.
+`claude plugin update` prints `Restart to apply changes` for a reason: **the hook list is
+snapshotted per session.** After a version bump, the new code sits in a new `…/<new>/` directory,
+so the session you are in keeps running the old code until Claude Code restarts. The exception is a
+same-version reinstall (step 4): it replaces the scripts in place. A running session then keeps its
+old hook list, but each hook runs the new script files from disk, so commits in that session may be
+gated by the new scripts before the restart. Restart to make the hook list and the scripts match.
 
 **Check (after restart):** `claude plugin list` shows the new version. The accepted-risk receipt and
 per-repo enablement are unchanged, because state was never touched.
@@ -317,8 +343,24 @@ structural and parity checks — see [`CONTRIBUTING.md`](CONTRIBUTING.md#running
 ## Testing an unreleased build without a version bump
 
 A version bump on the public repository tells every user to upgrade, so it waits until testing is
-complete. To try unreleased commits first, install an **export** of them at the version label
-they already carry, test, then return to the GitHub marketplace.
+complete. There are two ways to try unreleased commits first.
+
+**Commits already pushed to `main` (GitHub source):** stay on the GitHub marketplace and reinstall
+at the same label. `claude plugin update` alone copies nothing here (see
+[above](#the-one-thing-that-trips-up-every-local-update)).
+
+```bash
+claude plugin marketplace update reviewer-agent
+claude plugin uninstall reviewer-agent
+claude plugin install reviewer-agent@reviewer-agent
+```
+
+Run the last two back to back with no commit in progress; the gate is not guaranteed between them.
+Confirm `gitCommitSha` with step 4's optional check, then restart (step 5). Nothing needs undoing
+afterwards: the next release installs normally through `claude plugin update`.
+
+**Commits not pushed, or a build you want to pin:** install an **export** of them at the version
+label they already carry, test, then return to the GitHub marketplace.
 
 1. **Export to a permanent directory**, named for the commit so a later export can sit beside it.
    The export copies the **working tree**, so run it from a clean checkout of that commit (a

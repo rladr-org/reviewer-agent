@@ -135,8 +135,8 @@ To cut a new version:
 6. Commit before publishing, so a directory-source install's recorded `gitCommitSha` matches the
    files it copies.
 
-Bumping the version is also what lets an **installed** copy pick the change up: a local
-directory-source plugin (Claude Code) and the Codex host both resolve an installed local plugin by
-version string, so `claude plugin update` / a Codex reinstall does nothing until the version
-changes. See [`AGENT_UPDATE.md`](AGENT_UPDATE.md) for updating an existing installation, and
+Bumping the version is also what lets an **installed** copy pick the change up: Claude Code
+(from either a GitHub or a local directory marketplace) and the Codex host both resolve an
+installed plugin by version string, so `claude plugin update` / a Codex reinstall does nothing until
+the version changes. See [`AGENT_UPDATE.md`](AGENT_UPDATE.md) for updating an existing installation, and
 [*Running the suites*](#running-the-suites) for the live backend matrix that validates a release.
