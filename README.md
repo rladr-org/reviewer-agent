@@ -974,7 +974,7 @@ The two hosts recover differently:
 
 - **Claude Code** resumes the reviewer session by id, so a retry keeps what the reviewer already
   read and often lands second time. Raise the budget with `/reviewer-agent:reviewerModel timeout <seconds>`
-  (default 900s).
+  (default 1800s).
 - **Codex** *retires* the timed-out reviewer automatically and says so in the tool result: the
   retry starts a fresh reviewer, and rotating by hand afterwards is unnecessary. Raise the budget
   with `REVIEWER_CODEX_COMMIT_TIMEOUT_SECONDS`, or `commitReviewTimeoutSeconds` in
@@ -1041,9 +1041,9 @@ clamp to their minimum, and an invalid highest-priority integer/boolean falls ba
 | `codexBin` | local Codex executable, then `PATH` | Executable path; see `REVIEWER_CODEX_BIN` below. |
 | `piBin` | `pi` | Pi executable path. |
 | `claudeBin` | `claude` | Claude reviewer executable path. |
-| `model` | Codex CLI default | Codex backend only; one model token. Pi/Claude model selection uses its own command slot or environment override, with no JSON model key. |
-| `reasoningEffort` | Codex CLI default | Codex audit effort only; accepted levels are listed above. Pi/Claude use their own command slots or environment overrides. |
-| `commitReviewTimeoutSecs` | `900` | Shared audit budget in seconds; positive values clamp to at least 60 at runtime. The command additionally checks the host-hook ceiling. |
+| `model` | `gpt-6-luna` | Codex backend only; one model token. Pi/Claude model selection uses its own command slot or environment override, with no JSON model key. |
+| `reasoningEffort` | `xhigh` | Codex audit effort only; accepted levels are listed above. Pi/Claude use their own command slots or environment overrides. |
+| `commitReviewTimeoutSecs` | `1800` | Shared audit budget in seconds; positive values clamp to at least 60 at runtime. The command additionally checks the host-hook ceiling. |
 | `firstOutputTimeoutSecs` | `30` | Codex audit time to first output, at least 5 seconds. |
 | `idleTimeoutSecs` | `900` | Codex audit gap between outputs, at least 60 seconds; exceed the longest expected silent test run. |
 | `reviewerSessionAuditLimit` | `3` | Completed non-retry audits before rotation; integer 0–1000, with 0 disabling automatic rotation. |
@@ -1074,8 +1074,8 @@ controls. An environment value is visible only if the host process passes it to 
 | `REVIEWER_CONFIG_FILE` | `<state directory>/config.json` | Select a JSON configuration file independently of the state directory. |
 | `REVIEWER_BACKEND` | `codex` fallback | One-call/process override: `codex`, `pi` or `claude`. |
 | `REVIEWER_CODEX_BIN` | `~/.local/bin/codex` if it exists, else `codex` on `PATH` | Codex executable override; `codexBin` in `config.json` is more reliable for hooks. |
-| `REVIEWER_CODEX_MODEL` | Codex CLI default | Override `model` and the Codex model command slot. |
-| `REVIEWER_CODEX_EFFORT` | Codex CLI default | Override `reasoningEffort` and the Codex audit-effort command slot; the supervisor keeps its separate effort. |
+| `REVIEWER_CODEX_MODEL` | `gpt-6-luna` | Override `model` and the Codex model command slot. |
+| `REVIEWER_CODEX_EFFORT` | `xhigh` | Override `reasoningEffort` and the Codex audit-effort command slot; the supervisor keeps its separate effort. |
 | `REVIEWER_PI_BIN` | `pi` on `PATH` | Pi executable override; `piBin` in `config.json` is more reliable for hooks. |
 | `REVIEWER_PI_MODEL` | Pi default | Value passed to `pi --model`. |
 | `REVIEWER_PI_EFFORT` | `medium` | Value passed to `pi --thinking`. |
@@ -1099,7 +1099,7 @@ controls. An environment value is visible only if the host process passes it to 
 | `REVIEWER_ASYNC_AGENT_STALE_SECS` | `14400` | Live subagent marker window. |
 | `REVIEWER_BG_SHELL_STALE_SECS` | `43200` | Live background-shell marker window. |
 | `REVIEWER_MONITOR_STALE_SECS` | `3600` | Live monitor marker window. |
-| `REVIEWER_COMMIT_TIMEOUT_SECS` | `900` | Commit-audit timeout. |
+| `REVIEWER_COMMIT_TIMEOUT_SECS` | `1800` | Commit-audit timeout. |
 | `REVIEWER_FIRST_OUTPUT_TIMEOUT_SECS` | `30` (floor 5) | codex backend only (not the pi/claude backends): first-output idle threshold (N1) for the streamed audit. Also `firstOutputTimeoutSecs` in `config.json`. |
 | `REVIEWER_IDLE_TIMEOUT_SECS` | `900` (floor 60) | codex backend only (not the pi/claude backends): between-output idle threshold (N2) for the streamed audit; must exceed the longest legitimate silence. Also `idleTimeoutSecs` in `config.json`. |
 | `REVIEWER_SCRATCH_ROOT` | `<system temp>/reviewer-agent-scratch` | Codex backend: root for per-reviewer-session scratch dirs. `TMPDIR` is scoped to one on each codex audit; the dir is reclaimed at rotation and by a lease sweep. |

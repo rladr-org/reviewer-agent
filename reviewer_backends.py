@@ -584,8 +584,8 @@ DISABLE_PLUGINS = 'features.plugins=false'
 # The brief only needs to CREATE the reviewer session (and seed it with reviewerAgent.md);
 # its response text is discarded. So run it at low reasoning effort -- the session id
 # (`thread.started`) is emitted up front regardless, and this keeps session start fast even
-# when the user's global model_reasoning_effort is xhigh. The AUDIT (resume) does NOT set
-# this, so it inherits the user's configured effort.
+# when the audit runs at xhigh. The AUDIT (resume) does NOT set this; it passes
+# codex_effort() (default xhigh).
 BRIEF_REASONING_CONFIG = 'model_reasoning_effort="low"'
 
 

@@ -483,9 +483,9 @@ The following table is the installing agent's host-specific reference, not the u
 
 | Setting to discuss | Native Codex | Claude Code plugin |
 |---|---|---|
-| Reviewer backend and model | Native Codex child reviews; built-in model `gpt-5.6-luna`. Show the effective selection rather than assuming this default. | Ask which available backend: `codex`, `pi` or `claude`. Show its effective model; an unset model uses that backend's CLI default. |
-| Reasoning effort | Built-in `xhigh`, shared by commit and Stop reviews. | Commit effort is backend-specific; Stop has separate `stopContinueEffort`, default `low`. |
-| Commit timeout | `commitReviewTimeoutSeconds`, default 3600 seconds; integer 60–7200. Configure through JSON/environment, not a model-command timeout argument. | `commitReviewTimeoutSecs`, default 900 seconds; use `/reviewer-agent:reviewerModel timeout <seconds>` and its host-ceiling validation. |
+| Reviewer backend and model | Native Codex child reviews; built-in model `gpt-5.6-luna`. Show the effective selection rather than assuming this default. | Ask which available backend: `codex`, `pi` or `claude`. Show its effective model. Unset, codex uses `gpt-6-luna`; pi and claude use their CLI's default. |
+| Reasoning effort | Built-in `xhigh`, shared by commit and Stop reviews. | Commit effort is backend-specific (codex default `xhigh`); Stop has separate `stopContinueEffort`, default `low`. |
+| Commit timeout | `commitReviewTimeoutSeconds`, default 3600 seconds; integer 60–7200. Configure through JSON/environment, not a model-command timeout argument. | `commitReviewTimeoutSecs`, default 1800 seconds; use `/reviewer-agent:reviewerModel timeout <seconds>` and its host-ceiling validation. |
 | Streaming timeouts | No separate user-configurable first-output/idle settings. | Codex backend only: first output 30 seconds, idle 900 seconds by default. Ask whether long silent tests need a larger idle allowance. |
 | Stop timing | No reading delay; fixed 300-second review budget inside a 360-second hook ceiling. These are not commit-timeout settings. | Offer the reading delay, default 60 seconds, range 0–300, and separate supervisor effort. |
 | Session/history preferences | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. Ask about the optional watchdog only if Stop is selected. |

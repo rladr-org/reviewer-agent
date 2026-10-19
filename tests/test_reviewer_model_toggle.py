@@ -104,7 +104,7 @@ def test_clear_removes_override(tmp_path, monkeypatch):
     run_toggle(["m1"], home)
     p = run_toggle(["clear"], home)
     assert p.returncode == 0
-    assert _effective(home, monkeypatch) is None
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
 
 
 def test_invalid_model_name_rejected(tmp_path, monkeypatch):
@@ -112,19 +112,19 @@ def test_invalid_model_name_rejected(tmp_path, monkeypatch):
     p = run_toggle(['bad"name'], home)
     assert p.returncode == 2
     assert "ERROR" in (p.stdout + p.stderr)
-    assert _effective(home, monkeypatch) is None
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
 
 
 def test_extra_arguments_rejected(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     p = run_toggle(["two", "tokens"], home)
     assert p.returncode == 2
-    assert _effective(home, monkeypatch) is None
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
 
 
 # --------------------------------------------------------------------------
 # Optional timeout parameter. A 5700-line staged diff timed out the commit audit at 600s;
-# the gate is fail-CLOSED, so a timeout blocks the commit. The default rises to 900s and the
+# the gate is fail-CLOSED, so a timeout blocks the commit. The default is 1800s and the
 # operator can raise it further per machine without a code change.
 # --------------------------------------------------------------------------
 def _effective_timeout(home, monkeypatch):
@@ -156,7 +156,7 @@ def test_timeout_clear_reverts_to_the_default(tmp_path, monkeypatch):
     run_toggle(["timeout", "1200"], home)
     p = run_toggle(["timeout", "clear"], home)
     assert p.returncode == 0, p.stderr
-    assert _effective_timeout(home, monkeypatch) == 900
+    assert _effective_timeout(home, monkeypatch) == 1800
 
 
 @pytest.mark.parametrize("overrides,seconds,source", [
@@ -188,7 +188,7 @@ def test_model_clear_does_not_touch_the_timeout(tmp_path, monkeypatch):
     run_toggle(["m1", "1500"], home)
     p = run_toggle(["clear"], home)
     assert p.returncode == 0
-    assert _effective(home, monkeypatch) is None
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
     assert _effective_timeout(home, monkeypatch) == 1500
 
 
@@ -301,12 +301,12 @@ def test_effort_subcommand_leaves_the_model_and_timeout_alone(tmp_path, monkeypa
     assert _effective_effort(home, monkeypatch) == "xhigh"
 
 
-def test_effort_clear_reverts_to_inheriting_the_codex_default(tmp_path, monkeypatch):
+def test_effort_clear_reverts_to_the_default(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     run_toggle(["effort", "max"], home)
     p = run_toggle(["effort", "clear"], home)
     assert p.returncode == 0, p.stderr
-    assert _effective_effort(home, monkeypatch) is None
+    assert _effective_effort(home, monkeypatch) == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_an_invalid_level_is_rejected_and_NOTHING_is_written(tmp_path, monkeypatch):
@@ -317,7 +317,7 @@ def test_an_invalid_level_is_rejected_and_NOTHING_is_written(tmp_path, monkeypat
     p = run_toggle(["effort", "maximum"], home)
     assert p.returncode == 2
     assert "ERROR" in (p.stdout + p.stderr)
-    assert _effective_effort(home, monkeypatch) is None
+    assert _effective_effort(home, monkeypatch) == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_the_rejection_message_lists_the_levels(tmp_path):
@@ -332,7 +332,7 @@ def test_effort_with_no_value_is_rejected(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     p = run_toggle(["effort"], home)
     assert p.returncode == 2
-    assert _effective_effort(home, monkeypatch) is None
+    assert _effective_effort(home, monkeypatch) == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_an_invalid_level_does_not_apply_a_model_given_alongside_it(tmp_path, monkeypatch):
@@ -344,7 +344,7 @@ def test_an_invalid_level_does_not_apply_a_model_given_alongside_it(tmp_path, mo
     p = run_toggle(["effort", 'max" injected=evil'], home)
     assert p.returncode == 2
     assert _effective(home, monkeypatch) == "m1"
-    assert _effective_effort(home, monkeypatch) is None
+    assert _effective_effort(home, monkeypatch) == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_model_clear_does_not_touch_the_effort(tmp_path, monkeypatch):
@@ -353,7 +353,7 @@ def test_model_clear_does_not_touch_the_effort(tmp_path, monkeypatch):
     run_toggle(["effort", "high"], home)
     p = run_toggle(["clear"], home)
     assert p.returncode == 0
-    assert _effective(home, monkeypatch) is None
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
     assert _effective_effort(home, monkeypatch) == "high"
 
 
@@ -537,7 +537,7 @@ def test_timeout_below_the_floor_is_rejected(tmp_path, monkeypatch):
     p = run_toggle(["timeout", "30"], home)
     assert p.returncode == 2
     assert "ERROR" in (p.stdout + p.stderr)
-    assert _effective_timeout(home, monkeypatch) == 900
+    assert _effective_timeout(home, monkeypatch) == 1800
 
 
 def test_non_integer_timeout_is_rejected_without_applying_the_model(tmp_path, monkeypatch):
@@ -546,15 +546,15 @@ def test_non_integer_timeout_is_rejected_without_applying_the_model(tmp_path, mo
     home = str(tmp_path / "rh")
     p = run_toggle(["m1", "not-a-number"], home)
     assert p.returncode == 2
-    assert _effective(home, monkeypatch) is None
-    assert _effective_timeout(home, monkeypatch) == 900
+    assert _effective(home, monkeypatch) == rl.DEFAULT_CODEX_MODEL
+    assert _effective_timeout(home, monkeypatch) == 1800
 
 
 def test_show_reports_the_effective_timeout(tmp_path):
     home = str(tmp_path / "rh")
     p = run_toggle([], home)
     assert p.returncode == 0
-    assert "900" in p.stdout
+    assert "1800" in p.stdout
     run_toggle(["timeout", "1500"], home)
     p2 = run_toggle([], home)
     assert "1500" in p2.stdout
@@ -589,7 +589,7 @@ def test_show_says_default_when_an_invalid_env_is_the_only_setting(tmp_path):
     home = str(tmp_path / "rh")
     p = run_toggle([], home, {"REVIEWER_COMMIT_TIMEOUT_SECS": "-5"})
     assert p.returncode == 0
-    assert "900" in p.stdout
+    assert "1800" in p.stdout
     assert "default" in p.stdout
     assert "REVIEWER_COMMIT_TIMEOUT_SECS" not in p.stdout
 

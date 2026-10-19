@@ -64,7 +64,7 @@ def test_the_model_slot_is_separate_from_codex_and_pi(home):
 
     assert rl.reviewer_model("claude") == "opus"
     assert rl.reviewer_model("pi") == "some-pi-model"
-    assert rl.reviewer_model("codex") is None
+    assert rl.reviewer_model("codex") == rl.DEFAULT_CODEX_MODEL
     assert rl.reviewer_model_detail("claude")[1].endswith("claude_model")
 
 

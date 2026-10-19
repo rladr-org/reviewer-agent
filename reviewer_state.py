@@ -131,10 +131,13 @@ def codex_model_file():
     return reviewer_home() / "state" / "codex_model"
 
 
+DEFAULT_CODEX_MODEL = "gpt-6-luna"
+
+
 def codex_model_detail():
     """(model, source). Resolution: env REVIEWER_CODEX_MODEL (one-off/test override) > the
-    persistent state file (set via /reviewerModel) > config.json `model` > (None, ...) ->
-    inherit the codex CLI's own configured default.
+    persistent state file (set via /reviewerModel) > config.json `model` > DEFAULT_CODEX_MODEL,
+    the installation default for the codex backend.
 
     config.json supplies the DEFAULT model; /reviewerModel (the state file) is the explicit
     runtime choice and wins. The toggle validates on SET, but the env var, a hand-edited state
@@ -153,11 +156,11 @@ def codex_model_detail():
         val = str(candidate or "").strip()
         if val and is_valid_codex_model(val):
             return val, source
-    return None, "codex CLI default"
+    return DEFAULT_CODEX_MODEL, "default"
 
 
 def codex_model():
-    """The model every reviewer call uses, or None to inherit the codex CLI default. Thin
+    """The model every reviewer call uses. Thin
     wrapper so there is exactly ONE place the precedence is implemented."""
     return codex_model_detail()[0]
 
@@ -212,6 +215,7 @@ def codex_model_config(model):
 # evidence does not support.
 # --------------------------------------------------------------------------
 CODEX_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+DEFAULT_CODEX_EFFORT = "xhigh"
 
 
 def codex_effort_file():
@@ -221,8 +225,8 @@ def codex_effort_file():
 def codex_effort_detail():
     """(effort, source). Resolution mirrors `codex_model_detail` exactly: env
     REVIEWER_CODEX_EFFORT (one-off/test) > the state file (set via /reviewerModel) >
-    config.json `reasoningEffort` > (None, ...) -> inherit the codex CLI's own configured
-    effort, which is what every reviewer call did before this override existed.
+    config.json `reasoningEffort` > DEFAULT_CODEX_EFFORT, the installation default for the
+    codex backend.
 
     Every candidate is re-validated and an invalid one is deterministically SKIPPED so it
     can never reach `-c model_reasoning_effort="..."`. The command validates on set, but the
@@ -235,12 +239,12 @@ def codex_effort_detail():
         val = str(candidate or "").strip()
         if val and is_valid_codex_effort(val):
             return val, source
-    return None, "codex CLI default"
+    return DEFAULT_CODEX_EFFORT, "default"
 
 
 def codex_effort():
-    """The reasoning effort the commit audit and askq answer use, or None to inherit the
-    codex CLI default. One place implements the precedence."""
+    """The reasoning effort the commit audit and askq answer use. One place implements the
+    precedence."""
     return codex_effort_detail()[0]
 
 
@@ -278,7 +282,7 @@ def codex_effort_config(level):
 # answerer (300s) are latency-sensitive -- they run at every turn end -- and neither is
 # fail-closed, so a slow one costs a wasted turn, never a blocked commit.
 # --------------------------------------------------------------------------
-DEFAULT_COMMIT_TIMEOUT = 900
+DEFAULT_COMMIT_TIMEOUT = 1800
 DEFAULT_REVIEWER_SESSION_AUDIT_LIMIT = 3
 
 

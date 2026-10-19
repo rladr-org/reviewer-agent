@@ -41,7 +41,7 @@ def test_defaults_apply_with_no_config_file(tmp_path, monkeypatch):
     assert rl._bg_shell_stale_secs() == 12 * 3600
     assert rl._monitor_stale_secs() == 3600
     assert rl._async_agent_stale_secs() == 4 * 3600
-    assert rl.commit_review_timeout() == 900
+    assert rl.commit_review_timeout() == 1800
     assert rl.first_output_timeout() == 30
     assert rl.idle_timeout() == 900
     assert rl.max_nudges() == 8
@@ -109,7 +109,7 @@ def test_commit_timeout_detail_reports_the_source_that_actually_won(tmp_path, mo
     # One resolver, so the value and its reported source can never disagree -- the display
     # duplicating the precedence rules is exactly how it drifted.
     _isolate(tmp_path, monkeypatch)
-    assert rl.commit_review_timeout_detail() == (900, "default")
+    assert rl.commit_review_timeout_detail() == (1800, "default")
 
     _cfg(tmp_path, monkeypatch, {"commitReviewTimeoutSecs": 1200})
     secs, source = rl.commit_review_timeout_detail()
@@ -240,7 +240,7 @@ def test_invalid_model_in_config_is_ignored(tmp_path, monkeypatch):
     # `-c model="..."`.
     _isolate(tmp_path, monkeypatch)
     _cfg(tmp_path, monkeypatch, {"model": "bad model with spaces"})
-    assert rl.codex_model() is None
+    assert rl.codex_model() == rl.DEFAULT_CODEX_MODEL
 
 
 def test_config_selects_the_backend(tmp_path, monkeypatch):

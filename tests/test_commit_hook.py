@@ -1018,7 +1018,7 @@ def test_commit_audit_uses_the_configured_timeout(tmp_path, monkeypatch):
         assert commit_hook.main() == 0
 
     _call()
-    assert seen["timeout"] == 900, "default must be the raised 900s, not the old 600s"
+    assert seen["timeout"] == rl.DEFAULT_COMMIT_TIMEOUT
 
     monkeypatch.setenv("REVIEWER_COMMIT_TIMEOUT_SECS", "2400")
     _call()
@@ -1054,7 +1054,7 @@ def test_timeout_blocks_the_commit_and_names_the_remedy(tmp_path, monkeypatch):
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "TIMEOUT" in out["systemMessage"]
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-    assert "900" in reason
+    assert "1800" in reason
     assert "not an approval" in reason
     assert "/reviewerModel timeout" in reason
 

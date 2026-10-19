@@ -36,7 +36,7 @@ except Exception as _exc:  # reported by the __main__ guard, which must not depe
 else:
     _IMPORT_ERROR = None
 
-# Resolved per invocation from rl.commit_review_timeout() (default 900s, raised from 600s
+# Resolved per invocation from rl.commit_review_timeout() (default 1800s; earlier 900s, raised from 600s
 # after a ~5700-line staged diff timed out): env > /reviewerModel state > config.json. Read at
 # call time, not import time, so `/reviewerModel timeout <secs>` takes effect on the very next
 # commit without restarting anything.

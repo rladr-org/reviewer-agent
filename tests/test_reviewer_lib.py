@@ -555,17 +555,8 @@ def test_extra_config_can_still_override_the_service_tier():
 
 
 # --------------------------------------------------------------------------
-# codex model override: env REVIEWER_CODEX_MODEL > state file > None (codex default)
+# codex model override: env REVIEWER_CODEX_MODEL > state file > config.json > DEFAULT_CODEX_MODEL
 # --------------------------------------------------------------------------
-def test_codex_model_default_none_and_no_model_in_argv(tmp_path, monkeypatch):
-    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
-    monkeypatch.delenv("REVIEWER_CODEX_MODEL", raising=False)
-    assert rl.codex_model() is None
-    for argv in (rl.resume_by_id_argv("sid-1", "/p", "read-only", "hi"),
-                 rl.brief_argv("/p"), rl.brief_capture_argv("/p")):
-        assert not any(a.startswith('model="') for a in argv)
-
-
 def test_codex_model_state_file_applies_to_all_argv(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     monkeypatch.delenv("REVIEWER_CODEX_MODEL", raising=False)
@@ -576,7 +567,7 @@ def test_codex_model_state_file_applies_to_all_argv(tmp_path, monkeypatch):
         mi = argv.index('model="gpt-5.5-codex"')
         assert argv[mi - 1] == "-c"
     rl.clear_codex_model()
-    assert rl.codex_model() is None
+    assert rl.codex_model() == rl.DEFAULT_CODEX_MODEL
 
 
 def test_codex_model_env_beats_state_file(tmp_path, monkeypatch):
@@ -593,7 +584,7 @@ def test_codex_model_blank_file_means_no_override(tmp_path, monkeypatch):
     f = rl.codex_model_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("  \n")
-    assert rl.codex_model() is None
+    assert rl.codex_model() == rl.DEFAULT_CODEX_MODEL
 
 
 def test_codex_model_invalid_env_is_skipped_falls_through_to_file(tmp_path, monkeypatch):
@@ -613,14 +604,12 @@ def test_codex_model_invalid_file_contents_mean_no_override(tmp_path, monkeypatc
     f = rl.codex_model_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text('two tokens" injected=evil\n')
-    assert rl.codex_model() is None
-    argv = rl.resume_by_id_argv("sid-1", "/p", None, "x")
-    assert not any(a.startswith('model="') for a in argv)
+    assert rl.codex_model() == rl.DEFAULT_CODEX_MODEL
 
 
 # --------------------------------------------------------------------------
 # codex reasoning effort override: env REVIEWER_CODEX_EFFORT > state file >
-# config.json `reasoningEffort` > None (inherit the codex CLI's own config).
+# config.json `reasoningEffort` > DEFAULT_CODEX_EFFORT.
 #
 # Scoped to the RESUME path -- the commit audit and the askq answer. The brief
 # stays at BRIEF_REASONING_CONFIG (its response is discarded) and the stop
@@ -637,14 +626,6 @@ def _efforts(argv):
     return [a for a in argv if a.startswith("model_reasoning_effort=")]
 
 
-def test_codex_effort_default_none_and_no_effort_in_resume_argv(tmp_path, monkeypatch):
-    """Unset must leave today's behaviour byte for byte: no `-c` at all, so the
-    audit keeps inheriting whatever ~/.codex/config.toml says."""
-    _no_effort_env(monkeypatch, tmp_path)
-    assert rl.codex_effort() is None
-    assert _efforts(rl.resume_by_id_argv("sid-1", "/p", "read-only", "hi")) == []
-
-
 def test_codex_effort_state_file_reaches_the_resume_path(tmp_path, monkeypatch):
     _no_effort_env(monkeypatch, tmp_path)
     rl.set_codex_effort("max")
@@ -653,7 +634,7 @@ def test_codex_effort_state_file_reaches_the_resume_path(tmp_path, monkeypatch):
     i = argv.index('model_reasoning_effort="max"')
     assert argv[i - 1] == "-c"
     rl.clear_codex_effort()
-    assert rl.codex_effort() is None
+    assert rl.codex_effort() == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_codex_effort_leaves_the_BRIEF_at_low(tmp_path, monkeypatch):
@@ -718,8 +699,7 @@ def test_codex_effort_invalid_file_contents_mean_no_override(tmp_path, monkeypat
     f = rl.codex_effort_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text('max" injected=evil\n')
-    assert rl.codex_effort() is None
-    assert _efforts(rl.resume_by_id_argv("sid-1", "/p", None, "x")) == []
+    assert rl.codex_effort() == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_codex_effort_blank_file_means_no_override(tmp_path, monkeypatch):
@@ -727,7 +707,7 @@ def test_codex_effort_blank_file_means_no_override(tmp_path, monkeypatch):
     f = rl.codex_effort_file()
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("  \n")
-    assert rl.codex_effort() is None
+    assert rl.codex_effort() == rl.DEFAULT_CODEX_EFFORT
 
 
 def test_every_level_codex_accepts_is_valid_and_nothing_else_is(tmp_path, monkeypatch):

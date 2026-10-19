@@ -11,6 +11,10 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ### Changed
 
+- **Claude Code codex-backend defaults: `gpt-6-luna` at `xhigh`, and an 1800-second commit
+  review budget** (was 900). With no model or effort set, the reviewer previously inherited
+  whatever `~/.codex/config.toml` said; it now passes these defaults itself. Saved choices,
+  `config.json` and environment overrides still win.
 - **Claude Code stops now wait 60 seconds before the supervisor reviews them**, so the
   supervisor no longer pushes the agent on while you are still reading its reply.
   Replying during the wait skips the review, so it spends no reviewer tokens. Claude Code
