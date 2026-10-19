@@ -197,7 +197,10 @@ cp -R ~/.claude/hooks          "$BK"/hooks           2>/dev/null   # bash_gate.p
 echo "backup at $BK (state resolved to $STATE)"
 ```
 
-**Check:** `$BK` exists and contains `settings.json`; `state/`, `reviewerAgent/` and `hooks/` are
+The command prints the backup path; use that exact absolute path as `<BACKUP>` in later steps, since
+shell variables do not persist between tool calls.
+
+**Check:** `<BACKUP>` exists and contains `settings.json`; `state/`, `reviewerAgent/` and `hooks/` are
 present if they existed. Reviewer scratch (Step 3) is transient and is deleted, not backed up.
 
 ## Step 1 — detect the install shape
@@ -368,7 +371,7 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
   possible:
 
   ```bash
-  mv ~/.claude/plugins/cache/reviewer-agent "$BK"/plugin-cache
+  mv ~/.claude/plugins/cache/reviewer-agent "<BACKUP>"/plugin-cache
   ```
 
   **Check:** `~/.claude/plugins/cache/reviewer-agent` no longer exists, `claude plugin list` still
