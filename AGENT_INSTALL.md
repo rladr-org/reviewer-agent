@@ -105,13 +105,16 @@ Codex even when Pi is selected.
 ```
 uname -s                 # expect: Darwin or Linux
 command -v python3       # expect: an executable path
-python3 -V               # expect: Python 3.9.x or newer
+python3 -c "import sys;print(sys.version.split()[0]);sys.exit(sys.version_info < (3, 9))" && echo "SUPPORTED"
 if test -n "${WSL_DISTRO_NAME:-}" || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
   grep -qi 'WSL2' /proc/sys/kernel/osrelease || { echo "ERROR: WSL2 not detected"; exit 1; }
 fi
 ```
 
-**Check:** the platform, interpreter, version, and conditional WSL2 checks all succeed. macOS has
+**Check:** the platform, interpreter, version (`SUPPORTED`), and conditional WSL2 checks all
+succeed. The hooks run the first `python3` on the PATH Claude Code is started with, so an
+activated venv or conda environment decides it; this check predicts it only if Claude Code will be
+started with this shell's PATH. Step 6 repeats it in the restarted target session. macOS has
 daily use. Native Ubuntu installations produced issue reports; acceptance of the current fixes
 on a clean Linux host remains pending. Windows through WSL2 is an **untested beta** that is expected
 to work; tell the operator that before proceeding and continue only when the original request
@@ -499,7 +502,20 @@ and yielding for the answer. Honor the
 operator's requested format; do not use question cards when they have rejected them. Keep settings
 confirmation separate from enablement and the operator's exact acceptance command.
 
-First verify installation and the restart in `<TARGET_REPO>` required by step 4. Complete the
+First verify installation and the restart in `<TARGET_REPO>` required by step 4. Then check the
+hooks' Python from this restarted session, whose shell has the PATH the hooks use:
+
+```bash
+command -v python3
+python3 -c "import sys;print(sys.version.split()[0]);sys.exit(sys.version_info < (3, 9))" && echo "SUPPORTED"
+```
+
+**Check:** it prints `SUPPORTED`. Report the path and version, and name the environment if one is
+active (`CONDA_DEFAULT_ENV`, `VIRTUAL_ENV`). If it is older than 3.9, stop and report: the
+operator must start Claude Code with a supported `python3` first on the PATH. Tell the operator
+that starting Claude Code later under another environment, or none, changes the hooks' Python.
+
+Complete the
 shared [settings walkthrough](INSTALL_WITH_AGENT.md#2-resolve-choices-once) in order: commit-review
 settings and enablement, Stop settings and enablement, then rotation/history. The acceptance
 instructions below are a reference for each feature's enablement screen, not a reason to skip its

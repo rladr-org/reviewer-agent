@@ -1,5 +1,20 @@
 # Backlog
 
+## Hook launcher: treat a python3 older than 3.9 like a missing one
+
+`hooks/run_hook.sh` runs the first `python3` on the PATH Claude Code was started with, so an
+activated venv or conda environment (or none) decides the hooks' interpreter. It checks only that
+`python3` exists, not its version. The install and update guides now check it once, in the
+restarted target session, but a later start under another environment can switch it silently.
+
+- In the launcher, skip a candidate whose `sys.version_info < (3, 9)` and fall through to the
+  existing fail-closed path (block commits, tell the operator) when none qualifies.
+- Keep the check in the launcher, not in the Python scripts: code using newer syntax would fail
+  to compile before an in-script guard ran. Cost: one extra interpreter start per hook call.
+- Evidence (2026-10-19, Ubuntu 20.04, release `efa0d50`): system `/usr/bin/python3` is 3.8.10;
+  the smoke subset under it passed 308 of 309, the one failure being the deliberate
+  `test_host_versions.py` floor check. Older interpreters were not tested.
+
 ## Add a Pi backend to the native Codex package
 
 Deferred until after the current release.
