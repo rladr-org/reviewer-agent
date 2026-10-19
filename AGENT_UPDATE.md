@@ -18,6 +18,46 @@ is shorter.
 
 ---
 
+## Start here: the update status file
+
+An update spans a restart, and the restarted session does not have the earlier conversation. The
+update status file carries it across: **`~/.claude/reviewer-agent/update-status.json`**.
+
+The order is always:
+
+1. The operator asks for an update.
+2. The agent performs the entire update (steps 1–4), records the settings baseline, and writes
+   the status file (step 5).
+3. The agent asks the operator to restart Claude Code in the target, then to tell it to continue
+   the update.
+4. After the restart, the agent reads the status file and verifies it (below).
+5. If verified, it runs the [settings walkthrough](#confirm-existing-settings-with-the-user--both-hosts)
+   from step 1 of 5, then steps 6–7.
+
+**Every time this guide is started or continued, check the status file first:**
+
+```bash
+cat ~/.claude/reviewer-agent/update-status.json
+python3 -c "import json,os;e=json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0];print(e['version'], e.get('gitCommitSha'))"
+claude plugin marketplace update reviewer-agent
+```
+
+The update is **verified complete** only if all of these hold:
+
+- the file exists and has `"completed": true`;
+- its `version` and `gitCommitSha` equal the `installed_plugins.json` line;
+- that version is the current release. For a Directory source, `git -C <PLUGIN_DIR> fetch` then
+  `git -C <PLUGIN_DIR> rev-list --count 'HEAD..@{upstream}'` prints `0`, and `HEAD` equals
+  `gitCommitSha`. For either source, step 4's
+  [release check](#release-check--the-running-code-equals-the-release) passes. For a GitHub source, the plugin `version` in
+  `<installLocation>/.claude-plugin/marketplace.json` equals it, where `<installLocation>` is the
+  `reviewer-agent` entry's in `~/.claude/plugins/known_marketplaces.json`.
+
+If verified, and this session was started after the file's `completed_at`, continue with the
+walkthrough. If verified but this session is older than that, the restart has not happened: ask
+for it (step 5) and stop. Otherwise (no file, or any check fails), perform the update from
+step 1; step 5 rewrites the file.
+
 ## Resume after operator actions
 
 Follow the [installation checkpoint rule](INSTALL_WITH_AGENT.md#continue-across-operator-checkpoints)
@@ -34,9 +74,10 @@ Introduce the walkthrough as a review of installation-wide settings followed by 
 repository's feature enablement and risk acceptance. Name that repository and preserve any
 current acceptance receipt; shared settings and repository-specific state have different scopes.
 
-**When:** run this walkthrough **after** the update and restart (step 5), in the restarted session
-opened in the target. Then each enablement screen's command can be typed at once, and it records
-the new release's disclaimer. Before the update, only record a **baseline**, without asking
+**When:** run this walkthrough **after** the update and restart, in the restarted session opened
+in the target, once the [status file](#start-here-the-update-status-file) verifies the update.
+Then each enablement screen's command can be typed at once, and it records the new release's
+disclaimer. Before the update, only record a **baseline**, without asking
 anything: identify the target repository and note its current feature states, receipt validity,
 selected backend, effective reviewer model, reasoning effort, and timeouts. Include applicable Stop delay/effort, session rotation, history retention and
 Claude watchdog settings. Show where each effective value comes from: environment, saved command
@@ -327,6 +368,7 @@ An update writes outside the repository. The full list, before the first command
 | Claude Code's plugin cache (`~/.claude/plugins/cache/reviewer-agent/…/<version>/`) | a **new** version directory is copied in; the previous one remains until the host garbage-collects it | yes, roll back by reinstalling the prior version |
 | `~/.claude/plugins/installed_plugins.json` | the `reviewer-agent` entry's `version`, `installPath`, `gitCommitSha` and `lastUpdated` are rewritten | yes, reinstall |
 | `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **preserve and verify** — compare feature flags and receipt validity after update; a current receipt needs no re-acceptance. Confirm effective settings with the user before changing them | n/a |
+| `~/.claude/reviewer-agent/update-status.json` | written at step 5; read at every start or continuation | yes, delete it (the next run then redoes the update) |
 | `~/.pi/agent/extensions/git-read-only/` | **nothing** — a plugin update does **not** refresh the Pi extension. If the extension changed and you use the `pi` backend, refresh it by hand (step 6) | yes, delete the directory |
 | the **running** Claude Code session | Directory source: the scripts change at the `git pull`, the hook list at the restart. GitHub source: after a version bump, **nothing takes effect until restart** — the hook list is snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted. A same-version reinstall is the exception: it replaces the scripts in place, so the live session runs the new scripts under its old hook list (step 5) | n/a |
 
@@ -396,8 +438,9 @@ git -C <PLUGIN_DIR> log --oneline -1 '@{upstream}'
 git -C <PLUGIN_DIR> rev-list --count 'HEAD..@{upstream}'
 ```
 
-**Check:** `status` lists no files, and the count is greater than 0. A count of 0 means there is
-nothing to update: stop and report. If `status` lists files, stop and report — local edits are
+**Check:** `status` lists no files. A count greater than 0 means there is a new release: continue
+with 2b. A count of 0 means the checkout already has the latest release: skip 2b and 2c and
+continue at step 3, which then confirms it is installed. If `status` lists files, stop and report — local edits are
 the operator's, and a pull would mix them into the gate (and an install would copy them; see
 above). Do not stash or discard them.
 
@@ -462,9 +505,23 @@ now what the marketplace advertises.
 claude plugin update reviewer-agent
 ```
 
-**Check:** it reports `updated from <old> to <new>`. That is success.
+**Check:** it reports `updated from <old> to <new>`, and the
+[release check](#release-check--the-running-code-equals-the-release) below passes. The message
+alone does not prove the files are the release.
 
-**If instead it prints `already at the latest version`:** the installed version string matches the
+**Directory source: the cache copy is not what runs, and may be stale.** `claude plugin list`
+shows `Read from: <PLUGIN_DIR>`, and a repeated `claude plugin update` prints `reviewer-agent is
+read from its folder, <PLUGIN_DIR>: nothing to update. Edits there take effect at the next
+session start or /reload-plugins.` So the release check compares the checkout, not the
+`installPath` copy, and that copy needs no reinstall: if a `…/<new>/` cache directory already
+existed (a same-label candidate installed earlier), the update reuses it without copying.
+Verified with Claude Code 2.1.303 on 2026-10-19: `updated from 1.3.1 to 1.4.3` kept a 1.4.3
+directory from an older commit (15 files differed from the release), while the host read the
+checkout.
+
+**If instead it prints `already at the latest version`:** first run the release check below. If
+it passes, the release is already installed: continue at step 5.
+Otherwise the installed version string matches the
 marketplace's. That does **not** prove the installed files are current. For either source, newer
 commits under an unchanged version are skipped. The update compared the string, saw no difference,
 and did nothing. For a Directory source you are publishing, bump the version (appendix) and repeat
@@ -485,31 +542,33 @@ directory. Sessions already running that version keep the hook list they started
 then on they run the new scripts until they restart. Sessions on older versions are unaffected:
 their cache directories stay on disk.
 
-**Optional check — confirm the copy is actually current.** First print what was installed:
+### Release check — the running code equals the release
+
+Compare every file the host runs against the latest release commit. Checking one file is not
+enough: a given release may not change it. First print what was installed:
 
 ```bash
 python3 -c "import json,os;e=json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0];print(e['version'], e['installPath'], e['gitCommitSha'])"
 ```
 
-For a **Directory** source, compare a file you know changed against the installed copy:
+The release commit and the directory the host reads depend on the source:
 
-```bash
-diff -q <PLUGIN_DIR>/stop_hook.py "$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0]['installPath'])")/stop_hook.py" && echo "IN SYNC"
-```
+- **Directory:** the release is `git -C <PLUGIN_DIR> rev-parse '@{upstream}'` (after step 2's
+  fetch), and the host reads `<PLUGIN_DIR>` (`claude plugin list` shows `Read from:` it).
+- **GitHub:** the release is the head of `main` on GitHub, and the host reads the `installPath`
+  printed above. Use any clone that has that commit.
 
-For a **GitHub** source there is no local checkout. Check that `gitCommitSha` is the commit you
-expect, i.e. the head of `main` on GitHub. For a full comparison from any clone that has that
-commit, unpack it into an empty directory and diff it against the `installPath` printed above:
+Unpack the release into an empty directory and diff it against what the host reads:
 
 ```bash
 mkdir <empty-dir>
-git -C <any-clone> archive <gitCommitSha> | tar -x -C <empty-dir>
-diff -rq <empty-dir> <installPath>
+git -C <PLUGIN_DIR or any clone> archive <release commit> | tar -x -C <empty-dir>
+diff -rq -x .git -x __pycache__ -x .pytest_cache -x .in_use <empty-dir> <PLUGIN_DIR or installPath>
 ```
 
-**Check:** the version is the new one and the files match. For a Directory source, `stop_hook.py`
-reports `IN SYNC`. For a GitHub source, `gitCommitSha` is the expected commit, and the full diff
-lists only the host's own `.in_use` marker and `__pycache__`.
+**Check:** the version is the new one, `gitCommitSha` equals the release commit, and the diff
+prints nothing. For a Directory source, an `Only in <PLUGIN_DIR>` line for a git-ignored file
+(such as a test venv) is not a code difference; any other line is.
 
 ## Step 5 — restart Claude Code
 
@@ -523,16 +582,55 @@ gated by the new scripts before the restart. Restart to make the hook list and t
 Ask the operator to restart Claude Code **in the target repository** (`cd <TARGET_REPO> && claude`),
 not in the checkout the update ran from. The settings walkthrough's enablement screens and the
 step 7 commit check happen there, and an `on acceptRisk` typed in another repository records a
-receipt for that repository instead. Before yielding, record the checkpoint (target, versions
-before/after, completed checks, the settings baseline, next step) in the existing handoff file:
-the restarted session does not have this conversation.
+receipt for that repository instead.
+
+Before yielding, write the status file. Keep any settings answers an earlier file recorded:
+
+```json
+{
+  "completed": true,
+  "completed_at": "<UTC time, ISO 8601>",
+  "target": "<TARGET_REPO>",
+  "source": "Directory <PLUGIN_DIR>  |  GitHub <owner/repo>",
+  "from_version": "<version before>", "from_commit": "<gitCommitSha before>",
+  "version": "<version after>", "gitCommitSha": "<gitCommitSha after>",
+  "checks": "<step 2-4 results, one line each>",
+  "baseline": "<settings baseline recorded before the pull>",
+  "settings_answers": {},
+  "next": "restart, then settings walkthrough step 1 of 5"
+}
+```
+
+Then ask, choosing the form by this session's working directory. Nothing follows the request.
+
+- Already in the target: *"The update is installed. Please exit and restart Claude Code in this
+  same directory (`<TARGET_REPO>`), then tell me to continue the update."*
+- Elsewhere: *"The update is installed. Please restart Claude Code in `<TARGET_REPO>`
+  (`cd <TARGET_REPO> && claude`), then tell me to continue the update."*
 
 **Check (after restart):** the `installed_plugins.json` line from step 1 shows the new version (for a
 Directory source, `claude plugin list` alone does not prove this; see step 1). The accepted-risk receipt and
 per-repo enablement are unchanged, because state was never touched.
 
+**Check the hooks' Python (after restart, in the target session).** The hooks run the first
+`python3` on the PATH Claude Code was started with, so an activated venv or conda environment
+decides it. This session's shell has the same PATH, so from it:
+
+```bash
+command -v python3
+python3 -c "import sys;print(sys.version.split()[0]);sys.exit(sys.version_info < (3, 9))" && echo "SUPPORTED"
+```
+
+**Check:** it prints `SUPPORTED`. Report the path and version, and name the environment if one is
+active (`CONDA_DEFAULT_ENV`, `VIRTUAL_ENV`). If it is older than 3.9, stop and report: the
+operator must start Claude Code with a supported `python3` first on the PATH. Tell the operator
+that this holds for the environment active now: starting Claude Code later under another
+environment, or none, changes the hooks' Python. Verified 2026-10-19 on Ubuntu 20.04: with conda
+`base` active the hooks ran `~/miniconda3/bin/python3` 3.11.5; without it, `/usr/bin/python3` is
+3.8.10.
+
 Then run the [settings walkthrough](#confirm-existing-settings-with-the-user--both-hosts), starting
-at step 1 of 5, before step 6.
+at step 1 of 5, before step 6. Record each answer in the status file's `settings_answers`.
 
 If `stopContinue` and `stopContinueWatchdog` are active for a repository, the watchdog recovery cron
 needs no re-arming by hand. Whether it survives the restart depends on the host. On Claude Code
@@ -564,7 +662,7 @@ solely through this extension, a stale extension behind the fail-closed gate can
 
 The extension source is `<PLUGIN_DIR>/pi-extensions/git-read-only`. For a **Directory** source that
 is your checkout (step 2). A **GitHub** source has no checkout — use the installed plugin directory
-instead, i.e. the `installPath` from step 4's optional check
+instead, i.e. the `installPath` from step 4's release check
 (`~/.claude/plugins/cache/reviewer-agent/…/<version>/pi-extensions/git-read-only`); substitute it
 for `<PLUGIN_DIR>` in the commands below.
 
@@ -739,7 +837,8 @@ claude plugin install reviewer-agent@reviewer-agent
 ```
 
 Run the last two back to back with no commit in progress; the gate is not guaranteed between them.
-Confirm `gitCommitSha` with step 4's optional check, then restart (step 5). Nothing needs undoing
+Confirm the install with step 4's release check, using the commit you are testing in place of
+the release commit, then restart (step 5). Nothing needs undoing
 afterwards: the next release installs normally through `claude plugin update`.
 
 **Commits not pushed, or a build you want to pin:** install an **export** of them at the version
