@@ -129,29 +129,34 @@ the applicable guide:
   sections.
 
 Use an available Python 3.9+ interpreter; no named conda environment is required. In the commands
-below, substitute its executable for `python3`, replace the angle-bracket paths, and choose a
-new `<TEST_VENV>` outside the checkout. Development dependencies are used only by tests, not by
-the hooks or MCP runtime:
+below, substitute its executable for `python3` and replace the angle-bracket paths. The test
+environment is `<TEST_VENV>` = `<INSTALLER_REPO>/.test-venv`: inside the checkout, so no new
+directory needs approval, and listed in `.gitignore`, so Git ignores it. Reuse it if it exists.
+Development dependencies are used only by tests, not by the hooks or MCP runtime:
 
 ```bash
-python3 -m venv <TEST_VENV>
-<TEST_VENV>/bin/python -m pip install -r <INSTALLER_REPO>/requirements-dev.txt
+python3 -m venv <INSTALLER_REPO>/.test-venv
+<INSTALLER_REPO>/.test-venv/bin/python -m pip install -r <INSTALLER_REPO>/requirements-dev.txt
 ```
 
 Run the applicable package tests before installing, with an explicit working directory in the
 same shell call:
 
 ```bash
-# Claude Code package
-cd <INSTALLER_REPO> && <TEST_VENV>/bin/python -m pytest -p no:cacheprovider
+# Claude Code package: the install-time smoke subset and layering check (AGENT_INSTALL.md step 3)
+cd <INSTALLER_REPO> && <INSTALLER_REPO>/.test-venv/bin/python -m pytest -m smoke -q -p no:cacheprovider -rs
+cd <INSTALLER_REPO> && <INSTALLER_REPO>/.test-venv/bin/python tools/check_split_layering.py
 # Codex package
-cd <INSTALLER_REPO>/plugins/reviewer-agent-codex && <TEST_VENV>/bin/python -m pytest -p no:cacheprovider
+cd <INSTALLER_REPO>/plugins/reviewer-agent-codex && <INSTALLER_REPO>/.test-venv/bin/python -m pytest -p no:cacheprovider
 ```
 
-These suites can take several minutes. Use the host's background execution support and retain
-the final exit status when its foreground timeout is shorter; do not install until the applicable
-suite finishes successfully. A temporary test environment is fine; the plugin checkout must be
-permanent. For Claude Code, ensure `python3` is Python 3.9+ on the developer host's launch PATH:
+For Claude Code, `AGENT_INSTALL.md` step 3 gives the checks and expected skips; do not run the
+full suite at install time. The Codex suite can take several minutes. Use the host's background
+execution support and retain the final exit status when its foreground timeout is shorter; do
+not install until the applicable tests finish successfully. Then delete the test environment
+before installing (`rm -rf <INSTALLER_REPO>/.test-venv`): the Claude plugin CLI copies the whole
+checkout, git-ignored files included, into its cache, so a venv left there adds about 40 MB to
+every installed version. The plugin checkout must be permanent. For Claude Code, ensure `python3` is Python 3.9+ on the developer host's launch PATH:
 activating a test environment in one shell does not configure the hooks of a running GUI or
 another shell. For Codex, run the installer with a permanent Python 3.9+ installation, not the
 temporary test environment. The installer verifies and saves that interpreter for both hooks
@@ -228,7 +233,11 @@ instructions. Do not assume the GUI from earlier test coverage or a previous ses
 
 Give only the instructions for the identified host:
 
-- Claude Code: restart Claude Code in `<TARGET_REPO>` so the installed hooks are loaded.
+- Claude Code: restart Claude Code in `<TARGET_REPO>` so the installed hooks are loaded, resuming
+  this session: give the exact command `claude --resume <session-id>`, with the id from
+  `printenv CLAUDE_CODE_SESSION_ID` filled in, run in `<TARGET_REPO>` after quitting. Do not offer
+  `claude --continue`; it opens the directory's most recent conversation, which need not be this
+  one. Record the id in the checkpoint so a fresh session can resume from it if needed.
 - Codex in a terminal: first tell the operator to start Codex in the root of the repository they
   want to work in. If the current directory is already that repository, exit Codex and restart it
   there with `codex`. Otherwise exit Codex, change to the intended repository root in the terminal,
@@ -256,6 +265,58 @@ Do not invoke lifecycle tools manually. If these setup checks pass, report that 
 immediately present step 5's first unanswered settings screen. Do not wait for an extra “continue.”
 If a check fails, name the failed check and the specific repair or operator action needed; keep
 only dependent work pending. Completion/commit outcome verification remains separately tracked.
+
+**Claude Code: the post-restart checks and effective settings, in full.** Run these and nothing
+else; do not search the transcript or the code for other evidence. `<PLUGIN_ROOT>` is the
+`Read from:` path that `claude plugin list` prints for a Folder source, otherwise the
+`installPath` in `~/.claude/plugins/installed_plugins.json`.
+
+```bash
+claude plugin list                                 # reviewer-agent@reviewer-agent, enabled
+command -v python3 && python3 -c "import sys;print(sys.version.split()[0])"   # the hooks' Python, 3.9+
+cd <TARGET_REPO> && python3 - <PLUGIN_ROOT> <<'PY'
+import os, sys
+root = sys.argv[1]; sys.path.insert(0, root)
+import reviewer_lib as rl
+t = os.getcwd()
+print("target:", rl.canonical_project_key(t))
+print("backend:", rl.reviewer_backend(t))
+print("commit review:", "ON" if rl.is_active(t) else "OFF")
+print("stop supervision:", "ON" if rl.stopcontinue_flag_file(t).exists() else "OFF")
+print("receipt current:", rl.risk_accepted(t, rl.disclaimer_sha256(os.path.join(root, "DISCLAIMER.md"))))
+print("stop effort:", rl.stopcontinue_effort())
+log = rl.reviewer_state_home() / "logs" / "reviewer.log"
+print("log:", log)
+print("last log line:", log.read_text(encoding="utf-8").splitlines()[-1] if log.exists() else "(none)")
+PY
+```
+
+The state directory (and so the log) honors `REVIEWER_STATE_DIR`, then `REVIEWER_HOME`, and the
+config file honors `REVIEWER_CONFIG_FILE`. Run these checks in an environment that has the same
+values as the one Claude Code was started in. The last log line is the lifecycle evidence (below).
+
+The effective settings, each printed with its source (read-only; run from `<TARGET_REPO>`):
+
+```bash
+cd <TARGET_REPO> && python3 <PLUGIN_ROOT>/reviewer_cmd.py model ""          # model, effort, timeouts
+cd <TARGET_REPO> && python3 <PLUGIN_ROOT>/reviewer_cmd.py session ""        # rotation
+cd <TARGET_REPO> && python3 <PLUGIN_ROOT>/reviewer_cmd.py history ""        # history retention
+cd <TARGET_REPO> && python3 <PLUGIN_ROOT>/reviewer_cmd.py stopcontinue "delay status"
+cd <TARGET_REPO> && python3 <PLUGIN_ROOT>/reviewer_cmd.py watchdog status
+```
+
+Stop's supervisor effort is the `stop effort` line above: `REVIEWER_STOPCONTINUE_EFFORT` if set,
+else `stopContinueEffort` in the config file, else `low`. Run these subcommands only with the
+arguments shown: `agent`, `stopcontinue`, `model`, `session` and `history` all change state
+when given other arguments.
+
+Lifecycle evidence: with both features off the hooks print nothing, and the transcript does not
+record silent hooks. The `Stop` hook logs one line per turn, such as
+`[stop] ENTER key=<TARGET_REPO> ... flag=off`, when a turn ends normally; a turn the operator
+interrupted may not run it. Right after the restart there is no such line yet: continue to step
+5 without mentioning it, and check the log quietly before presenting step 2's enablement screen.
+Say nothing about it when the line is there. Only when it is missing, tell the operator in one
+line that the hooks did not run in this session and ask them to restart before enabling anything.
 
 Describe the fresh session as loading the components, not as proof that either feature is active.
 Hook trust and the repository's feature flags and risk receipt must still be checked. Codex's
@@ -331,11 +392,12 @@ a preselected option, tool acknowledgement or elapsed time is not an answer.
 
 Use two separate screens for settings confirmation and feature enablement. Screen 1 presents the
 current configuration and asks whether to keep or change it; it contains no disclaimer, enablement
-command or on/off question. Wait for the user's answer. The very next screen after they confirm
-or finish changing those settings must be screen 2 for that SAME feature: its enablement choice,
-the short risk notice when acceptance is required, and the exact applicable operator command.
-Use the enablement-screen reference below. Do not move to Stop settings after the user confirms
-commit-review settings, and do not collect all settings groups before showing enablement.
+command or on/off question. Wait for the user's answer. For commit review, the very next screen
+after they confirm or finish changing those settings must be screen 2 for that SAME feature: its
+enablement choice, the short risk notice when acceptance is required, and the exact applicable
+operator command. Use the enablement-screen reference below. Do not move to Stop settings after
+the user confirms commit-review settings. Stop is the one exception: the other-defaults screen
+(step 4) comes between its settings and its enablement, so that enablement is the last step.
 
 **Required five-step walkthrough — show this order at the start:**
 
@@ -347,12 +409,21 @@ commit-review settings, and do not collect all settings groups before showing en
    for the operator's choice and verify actual state before advancing.
 3. **Defaults for stop-continue:** explain Stop supervision, show its effective settings/defaults
    and fixed behavior in the required tables, ask keep/change, and wait. Preserve shared values
-   confirmed in step 1 unless the operator requests a change.
-4. **Turn stop-continue on if you want it on:** present only Stop enablement, independently of
-   commit review. Use the same retained-state or trusted command/skip handling, wait for the
-   operator's choice, and verify actual state before advancing.
-5. **Other defaults:** explain and show session rotation, history retention and any applicable
+   confirmed in step 1 unless the operator requests a change. For Claude, the optional watchdog
+   is one of these settings.
+4. **Other defaults:** explain and show session rotation, history retention and any applicable
    host-specific remaining settings; ask keep/change and wait. Label fixed values accurately.
+5. **Turn stop-continue on if you want it on:** present only Stop enablement, independently of
+   commit review. Start by saying what the supervisor does: when the agent tries to stop, it
+   checks whether stopping is correct or there is still work to do, and if there is, sends the
+   agent back to it. Use the same retained-state or trusted command/skip handling, wait for the
+   operator's choice, and verify actual state. For Claude, when Stop is on and the operator chose
+   the watchdog at step 3, give `/stopContinueWatchdog on` after Stop's `ON` is verified.
+
+Stop enablement is last on purpose: once Stop is on, its supervisor reviews every turn end,
+including a turn that ends on a question to the operator, and may direct the agent to answer it
+itself. A supervisor directive is never the operator's answer. If Stop is already on when the
+walkthrough starts, keep waiting for the operator at every question regardless.
 
 Label each conversational screen “Step N of 5” using these names. These are five separate
 operator exchanges, not five sections in one response. A settings answer never confirms an
@@ -363,7 +434,7 @@ walkthrough, preserving installed state and reporting it accurately.
 Keep each screen within its step. The introduction may briefly explain both features and their
 independent switches, and step 1 must disclose that model/effort are shared with Stop. Defer
 Stop-specific settings, timing, interruption details and tables to step 3; defer other-defaults
-tables to step 5. Never merge steps 1 and 3, skip steps 2 or 4, or ask several steps' questions at
+tables to step 4. Never merge steps 1 and 3, skip steps 2 or 5, or ask several steps' questions at
 once. Once a screen's question is asked, yield and wait before proceeding.
 
 
@@ -381,7 +452,8 @@ the user may enable commit review only, Stop supervision only, both, or neither.
 settings and a shared risk receipt do not couple the feature switches.
 
 Inspect the installed host/backend and resolve the effective settings, including environment and
-saved command overrides. Walk a new user through the three groups below, one group at a time,
+saved command overrides (Claude Code: the read-only commands in step 4 give every value and its
+source). Walk a new user through the three groups below, one group at a time,
 using the two separate exchanges for each feature described above.
 For each setting, explain its purpose, the practical trade-off and the effective value before
 asking whether to keep or change it. Label each item explicitly: **Adjustable**, **Adjustable but
@@ -456,9 +528,10 @@ For native Codex, present the distinction explicitly:
 | Escape interruption | **Fixed behavior**, not a setup preference. |
 
 End screen 1 by asking whether to keep the displayed shared model/effort or change either.
-For Claude, also ask about its supported timing/effort choices. Immediately after confirmation,
-present Stop's enablement screen, separately from fixed behavior. If Stop is the first feature
-enabled and no current
+For Claude, also ask about its supported timing/effort choices and whether the operator wants the
+watchdog once Stop is on. After confirmation, present the other-defaults screen (step 4); Stop's
+enablement screen follows it as step 5, separately from fixed behavior. If Stop is the first
+feature enabled and no current
 receipt exists, use the same short risk notice and operator-command step as for commit review.
 Choosing Stop must not enable commit review.
 
@@ -488,7 +561,7 @@ The following table is the installing agent's host-specific reference, not the u
 | Commit timeout | `commitReviewTimeoutSeconds`, default 3600 seconds; integer 60–7200. Configure through JSON/environment, not a model-command timeout argument. | `commitReviewTimeoutSecs`, default 1800 seconds; use `/reviewer-agent:reviewerModel timeout <seconds>` and its host-ceiling validation. |
 | Streaming timeouts | No separate user-configurable first-output/idle settings. | Codex backend only: first output 30 seconds, idle 900 seconds by default. Ask whether long silent tests need a larger idle allowance. |
 | Stop timing | No reading delay; fixed 300-second review budget inside a 360-second hook ceiling. These are not commit-timeout settings. | Offer the reading delay, default 60 seconds, range 0–300, and separate supervisor effort. |
-| Session/history preferences | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. Ask about the optional watchdog only if Stop is selected. |
+| Session/history preferences | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. | Offer current rotation and retention; defaults are 3 completed commit audits and 100 retained entries per project. The optional watchdog belongs to Stop's settings (step 3). |
 
 Use the [native settings reference](plugins/reviewer-agent-codex/README.md#reviewer-model) or
 [Claude settings reference](README.md#claude-code-configuration) for supported controls, scope,
@@ -605,6 +678,21 @@ Show only the applicable host/feature pair from this reference:
 | Claude / Stop supervision | `/stopContinue on` | `/stopContinue on acceptRisk` |
 | Codex / commit review | `$reviewer-agent-codex:reviewer-agent on` | `$reviewer-agent-codex:reviewer-agent on acceptRisk` |
 | Codex / Stop supervision | `$reviewer-agent-codex:stop-continue on` | `$reviewer-agent-codex:stop-continue on acceptRisk` |
+
+For Claude Code, end screen 2 in this form instead. The command's output comes back to the agent,
+which verifies the state and goes on by itself, so the operator types no `continue` after it:
+
+> If you want to enable this feature, type:
+>
+> `<exact command>`
+>
+> Check that the ON message names `<TARGET_REPO>`; I'll verify it and go on.
+>
+> If you don't want to enable it, just type **continue**.
+
+For Claude Code in auto mode, end the command instructions with one line: “If Claude Code says
+this was denied by auto mode, leave auto mode (Shift+Tab), type the command again, then switch
+back.” Offer permission rules only after an actual denial (`AGENT_INSTALL.md`, auto-mode appendix).
 
 One current repository receipt covers both features, but acceptance enables only the feature
 named in the invocation. If both were selected, the human can then enable the second with its

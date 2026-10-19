@@ -22,3 +22,6 @@ pi-extensions/*/node_modules/
 
 # Local-only privacy deny list for tools/scan_release.py (see CONTRIBUTING.md).
 tools/private_terms.txt
+
+# Install-time test environment (INSTALL_WITH_AGENT.md step 2, AGENT_INSTALL.md step 3)
+.test-venv/

@@ -343,7 +343,10 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
 - **State.** `rm -rf "$STATE"` (the directory resolved in Step 0 — `REVIEWER_STATE_DIR`, else the
   legacy `REVIEWER_HOME`, else `~/.claude/reviewer-agent`) — every project's flags, reviewer/stop
   session ids, retained verdicts, and logs. Skip it to keep review history and per-repo enablement
-  for a later reinstall.
+  for a later reinstall. **Do this after the Step 4 restart, as for the plugin cache below:** the
+  session that ran the uninstall still runs its snapshotted hooks, and its `Stop` hook recreates
+  `"$STATE"/logs/reviewer.log` at the end of every turn. After the restart, check that no new
+  entry was written since the restart before removing the directory.
 - **Per-repository briefs.** Each protected repo has a hand-written `reviewerAgent.md`. Leave them
   unless the operator asks — they are not the tool's to delete.
 - **The Pi extension**, only if `pi` was used: `rm -rf ~/.pi/agent/extensions/git-read-only`.
@@ -389,7 +392,16 @@ Uninstalling the code does not remove these. Do each only if the operator wants 
 
 ## Step 4 — restart and verify (operator-only)
 
-Ask the operator to **restart Claude Code**, then confirm:
+Work remains after the restart (these checks and the plugin-cache move in Step 3), so first record
+where you are in `<BACKUP>/uninstall-status.txt`: the backup path, the install shape, the steps
+done, what is still pending, and this session's id (`printenv CLAUDE_CODE_SESSION_ID`). Then give
+the operator the exact command to come back to this session: quit Claude Code and, in the same
+directory, run `claude --resume <session-id>` with the id filled in. Do not offer `claude
+--continue`: it opens the most recent conversation in that directory, which need not be this
+one. If the session cannot be resumed, a fresh one continues from that file; the operator gives
+it the `<BACKUP>` path.
+
+Ask the operator to **restart Claude Code** that way, then confirm:
 
 - `/hooks` lists **no** reviewerAgent hooks (`session_start_hook.py`, `stop_hook.py`,
   `askq_reroute_hook.py`, or a `commit_hook.py` chained in `bash_gate.py`).

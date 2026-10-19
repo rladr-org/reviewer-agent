@@ -23,6 +23,7 @@ full list is here, before the first command rather than buried in a step:
 | path | what happens | reversible? |
 |---|---|---|
 | Claude Code's plugin directory | the plugin is installed | yes, `/plugin uninstall reviewer-agent` (full teardown: [`AGENT_UNINSTALL.md`](AGENT_UNINSTALL.md)) |
+| `~/.claude/settings.json` | the plugin CLI adds `extraKnownMarketplaces.reviewer-agent` and `enabledPlugins["reviewer-agent@reviewer-agent"]` | yes, the uninstall and `marketplace remove` clear both |
 | `~/.claude/reviewer-agent/` | created for flags, session ids, logs, verdicts | yes, delete the directory |
 | system temp base `reviewer-agent-scratch/` | **codex backend only:** per-reviewer-session scratch for the streamed codex audit (`REVIEWER_SCRATCH_ROOT` relocates it) | yes, auto-reclaimed at rotation / by a lease sweep; safe to delete |
 | `~/.pi/agent/extensions/git-read-only/` | **only if** the backend is `pi` | yes, delete the directory |
@@ -340,19 +341,22 @@ fix is a system-wide Node install.
 
 ## Step 3 — verify the checkout before trusting it
 
-Select an available Python 3.9+ interpreter and create a new test environment outside the
-checkout, as described in `INSTALL_WITH_AGENT.md`. No named conda environment is required.
+Select an available Python 3.9+ interpreter and create the test environment at
+`<PLUGIN_DIR>/.test-venv`, as described in `INSTALL_WITH_AGENT.md`: inside the checkout, so no new
+directory needs approval, and listed in `.gitignore`. No named conda environment is required.
 Install test dependencies before invoking pytest; the runtime remains standard-library-only.
 
 ```bash
-python3 -m venv <TEST_VENV>
-<TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
-cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest -m smoke -q -p no:cacheprovider -rs
-cd <PLUGIN_DIR> && <TEST_VENV>/bin/python tools/check_split_layering.py
+python3 -m venv <PLUGIN_DIR>/.test-venv
+<PLUGIN_DIR>/.test-venv/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
+cd <PLUGIN_DIR> && <PLUGIN_DIR>/.test-venv/bin/python -m pytest -m smoke -q -p no:cacheprovider -rs
+cd <PLUGIN_DIR> && <PLUGIN_DIR>/.test-venv/bin/python tools/check_split_layering.py
 ```
 
-Reuse an environment prepared by the shared guide rather than creating it twice. Keep the
-plugin checkout in a permanent directory; only the test environment may be temporary.
+Reuse the environment if it exists rather than creating it twice. Once the checks below pass,
+delete it before step 4 (`rm -rf <PLUGIN_DIR>/.test-venv`): `claude plugin install` copies the
+whole checkout, git-ignored files included, into the plugin cache. Keep the plugin checkout in
+a permanent directory.
 
 `-m smoke` runs the install-time subset: imports, distribution shape, host versions, the hook
 launcher and a real-git gate round trip, in under a minute. The full suite (about 1,500 tests,
@@ -393,7 +397,7 @@ checkout; use the published `rladr-org/reviewer-agent` marketplace when installi
 the commands `/reviewerAgent`, `/reviewerDirective`, `/reviewerModel`, `/reviewerSession` and
 `/stopContinue` are offered.
 
-Hooks are snapshotted per session at start. An installing agent may finish steps 5 and 5b, but it must not
+Hooks are snapshotted per session at start. An installing agent may finish step 5, but it must not
 accept risk or enable either feature for the operator. The human must restart Claude Code before
 step 6. A session that was already running keeps the old hook snapshot, so the gate can appear
 installed and do nothing.
@@ -420,7 +424,7 @@ test -e <TARGET_REPO>/reviewerAgent.md && echo "EXISTS - leave it alone, do not 
 ```
 
 If it already exists, **report that** and leave the file untouched — it is very likely better than
-the template — then continue to step 5b.
+the template — then continue with the restart before step 6.
 
 If you created it, **edit it for that repository**: what the reviewer must enforce, the conventions
 it should know, the defect classes this codebase actually produces, and its test command. Replace
@@ -440,58 +444,6 @@ This reduces prompt tokens on codex retries and can lower the likelihood of time
 failures on large data commits — the initial audit still runs on the full staged patch,
 and codex may fetch a matched path on demand, so it is a mitigation rather than a guarantee. See the "Skimmed paths" section of the README for the fenced-block format. The file
 is optional; a missing file matches today's behavior (no exclusions).
-
-## Step 5b — offer the settings rules (agent, on approval)
-
-These two optional blocks go in the operator's `~/.claude/settings.json`. Show them to the
-operator, explain what each allows, and write them only if the operator approves. They are
-not needed when auto mode is off. If your own write to `settings.json` is refused (auto mode can
-block an agent editing its host's settings), give the operator the JSON to add themselves.
-
-**One permission rule for the manual commands.** The six manual commands (`/reviewerAgent`,
-`/reviewerHistory`, `/reviewerModel`, `/reviewerSession`, `/stopContinue`, `/stopContinueWatchdog`)
-run a `!` shell pre-exec through a single dispatcher, `reviewer_cmd.py`. In Claude Code `auto` mode a
-pre-exec with no matching allow-rule is blocked before it runs, so add ONE scoped rule to
-`~/.claude/settings.json`. Permission-rule paths are literal (no `${CLAUDE_PLUGIN_ROOT}` expansion),
-and the installed path is version-stamped —
-`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/reviewer_cmd.py` — so a rule that pins the
-version goes STALE on the next `claude plugin update`. Wildcard the version segment with `*` so the
-rule survives updates: run `claude plugin list` for your install path, then keep every segment
-literal EXCEPT the version, which becomes `*`. End the rule with a space and `*` (` *)`), not the
-legacy `:*` suffix: Claude Code recognizes `:*` only at the end of a pattern and matches everything
-before it literally, so `.../*/reviewer_cmd.py":*` compares the `*` as a literal character, never
-matches, and draws a startup warning that it "mixes * with the trailing :* prefix syntax".
-
-A Bash-rule `*` matches ANY text, including `/` and `..` — it does not stop at one path segment — so
-the allow rule alone would also approve `.../reviewer-agent/../../../tmp/x/reviewer_cmd.py`, an
-arbitrary script that merely shares the name. Pair it with a deny rule (deny rules take precedence)
-that refuses any `..` after the plugin-cache prefix:
-
-```json
-{ "permissions": {
-  "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*/reviewer_cmd.py\" *)"],
-  "deny": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*..*)"]
-} }
-```
-
-The deny rule also refuses a normal invocation whose arguments contain `..`; none of the reviewer
-commands take such an argument.
-
-`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
-
-**Auto mode may block `on` even with the allow-rule above.** The permission rule lets the
-non-state-changing invocations run; on some Claude Code versions a state-CHANGING invocation (`on`)
-is independently flagged by auto mode's classifier and refused even with the rule. Either turn auto mode off for the single
-`on acceptRisk` invocation, or add an `autoMode.allow` classifier exception — read from
-`~/.claude/settings.json` (and managed settings) only, keep `"$defaults"`, and it survives updates
-because it names the dispatcher rather than a version:
-
-```json
-{ "autoMode": { "allow": [
-  "$defaults",
-  "Running the reviewer-agent dispatcher reviewer_cmd.py (under ~/.claude/plugins/cache/reviewer-agent/) with any subcommand and arguments, including its on/off/acceptRisk toggles: it only reads or flips this tool's own per-project flag files under ~/.claude/reviewer-agent/state and prints status; it never edits code, runs git, or accesses the network."
-] } }
-```
 
 ## Step 6 — settings confirmation, then human acceptance and enablement
 
@@ -517,7 +469,7 @@ that starting Claude Code later under another environment, or none, changes the 
 
 Complete the
 shared [settings walkthrough](INSTALL_WITH_AGENT.md#2-resolve-choices-once) in order: commit-review
-settings and enablement, Stop settings and enablement, then rotation/history. The acceptance
+settings and enablement, Stop settings, rotation/history, then Stop enablement last. The acceptance
 instructions below are a reference for each feature's enablement screen, not a reason to skip its
 settings confirmation. If settings were asked prematurely, follow the shared recovery rule and
 ask again now using the loaded effective values.
@@ -545,10 +497,12 @@ paths* above — the operator first invokes:
 **If Claude Code's auto mode is on, the toggle may be blocked on some Claude Code versions**
 with a *"Permission for this action was denied by the Claude Code auto mode classifier"* error
 before the toggle script ever runs — the classifier reads the `on` argument as state-changing.
-**Turn auto mode off** for the enablement invocation (in `/config`, or set `permissions.defaultMode` to `default` in
-`~/.claude/settings.json`), invoke `/reviewerAgent on` (then `on acceptRisk`), and re-enable auto
-mode afterward if you want it back, or use the `autoMode.allow` exception from step 5b. The same
-applies to `/stopContinue on [acceptRisk]` and `/stopContinueWatchdog on`.
+So when the session is in auto mode, the enablement screen ends its command instructions with one
+line: “If Claude Code says this was denied by auto mode, leave auto mode (Shift+Tab), type the
+command again, then switch back.” Do not offer permission rules before a denial has happened; if
+one happens and the operator wants these commands to work in auto mode, use the
+[auto-mode appendix](#appendix--a-reviewer-command-is-denied-in-auto-mode). The same applies to
+`/stopContinue on [acceptRisk]` and `/stopContinueWatchdog on`.
 
 Without auto mode blocking it, the plain `on` invocation must refuse without enabling and display:
 
@@ -654,6 +608,81 @@ typo falls through to `codex` silently.
 Set `REVIEWER_PI_MODEL` if the operator wants a specific model; unset means pi's own default. It
 must be a single plain token — a value with spaces is skipped and you get the default with no
 warning.
+
+## Appendix — a reviewer command is denied in auto mode
+
+Use this only after a reviewer command was actually refused with *"Permission for this action was
+denied by the Claude Code auto mode classifier"*. It is not an install step: it enables no feature
+and accepts no risk, it only lets the operator's own command reach the plugin. The simplest fix is
+for the operator to leave auto mode for that one command (Shift+Tab cycles the permission mode, or
+`/config`), type it again, then switch back.
+
+If the operator wants the reviewer commands to work in auto mode, offer the entries below for
+`~/.claude/settings.json`, explain what each allows, and write them only on approval, merged into
+existing `permissions.allow` and `autoMode.allow` lists rather than replacing them; read the file
+back and report what was added. If your own write to `settings.json` is refused (auto mode can
+block an agent editing its host's settings), give the operator the JSON to add themselves.
+
+**One permission rule for the manual commands.** The six manual commands (`/reviewerAgent`,
+`/reviewerHistory`, `/reviewerModel`, `/reviewerSession`, `/stopContinue`, `/stopContinueWatchdog`)
+run a `!` shell pre-exec through a single dispatcher, `reviewer_cmd.py`. In Claude Code `auto` mode a
+pre-exec with no matching allow-rule is blocked before it runs, so add ONE scoped rule to
+`~/.claude/settings.json`. Permission-rule paths are literal (no `${CLAUDE_PLUGIN_ROOT}` expansion),
+and the installed path is version-stamped —
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/reviewer_cmd.py` — so a rule that pins the
+version goes STALE on the next `claude plugin update`. Wildcard the version segment with `*` so the
+rule survives updates: run `claude plugin list` for your install path, then keep every segment
+literal EXCEPT the version, which becomes `*`. End the rule with a space and `*` (` *)`), not the
+legacy `:*` suffix: Claude Code recognizes `:*` only at the end of a pattern and matches everything
+before it literally, so `.../*/reviewer_cmd.py":*` compares the `*` as a literal character, never
+matches, and draws a startup warning that it "mixes * with the trailing :* prefix syntax".
+
+A Bash-rule `*` matches ANY text, including `/` and `..` — it does not stop at one path segment — so
+the allow rule alone would also approve `.../reviewer-agent/../../../tmp/x/reviewer_cmd.py`, an
+arbitrary script that merely shares the name. Pair it with a deny rule (deny rules take precedence)
+that refuses any `..` after the plugin-cache prefix:
+
+```json
+{ "permissions": {
+  "allow": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*/reviewer_cmd.py\" *)"],
+  "deny": ["Bash(python3 \"/ABSOLUTE/PATH/reviewer-agent/*..*)"]
+} }
+```
+
+The deny rule also refuses a normal invocation whose arguments contain `..`; none of the reviewer
+commands take such an argument.
+
+**Installed from a local checkout (Folder source)?** Then the commands run the checkout's own
+dispatcher, not a cache copy: `claude plugin list` shows `Read from: <PLUGIN_DIR>`, and that is the
+plugin root. The path has no version segment, so the rule is literal and needs no deny rule:
+
+```json
+{ "permissions": { "allow": ["Bash(python3 \"/ABSOLUTE/PATH/TO/PLUGIN_DIR/reviewer_cmd.py\" *)"] } }
+```
+
+Name that path in the `autoMode.allow` text below as well. The first `/reviewerAgent` invocation
+after the restart shows the exact command; if it asks for permission, compare its path with the
+rule.
+
+`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
+
+**Auto mode may block `on` even with the allow-rule above.** The permission rule lets the
+non-state-changing invocations run; on some Claude Code versions a state-CHANGING invocation (`on`)
+is independently flagged by auto mode's classifier and refused even with the rule. Either turn auto mode off for the single
+`on acceptRisk` invocation, or add an `autoMode.allow` classifier exception — read from
+`~/.claude/settings.json` (and managed settings) only, keep `"$defaults"`, and it survives updates
+because it names the dispatcher rather than a version:
+
+```json
+{ "autoMode": { "allow": [
+  "$defaults",
+  "Running the reviewer-agent dispatcher reviewer_cmd.py (under ~/.claude/plugins/cache/reviewer-agent/, or the checkout for a Folder source) with any subcommand and arguments, including its on/off/acceptRisk toggles: it reads and changes only this tool's own state and config (feature flags and the risk receipt, reviewer model/effort/timeouts, Stop settings, session rotation, and clearing review history) and prints status; it never edits code, runs git, or accesses the network."
+] } }
+```
+
+This exception covers every dispatcher subcommand, not only `on`/`off`: with it, auto mode also
+lets those commands change the reviewer model and timeouts, rotate the reviewer session and clear
+review history without asking. Tell the operator that before they approve it.
 
 ---
 

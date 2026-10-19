@@ -128,12 +128,21 @@ shared receipt do not require enabling both features.
    for the operator's choice and verify actual state before advancing.
 3. **Defaults for stop-continue:** explain Stop supervision, show its effective settings/defaults
    and fixed behavior in the required tables, ask keep/change, and wait. Preserve shared values
-   confirmed in step 1 unless the operator requests a change.
-4. **Turn stop-continue on if you want it on:** present only Stop enablement, independently of
-   commit review. Use the same retained-state or trusted command/skip handling, wait for the
-   operator's choice, and verify actual state before advancing.
-5. **Other defaults:** explain and show session rotation, history retention and any applicable
+   confirmed in step 1 unless the operator requests a change. For Claude, the optional watchdog
+   is one of these settings.
+4. **Other defaults:** explain and show session rotation, history retention and any applicable
    host-specific remaining settings; ask keep/change and wait. Label fixed values accurately.
+5. **Turn stop-continue on if you want it on:** present only Stop enablement, independently of
+   commit review. Start by saying what the supervisor does: when the agent tries to stop, it
+   checks whether stopping is correct or there is still work to do, and if there is, sends the
+   agent back to it. Use the same retained-state or trusted command/skip handling, wait for the
+   operator's choice, and verify actual state. For Claude, when Stop is on and the operator chose
+   the watchdog at step 3, give `/stopContinueWatchdog on` after Stop's `ON` is verified.
+
+Stop enablement is last on purpose: once Stop is on, its supervisor reviews every turn end,
+including a turn that ends on a question to the operator, and may direct the agent to answer it
+itself. A supervisor directive is never the operator's answer. If Stop is already on when the
+walkthrough starts, keep waiting for the operator at every question regardless.
 
 Label each conversational screen “Step N of 5” using these names. These are five separate
 operator exchanges, not five sections in one response. A settings answer never confirms an
@@ -144,7 +153,7 @@ walkthrough, preserving installed state and reporting it accurately.
 Keep each screen within its step. The introduction may briefly explain both features and their
 independent switches, and step 1 must disclose that model/effort are shared with Stop. Defer
 Stop-specific settings, timing, interruption details and tables to step 3; defer other-defaults
-tables to step 5. Never merge steps 1 and 3, skip steps 2 or 4, or ask several steps' questions at
+tables to step 4. Never merge steps 1 and 3, skip steps 2 or 5, or ask several steps' questions at
 once. Once a screen's question is asked, yield and wait before proceeding.
 
 **Use an interactive conversational walkthrough, one screen at a time.** Explain the feature
@@ -241,21 +250,23 @@ if enablement is needed; do not request acceptance again. Preserve an already en
 when the user chooses to keep it on. Show only the command for the host and feature being discussed,
 and explain that it enables only that feature.
 
-**Same ending on both hosts, for both features.** Every screen 2 (commit review at step 2,
-Stop supervision at step 4) ends with the exact command to type, then `continue`, or `continue`
-alone to leave the feature off. Claude Code uses the same form as Codex:
+**The ending of every screen 2** (commit review at step 2, Stop supervision at step 5) is the
+exact command to type, or `continue` alone to leave the feature off. On Claude Code the command's
+output comes back to the agent, which verifies and goes on by itself, so no `continue` follows the
+command:
 
 > If you want to enable it, type:
 >
 > `/reviewerAgent on acceptRisk`   (Stop: `/stopContinue on acceptRisk`)
 >
-> After the ON message, check that it names `<TARGET_REPO>`, then type **continue** as a
-> separate message.
+> Check that the ON message names `<TARGET_REPO>`; I'll verify it and go on.
 >
 > If you don't want to enable it, just type **continue**.
 
-Use `on acceptRisk` when the receipt is missing or stale, plain `on` when it is current. Nothing
-follows those lines.
+Use `on acceptRisk` when the receipt is missing or stale, plain `on` when it is current. In auto
+mode, add the one-line auto-mode fallback from `INSTALL_WITH_AGENT.md` step 6. Nothing else
+follows those lines. Codex differs: its control hook ends the turn, so the operator types
+`continue` after the `ON` message (below).
 
 **A revised disclaimer requires accepting again, even for an enabled feature.** When the update
 changes `DISCLAIMER.md`, the existing receipt no longer matches, so treat each enabled feature as
@@ -563,12 +574,12 @@ Unpack the release into an empty directory and diff it against what the host rea
 ```bash
 mkdir <empty-dir>
 git -C <PLUGIN_DIR or any clone> archive <release commit> | tar -x -C <empty-dir>
-diff -rq -x .git -x __pycache__ -x .pytest_cache -x .in_use <empty-dir> <PLUGIN_DIR or installPath>
+diff -rq -x .git -x __pycache__ -x .pytest_cache -x .in_use -x .test-venv <empty-dir> <PLUGIN_DIR or installPath>
 ```
 
 **Check:** the version is the new one, `gitCommitSha` equals the release commit, and the diff
-prints nothing. For a Directory source, an `Only in <PLUGIN_DIR>` line for a git-ignored file
-(such as a test venv) is not a code difference; any other line is.
+prints nothing. For a Directory source, an `Only in <PLUGIN_DIR>` line for another git-ignored
+file is not a code difference; any other line is.
 
 ## Step 5 — restart Claude Code
 
