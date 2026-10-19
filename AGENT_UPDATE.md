@@ -606,8 +606,9 @@ shows the new version.
 
 The Codex plugin is a separate package with its own procedure, summarised here; the authoritative
 copy is [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md#update-disable-and-uninstall).
-First complete [existing-settings confirmation](#confirm-existing-settings-with-the-user--both-hosts);
-this requirement applies even when entering directly at this Codex section.
+First record the [settings baseline](#confirm-existing-settings-with-the-user--both-hosts), and run
+that walkthrough after the trust and restart checkpoint below; this applies even when entering
+directly at this Codex section.
 
 Codex resolves cached plugins by version string. Published candidates already contain their
 version and `+codex.<timestamp>` build metadata; keep those committed values when updating.
