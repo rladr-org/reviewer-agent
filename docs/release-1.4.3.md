@@ -52,9 +52,10 @@ required stop token, producing an unwanted continuation. Captured incidents rema
 investigation. Escape returns control; feature toggles let you disable supervision separately
 from commit review.
 
-macOS has daily use and automated coverage. Ubuntu installations produced findings, and
-clean-host acceptance of the current Linux fixes is still pending. WSL2 is unverified. No platform
-or model configuration is guaranteed to work.
+macOS has daily use and automated coverage. The Ubuntu Codex candidate passed automated
+suites and actual CLI commit-review, Stop-supervision and uninstall/reinstall checks.
+Claude Code host acceptance of this candidate is still pending, as is clean-profile coverage.
+WSL2 is unverified. No platform or model configuration is guaranteed to work.
 
 Reviewer calls send project context to the selected provider and may consume quota. Read
 [SECURITY](https://github.com/rladr-org/reviewer-agent/blob/main/SECURITY.md),
@@ -62,3 +63,4 @@ Reviewer calls send project context to the selected provider and may consume quo
 [DISCLAIMER](https://github.com/rladr-org/reviewer-agent/blob/main/DISCLAIMER.md) before enabling.
 
 The release remains a draft until host acceptance, version metadata and artifact checks are complete.
+Claude Code testing must finish before publication.

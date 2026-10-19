@@ -1,8 +1,8 @@
 # Disclaimer — read before installing
 
 **This software runs an autonomous AI agent inside your development environment, with access to
-your source code and, on one backend, the ability to execute commands in your repository. Using
-it is entirely at your own risk.**
+your source code. It can execute commands in your repository or direct your development agent
+to do so. Using it is entirely at your own risk.**
 
 **"The Software" in this notice means the project-authored software and documentation distributed
 from this repository**, including its scripts, hooks, plugins, extensions, prompts, templates,

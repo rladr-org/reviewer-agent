@@ -6,8 +6,9 @@
 A procedure for an **agent** that has been pointed at this repository and told to install it. Every
 step has a command and a check that proves it worked. Do not proceed past a failed check.
 
-This guide installs the **Claude Code** plugin at the repository root. For the Codex-native plugin,
-follow [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md#install);
+This guide installs the **Claude Code** plugin at the repository root. For agent-assisted native
+Codex installation or reinstallation, start at [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md).
+It includes the settings and operator checkpoints and links to the native package's install guide;
 its installer also performs Codex-specific direct-tool configuration.
 
 If you are a human, [`README.md`](README.md) is shorter.
@@ -91,8 +92,11 @@ python3 -c "import json,os;p=os.path.expanduser('~/.claude/settings.json');d=jso
 If it prints commands under `~/.claude/reviewerAgent/` or `~/.claude/hooks/bash_gate.py`, stop and
 report that the standalone hooks must be migrated before plugin installation. Do not simply delete
 `bash_gate.py`: some older installs use it to chain a separate preflight hook that may still be
-wanted. The README's upgrade section describes the required inspection. Running both copies causes
-duplicate audits and older `SessionStart` hooks launch Codex even when Pi is selected.
+wanted. Follow the uninstall guide's [backup](AGENT_UNINSTALL.md#step-0--back-up-first) and
+[legacy-hook removal](AGENT_UNINSTALL.md#step-2s--tear-down-the-legacy-standalone-the-delicate-one)
+steps, preserving retained state and unrelated hooks; optional data purges are not part of this
+migration. Running both copies causes duplicate audits and older `SessionStart` hooks launch
+Codex even when Pi is selected.
 
 ---
 
@@ -137,6 +141,12 @@ If that fails, ask the operator to set `user.name` and `user.email`; otherwise t
 fails for a reason that has nothing to do with the gate.
 
 ## Step 2 — detect the backends, then ASK which one to use
+
+Resolve the backend prerequisite here. Defer feature settings confirmation to step 6, after
+installation and host restart. Then follow the shared
+[settings walkthrough](INSTALL_WITH_AGENT.md#2-resolve-choices-once), with a settings screen and
+an immediate enablement screen for each feature before moving to the next feature. Do not use a
+premature pre-install settings answer to skip that checkpoint.
 
 There are three, `codex`, `pi` and `claude`. **None is a requirement and you do not get to pick
 for them.** Detect what is present, then put the choice to the operator — do not infer it from
@@ -480,12 +490,34 @@ because it names the dispatcher rather than a version:
 ] } }
 ```
 
-## Step 6 — human acceptance and enablement, per repository
+## Step 6 — settings confirmation, then human acceptance and enablement
 
-This step is operator-only. The installing agent must stop here, point the operator to
-[`DISCLAIMER.md`](DISCLAIMER.md), and wait for the operator to restart Claude Code in
-`<TARGET_REPO>`. The agent must not run either source toggle or add `acceptRisk` on the operator's
-behalf.
+Follow the interactive conversational format in the
+[shared settings walkthrough](INSTALL_WITH_AGENT.md#2-resolve-choices-once): explain the system
+and settings, using the required settings-table columns, before asking one keep/change question
+and yielding for the answer. Honor the
+operator's requested format; do not use question cards when they have rejected them. Keep settings
+confirmation separate from enablement and the operator's exact acceptance command.
+
+First verify installation and the restart in `<TARGET_REPO>` required by step 4. Complete the
+shared [settings walkthrough](INSTALL_WITH_AGENT.md#2-resolve-choices-once) in order: commit-review
+settings and enablement, Stop settings and enablement, then rotation/history. The acceptance
+instructions below are a reference for each feature's enablement screen, not a reason to skip its
+settings confirmation. If settings were asked prematurely, follow the shared recovery rule and
+ask again now using the loaded effective values.
+
+Tell the operator explicitly that installation and host hook permissions do not accept the risk
+or enable these features. Report the target and current feature/receipt state, then give the exact
+commands below; do not leave the operator to discover the acceptance requirement. A conversational
+“yes” to enablement only confirms the preference. Display the short risk notice, disclaimer
+link and applicable command, then wait for the operator to type the command at the prompt.
+Verify its receipt/feature state as described in the
+[shared checkpoint](INSTALL_WITH_AGENT.md#5-human-only-checkpoint-and-final-report).
+
+Risk acceptance is operator-only. Point the operator to [`DISCLAIMER.md`](DISCLAIMER.md) on the
+applicable enablement screen. If the restart in `<TARGET_REPO>` has not happened, finish that
+prerequisite before presenting settings or enablement. The agent must not run either source toggle
+or add `acceptRisk` on the operator's behalf.
 
 **From the restarted Claude Code session whose working directory is `<TARGET_REPO>`** — see *Two
 paths* above — the operator first invokes:

@@ -31,6 +31,36 @@ remaining operator actions into short checkpoints. Do not infer that an operator
   behavior and sanitized evidence. A fix creates a new candidate and requires affected checks
   to be rerun. Do not push, tag, publish, change repository visibility or create GitHub issues.
 
+## Update, restart and fresh-install order
+
+On an existing installation, first follow [AGENT_UPDATE.md](../AGENT_UPDATE.md) and the host's
+update guide. Record and correct errors or missing steps in a separate documentation checkout;
+keep the runtime artifact and its candidate identity frozen. Confirm existing effective settings
+with the operator using the update guide; after reload, compare the settings with their answer.
+For fresh installation, verify the agent asks about model, effort, timeouts and applicable optional
+settings in understandable groups with purpose/trade-offs, and explains hook trust versus risk
+acceptance before giving enablement commands. Verify the agent waits for each group's answer
+unless the operator chooses a combined confirmation; unanswered choices stay pending.
+Complete update verification, then
+ask the operator to trust/restart the host and perform the automated host and manual checks.
+Only after those checks, follow the applicable [uninstall procedure](../AGENT_UNINSTALL.md)
+(including its fresh-host removal checkpoint), then exercise
+[INSTALL_WITH_AGENT.md](../INSTALL_WITH_AGENT.md) from the start. Execute the documented commands
+directly and record each command's exit status separately from verification results. Do not create
+a temporary orchestration script or automatically reinstall in a cleanup/finally block. If the
+procedure has a gap, correct the documentation in the separate checkout before continuing.
+Retain before-uninstall, after-uninstall and after-install evidence; a boolean-only summary cannot
+explain a discrepancy after reinstall overwrites the intermediate state. Expected removal of the
+plugin's own configuration and an otherwise empty parent table is not loss of unrelated settings;
+compare semantic values and preserve the underlying evidence. Stop on unexplained differences.
+Record findings from each phase when it actually runs; an update pass does not establish that the
+initial-install guide works, and an ad hoc combined cycle does not validate the written procedure.
+
+An uninstall that preserves reviewer state is not a clean-profile installation. Use a new
+disposable target without a receipt to exercise first-time brief creation and operator
+acceptance, while keeping the existing targets' state and unrelated host settings. Do not purge
+real reviewer state merely to simulate a clean machine. Report clean-profile coverage separately.
+
 ## 1. Record the environment and preserve state
 
 Record native Linux versus WSL2, distribution, kernel, CPU count, Git, Python, host and selected
@@ -102,7 +132,9 @@ not an invented pass. Both full suites must finish successfully. Use background 
 necessary and collect the final result; an active session is not a successful test.
 
 Install the host package from this permanent export to test the artifact. The install guide's
-`<INSTALLER_REPO>` may refer to that export. Do not delete it while an installation points there.
+`<INSTALLER_REPO>` may refer to that export. For an existing Codex source link, follow
+[source-link migration](../plugins/reviewer-agent-codex/README.md#changing-the-existing-source-directory)
+before installation; the installer will not overwrite a link to the previous checkout. Do not delete it while an installation points there.
 The root suite does not collect the nested Codex suite. Existing regression tests cover launcher
 failure, large stages, Python discovery, Git compatibility and filesystem handling; inspect any
 failure or unexpected skip instead of creating more tests merely to repeat their assertions.
@@ -119,7 +151,7 @@ For authorized live backend checks, list scenarios with `python3 tools/release_m
 Run only the selected scenarios, saving a report, for example:
 
 ```bash
-python3 tools/release_matrix.py --scenario claude-codex --report <MATRIX_REPORT>
+python3 tools/release_matrix.py --scenario claude-codex --keep --report <MATRIX_REPORT>
 ```
 
 Other live scenarios are `claude-pi`, `claude-claude`, and `codex-native`. Install only the
@@ -127,7 +159,15 @@ operator's selected backend executables; the Claude backend uses the existing Cl
 A stub result is not live acceptance.
 Do not use `--all` here: its `distribution` scenario would repeat the full suites already run.
 Report unexercised backends explicitly. Read-only command/help or stub checks do not spend
-provider quota, but the listed live scenarios do.
+provider quota, but the listed live scenarios do. Save the workspace path printed by `--keep`;
+the default deletes the raw evidence. Keep provider transcripts private and report sanitized
+outcomes, including actual Stop verdicts. The current matrix's unfinished-Stop check can pass on
+a fail-open diagnostic containing `stopContinue`: require a real blocking decision, a nonempty
+directive and a successful reviewer outcome before counting that case as accepted.
+
+The matrix creates acceptance receipts only in its isolated synthetic fixture state. That test
+setup does not authorize enabling any real repository or replace the operator's exact
+`acceptRisk` invocation at the host checkpoint below.
 
 ## 3. Codex agent checks
 
@@ -158,7 +198,7 @@ session. For a desktop test, fully restart the GUI too. Confirm flags and receip
 | CX6 | **Controls/config:** show, set, show and clear model/effort, reviewer-session audit limit and history controls using documented forms. Verify invalid values preserve configuration, environment precedence, global overrides versus repository flags, and that history clear affects only the disposable target. Inventory all five active JSON keys against the reference; use existing tests for exhaustive numeric boundaries. |
 | CX7 | **Stop decisions:** completed question, completed compaction handover, unfinished authorized task, and work with a background server. Completed work may stop; unfinished work continues. A legitimately awaited operation may return `STOP_WAIT`. A listening server alone must not disable supervision. Record actual prompt/verdict on a misjudgment. |
 | CX8 | **Update/restart:** rerun the supported installer, verify installed bytes, restart and repeat one actual gated commit and automatic Stop. Feature state, receipts and unrelated plugins/settings survive. Do not mutate the candidate's cachebuster to make installation pass. |
-| CX9 | **Uninstall/reinstall:** with no review/commit active, run `scripts/uninstall_local.py` from the Codex package. Confirm unrelated plugin/config entries and retained reviewer state survive. The shared direct-only namespace edit is deliberately left manual and reported by the uninstaller. Reinstall, trust/restart, verify state and run a real gate again. Do not use `--purge-state`. |
+| CX9 | **Uninstall/reinstall:** follow the Codex section of `AGENT_UNINSTALL.md` directly with no review/commit active. Preserve evidence and verify removal, unrelated configuration and retained state before reinstalling. Complete the fresh-host removal checkpoint, then follow `INSTALL_WITH_AGENT.md` from step 1, trust/restart and verify a real gate and automatic Stop. Report the direct-only namespace entry left in place for reinstall. Do not use `--purge-state` or a temporary combined wrapper. |
 
 CLI completion check, from the installer/export root, after enablement and hook trust:
 

@@ -48,14 +48,15 @@ The Codex GUI on macOS is tested. On macOS, Codex CLI 0.154.0 has also been exer
 host for stop supervision through automatic Stop rejection and retry. These smoke checks do not establish coverage of every
 interactive terminal, key binding, or the CLI commit-gate flow. See
 [CLI completion checks](#cli-completion-checks) for the repeatable procedure.
-Native Ubuntu installation has produced issue reports; clean-host acceptance of the current
-Linux fixes remains pending. Windows through WSL2 is untested. Unit tests run in Linux and
+The Ubuntu 1.4.3 candidate passed automated suites and actual CLI commit-review,
+Stop-supervision and uninstall/reinstall checks. Clean-profile acceptance remains pending.
+Windows through WSL2 is untested. Unit tests run in Linux and
 macOS CI, including Git 2.25 on Ubuntu. Native
 Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
 will not work because [Codex's Linux sandbox](https://learn.chatgpt.com/docs/windows/wsl) uses
 `bubblewrap`, which requires WSL2.
 
-### Native Linux (current acceptance pending)
+### Native Linux (clean-profile acceptance pending)
 
 Install Git, `curl`, and Python 3.9 or newer using the distribution's package manager. If Codex is
 not already installed and authenticated, use the
@@ -112,6 +113,14 @@ feature toggles, restart, and hook trust, start Codex in the repository to prote
 prompt in [`INSTALL_WITH_AGENT.md`](../../INSTALL_WITH_AGENT.md). The agent runs the same
 installer below and stops only at the human-only trust and restart checkpoint. GUI users complete
 hook trust from the CLI as described below.
+
+After installation, hook trust and host restart are verified, follow the shared
+[settings walkthrough](../../INSTALL_WITH_AGENT.md#2-resolve-choices-once). Confirm commit-review
+settings, then immediately present its enablement screen and resolve that choice before asking
+about Stop settings. Follow the same two-screen sequence for Stop, then confirm rotation/history.
+Do not ask feature settings questions before installation or carry a premature answer forward as
+confirmation. If the walkthrough started too early, finish the missing prerequisites, inspect the
+loaded configuration, and ask again at the documented settings checkpoint.
 
 ### Shared repository install
 
@@ -208,12 +217,22 @@ review launches use that retained code, so temporarily parking or removing the o
 does not prevent a running server from launching a review. Cancellation, timeouts, and cleanup
 when the MCP parent exits apply throughout installation.
 
-Then open a terminal and run `codex` to start an interactive CLI session. Run `/hooks` there,
-inspect the `reviewer-agent-codex` lifecycle hooks, and trust any entries requiring approval.
-`/hooks` is not a Codex GUI command. Exit the CLI, fully quit and restart the GUI, then start a new
-GUI chat. Codex loads newly
-installed plugin skills and hooks at that session boundary. CLI users instead start a fresh
-interactive CLI session. The CLI smoke coverage and its limits are described above.
+For terminal use, start Codex in the root of the repository you want to work in. If the current
+Codex session is already in that repository, exit and restart it there with `codex`; otherwise
+exit, change to the intended repository root in your terminal, and run `codex`. Then run `/hooks`,
+inspect the `reviewer-agent-codex` lifecycle hooks, and trust any requiring approval. Tell the
+agent that the restart and hook inspection are done so it can verify the loaded components and
+immediately resume the first unanswered settings screen. If those hooks are already trusted,
+that check is complete; no repeat enable action is needed. A natural-language completion report
+is sufficient; a literal `continue` is not required after restart. A second restart is needed
+only if the host requests it or verification identifies a reload problem.
+
+For GUI use, open an interactive CLI session in the target repository and complete `/hooks`
+inspection and trust there. Then exit the CLI, fully quit and restart the GUI, and
+start a new GUI chat in that repository. `/hooks` is not a Codex GUI command. Give only the instructions for the user's
+actual host, following the [shared host checkpoint](../../INSTALL_WITH_AGENT.md#4-hook-trust-and-host-restart).
+Loading the plugin does not itself establish feature enablement; verify hook trust, repository
+flags and the risk receipt. The CLI smoke coverage and its limits are described above.
 
 To update, pull the combined repository and re-run the same installer:
 
@@ -393,6 +412,11 @@ python3 scripts/install_local.py --prepare-only
 
 ## Update, disable and uninstall
 
+Before an update, the agent must show the existing effective settings and their sources and ask
+the user whether to keep or change them, following
+[the update settings checkpoint](../../AGENT_UPDATE.md#confirm-existing-settings-with-the-user--both-hosts).
+Verify those confirmed settings again after installation and restart.
+
 **Update** an existing installation by pulling the clean checkout and running the local
 installer. Keep the release's committed version and `+codex.<timestamp>` metadata. The installer
 refreshes the canonical cache even at the same label, preserving displaced live directories
@@ -404,10 +428,22 @@ git pull --ff-only
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-Afterwards, open an interactive `codex` CLI session, run `/hooks`, and trust any plugin hooks
-requiring approval.
-Then exit the CLI, fully quit and restart the GUI, and start a new GUI chat. `/hooks` is not a Codex
-GUI command. CLI users instead start a fresh interactive CLI session.
+Use a permanent Python 3.9+ interpreter for the installer. If a temporary test venv is active,
+invoke the permanent interpreter by absolute path rather than relying on its `python3` command.
+For a dirty checkout, preserve the edits and verify a separate pinned checkout or permanent export.
+Do not pull an export or change a frozen candidate's version/cachebuster. If using a different
+source directory, follow [the source-link migration below](#changing-the-existing-source-directory).
+
+Before restarting, compare the installed package files with the verified source, check the saved
+`python-path`, and compare existing feature settings, receipts and unrelated configuration with
+the pre-update baseline. Keep the old source and live cache directories. A fresh process launched
+through the installed `.mcp.json` must initialize with the expected version and expose exactly
+`review_commit`, `stop_hook`, and `interrupt_stop`; do not invoke the lifecycle tools manually.
+
+Afterwards, follow the [host-specific trust and restart checkpoint](../../INSTALL_WITH_AGENT.md#4-hook-trust-and-host-restart).
+For terminal use, restart Codex in the target repository, inspect `/hooks`, and trust only entries
+requiring approval. GUI users complete that CLI check, then fully quit and restart the GUI in the
+target repository. Already-trusted entries need no repeated action. `/hooks` is not a GUI command. CLI users instead start a fresh interactive CLI session.
 Then complete the [post-install verification](#post-install-verification); a successful install
 does not prove that an existing task has loaded the new server or hook definitions.
 
@@ -417,6 +453,11 @@ does not prove that an existing task has loaded the new server or hook definitio
 $reviewer-agent-codex:reviewer-agent off
 $reviewer-agent-codex:stop-continue off
 ```
+
+For the complete agent procedure, follow
+[Codex uninstall and reinstall](../../AGENT_UNINSTALL.md#codex-uninstall-and-reinstall), including
+backup, removal checks, a fresh-host checkpoint and the handoff to the initial-install guide.
+Run each documented step directly; do not combine uninstall and reinstall in a temporary wrapper.
 
 **Uninstall**, which removes this plugin's configuration and nothing else — other plugins,
 marketplaces, MCP servers and settings are left alone:
@@ -438,7 +479,72 @@ It is designed to tolerate a repeat run or a half-finished prior install. Two th
   entry from a shared array is left manual to avoid rewriting a running host's shared setting, so the uninstaller
   prints the exact edit instead. Leave the other namespaces alone.
 
+### Changing the existing source directory
+
+An update from a new checkout or permanent export changes the package's absolute path.
+The installer refuses when `~/plugins/reviewer-agent-codex` points elsewhere; this is protection
+against replacing an unrelated source, not a reason to delete the old checkout or uninstall.
+
+With no review or commit active, record the old target with
+`readlink "$HOME/plugins/reviewer-agent-codex"` and confirm that it is this plugin's existing
+source. Back up the relevant configuration and feature settings as described in
+[the update guide](../../AGENT_UPDATE.md#the-codex-native-host). Keep the old source intact.
+Replace the three absolute paths below with a permanent Python interpreter, the verified new
+package directory, and the confirmed old package directory. This procedure replaces only the
+expected symlink, saves its previous target, and runs the documented installer:
+
+```bash
+/absolute/path/to/python3 - /absolute/new/plugins/reviewer-agent-codex /absolute/old/plugins/reviewer-agent-codex <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import uuid
+
+source, previous = (Path(arg).expanduser().resolve() for arg in sys.argv[1:])
+link = Path.home() / "plugins" / "reviewer-agent-codex"
+if not link.is_symlink() or link.resolve() != previous:
+    raise SystemExit("Unexpected source path; inspect it instead of replacing it")
+manifest = json.loads((source / ".codex-plugin" / "plugin.json").read_text())
+if manifest.get("name") != "reviewer-agent-codex":
+    raise SystemExit("The new directory is not the reviewer-agent-codex package")
+backup = link.with_name(link.name + ".previous-source-" + uuid.uuid4().hex + ".txt")
+backup.write_text(str(previous) + "\n")
+temporary = link.with_name("." + link.name + ".update-" + uuid.uuid4().hex)
+temporary.symlink_to(source, target_is_directory=True)
+os.replace(temporary, link)
+try:
+    subprocess.run([sys.executable, str(source / "scripts" / "install_local.py")], check=True)
+except (OSError, subprocess.CalledProcessError):
+    temporary.symlink_to(previous, target_is_directory=True)
+    os.replace(temporary, link)
+    raise
+print("Previous source recorded at", backup)
+PY
+```
+
+If installation fails, the snippet restores the source link. The installer may already have
+changed cache/configuration, so inspect its output and the saved baseline; restoring a link is
+not a complete installation rollback. After success, perform the byte/state comparisons and
+hook-trust/restart checks above. Retain both source directories while a host may still use them.
+
 ## Enable in a repository
+
+Commit review and Stop supervision can each be turned on or off independently. Enable either
+one, both, or neither; changing one switch does not change the other. Shared model settings and
+one repository risk receipt do not require both features to be enabled.
+
+Trusting hooks (including “trust all hooks”) permits execution; it does not accept the disclaimer
+or enable either feature. The installing agent must explain this distinction, report the target's
+feature/receipt state, and give the user the exact enablement commands below. When the user opts
+in without a current receipt, show the short risk notice, disclaimer link and applicable command
+from the [shared checkpoint](../../INSTALL_WITH_AGENT.md#5-human-only-checkpoint-and-final-report),
+then wait for the user to type it at the prompt. A conversational “yes” is only a preference,
+not acceptance. Displaying the command does not invoke it. Only the user can submit
+the risk-accepting invocation as their own standalone message in the target repository's host
+session. Verify the resulting target, receipt and enabled state; never create the receipt or run
+the accepting command on the user's behalf.
 
 Write `reviewerAgent.md` at the repository root, starting from `reviewerAgent.md.template`. Then
 invoke the bundled skills:
@@ -447,17 +553,22 @@ invoke the bundled skills:
 $reviewer-agent-codex:reviewer-agent on
 ```
 
-The first invocation does not enable anything. Read [`DISCLAIMER.md`](DISCLAIMER.md), then invoke:
+Without a current receipt, this invocation refuses to enable. Read [`DISCLAIMER.md`](DISCLAIMER.md), then invoke:
 
 ```text
 $reviewer-agent-codex:reviewer-agent on acceptRisk
-$reviewer-agent-codex:stop-continue on
 ```
 
-One current receipt covers both features for this repository. If stopContinue is the first feature
-enabled, its plain `on` response instead requires
+This enables commit review only. If Stop supervision was also selected, enable it separately
+with `$reviewer-agent-codex:stop-continue on`. One current receipt covers both features for this
+repository. For Stop supervision only, begin with `$reviewer-agent-codex:stop-continue on` instead
+of enabling commit review; without a current receipt, its response requires
 `$reviewer-agent-codex:stop-continue on acceptRisk`. A changed disclaimer invalidates the old
 receipt and requires a new explicit acceptance.
+
+After an exact control command, check the repository named in its response, then type `continue`
+as a separate message to resume an agent-assisted setup. The hook ends the control turn without
+invoking the agent; do not append `continue` to the control command itself.
 
 Use `off` or `status` with either skill to change or inspect its state. State defaults to
 `~/.codex/reviewer-agent-codex`; override it with `REVIEWER_CODEX_STATE_DIR`.

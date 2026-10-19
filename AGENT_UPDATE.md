@@ -18,6 +18,205 @@ is shorter.
 
 ---
 
+## Resume after operator actions
+
+Follow the [installation checkpoint rule](INSTALL_WITH_AGENT.md#continue-across-operator-checkpoints)
+when yielding for hook trust, restart, or a trusted control command. When the operator reports
+completion in ordinary language, verify that checkpoint and resume the first unfinished update
+step in the same turn. Do not end with a status-only acknowledgement or require an extra
+`continue`. Already-trusted hooks need no repeated enable action. Preserve settings choices
+already confirmed in this update; ask only the next unanswered question. A restart/trust report
+alone does not confirm settings or change repository feature choices.
+
+## Confirm existing settings with the user — both hosts
+
+Introduce the walkthrough as a review of installation-wide settings followed by the selected
+repository's feature enablement and risk acceptance. Name that repository and preserve any
+current acceptance receipt; shared settings and repository-specific state have different scopes.
+
+Before changing an installation, identify the target repository and show the user its current
+feature states, receipt validity, selected backend, effective reviewer model, reasoning effort,
+and timeouts. Include applicable Stop delay/effort, session rotation, history retention and
+Claude watchdog settings. Show where each effective value comes from: environment, saved command
+override, JSON or default. Inspect only plugin settings; do not print unrelated configuration.
+Use the host-specific controls and defaults in
+[the installation settings checklist](INSTALL_WITH_AGENT.md#2-resolve-choices-once).
+
+Explain in both feature groups that commit review and Stop supervision have independent on/off
+switches: the user may enable either one, both, or neither. An update must preserve the confirmed
+combination, and changing one switch must not silently change the other. Shared settings and a
+shared receipt do not require enabling both features.
+
+**Required five-step walkthrough — show this order at the start:**
+
+1. **Defaults for reviewer-agent:** explain commit review, show its effective settings/defaults
+   in the required table, ask keep/change, and wait.
+2. **Turn reviewer-agent on if you want it on:** present only commit-review enablement. If it is
+   already on with a current receipt, ask whether to keep it on or disable it; keeping it on
+   requires no repeated command. Otherwise use the applicable trusted command/skip path. Wait
+   for the operator's choice and verify actual state before advancing.
+3. **Defaults for stop-continue:** explain Stop supervision, show its effective settings/defaults
+   and fixed behavior in the required tables, ask keep/change, and wait. Preserve shared values
+   confirmed in step 1 unless the operator requests a change.
+4. **Turn stop-continue on if you want it on:** present only Stop enablement, independently of
+   commit review. Use the same retained-state or trusted command/skip handling, wait for the
+   operator's choice, and verify actual state before advancing.
+5. **Other defaults:** explain and show session rotation, history retention and any applicable
+   host-specific remaining settings; ask keep/change and wait. Label fixed values accurately.
+
+Label each conversational screen “Step N of 5” using these names. These are five separate
+operator exchanges, not five sections in one response. A settings answer never confirms an
+on/off choice. “Defaults” means show the effective value and its source, including saved choices;
+it does not mean reset to factory values. Start over at step 1 when the operator requests a fresh
+walkthrough, preserving installed state and reporting it accurately.
+
+Keep each screen within its step. The introduction may briefly explain both features and their
+independent switches, and step 1 must disclose that model/effort are shared with Stop. Defer
+Stop-specific settings, timing, interruption details and tables to step 3; defer other-defaults
+tables to step 5. Never merge steps 1 and 3, skip steps 2 or 4, or ask several steps' questions at
+once. Once a screen's question is asked, yield and wait before proceeding.
+
+**Use an interactive conversational walkthrough, one screen at a time.** Explain the feature
+in the conversation before asking for a choice; do not replace that explanation with a compact
+question card or a bare list of values. Use the operator's requested interaction format. When
+they ask for a conversational walkthrough or reject question cards, ask directly in chat rather
+than using `request_user_input_async`, `request_user_input` or `AskUserQuestion`.
+
+Include both features in the introductory explanation, following the update walkthrough's
+independent-switch rule and its linked settings reference. Commit review checks staged changes
+before a commit and returns findings for the developer agent to fix before retrying. Stop
+supervision checks whether the authorized task is complete when the developer agent tries to
+finish its turn. It can direct that agent to continue unfinished work, adding waiting and model
+usage. Either feature, both, or neither may be enabled; changing one does not change the other.
+Explain this behavior before the first settings question, then discuss each feature's settings
+and enablement in the established order. Do not postpone the explanation of what Stop does until
+after asking the operator to confirm settings shared with it.
+
+At step 1, disclose that native Codex model and effort are shared with Stop across repositories.
+At step 3, explain Stop-specific behavior: its fixed five-minute review budget is separate from the configurable
+commit timeout; there is no reading delay. Escape interrupts a running review; typing a reply
+is not a substitute. Label these timing and interruption behaviors fixed, not adjustable choices.
+Use the host-specific Stop controls in the settings reference for Claude instead of applying
+Codex's fixed behavior to it.
+
+For each settings screen, explain what the system does, who acts on its findings, and how the
+feature relates to the other feature. Then explain each setting's purpose, effective value,
+source, practical trade-off and shared scope. Label adjustable settings and fixed behavior as
+specified below. End with one clear keep/change question and wait for the answer. Do not combine
+settings confirmation with enablement. The next screen handles that feature's on/off choice;
+a conversational answer never substitutes for an exact trusted control command or risk acceptance.
+
+**Required table format for every settings screen, in both install and update walkthroughs:**
+After the feature explanation, show a Markdown table with columns **Setting**, **Current value
+(source)**, **What it does / trade-off**, and **Adjustability / scope**. Include the group's actual
+effective values, not assumed defaults. Use this format for commit review, Stop supervision,
+and session rotation/history. Label rows **Adjustable**, **Adjustable but shared**, or **Fixed
+behavior**, naming the affected features/repositories. Put adjustable rows first; show fixed
+behavior separately from the choices, in a second table when needed. Do not put feature on/off
+choices in the settings table; those belong to the next enablement screen. The table supplements
+the explanation of system behavior rather than replacing it. End with one conversational
+keep/change question and wait. Use a different format only if the operator explicitly requests it.
+
+Once the settings screen is presented, yield for the operator's answer. Finish independent guide
+edits and checks before presenting that screen rather than continuing them behind a pending
+question. If the operator explicitly asks for concurrent work, describe what will run. Silence,
+a preselected option, tool acknowledgement or elapsed time is not an answer.
+
+**Screen 1 — confirm the current settings/defaults.** Show the effective configuration values,
+their sources, what each setting does and its trade-offs. A saved override is a current setting,
+not a built-in default. Explain the feature's behavior, and report its current on/off state as
+context, not as a confirmed preference. For commit review, explain that the reviewer checks staged
+changes before a commit. On rejection, the reviewer returns a list of problems for the developer
+agent to fix before retrying review; do not tell the user that they must fix those problems.
+
+End with a question naming the configuration values: “Keep these settings, or change any of them?”
+Do not include the disclaimer, enablement command or on/off question on this screen. Wait for the
+user's answer before applying configuration changes or presenting screen 2. Reporting that values
+match a handoff or earlier choice does not replace this confirmation in a fresh walkthrough.
+An answer such as “keep those” confirms the displayed configuration values only, not enablement
+or risk acceptance. Do not treat a request to continue the update as configuration confirmation.
+
+**Codex command entry through autocomplete:** On the applicable enablement screen, explain
+this shortcut before the final command/skip instructions. For reviewer-agent, type `$reviewer`,
+select **Reviewer Agent** from the suggestions, and press Enter to insert the skill. For
+stop-continue, type `$stop`, select **Stop Continue**, and press Enter to insert it. Choose the
+entry belonging to `reviewer-agent-codex` if several plugins offer similar names. Then append a
+space and `on acceptRisk` if the repository's receipt is missing/stale, or `on` if it is current,
+and submit the completed command. Selecting a suggestion only inserts the skill; it does not
+submit the enablement command or accept risk. Show only the current feature's shortcut on its
+screen. Keep the complete exact namespaced command below as a copy/paste fallback when
+suggestions are unavailable. Never submit `$reviewer on` or `$stop on` as abbreviated commands.
+
+Autocomplete does not change the operator-only acceptance requirement or the standalone-command
+format. Keep the short risk notice when acceptance is required. After the ON response, the
+operator checks the target repository and sends `continue` separately to resume setup.
+
+**Screen 2 — choose enablement and present risk acceptance.** After screen 1 is confirmed, present
+the conditional enablement action and skip path below. For a missing or stale receipt,
+show the short risk notice, disclaimer link and exact applicable `on acceptRisk` command from the
+[operator checkpoint](INSTALL_WITH_AGENT.md#5-human-only-checkpoint-and-final-report).
+Do not paste the full disclaimer. Explicitly prompt: “If you want this feature enabled, send this
+exact command as your own standalone message.” Explain that keeping a disabled feature off
+requires no command or acceptance. With a current receipt, show the applicable plain `on` command
+if enablement is needed; do not request acceptance again. Preserve an already enabled feature
+when the user chooses to keep it on. Show only the command for the host and feature being discussed,
+and explain that it enables only that feature.
+
+For Codex, screen 2 must also say: “After the `ON` message, check that it names the intended
+repository, then type `continue` as a separate message so I can verify enablement and resume.”
+Name the actual target repository. Do not append `continue` to the `on acceptRisk` or plain `on`
+command: the trusted control hook requires an exact standalone invocation and ends its turn
+without resuming the agent. After the separate `continue`, verify the canonical repository,
+receipt validity against the installed disclaimer, and actual feature state before reporting
+successful enablement or advancing the walkthrough. Displaying a command is not execution or
+acceptance, and a conversational choice to enable does not run it for the user.
+
+For a currently disabled native Codex feature, put the risk notice and explanations before the
+final action instructions. End with: “If you want to enable it, type:” and the exact command,
+then “After the ON message, check the repository and type continue as a separate message.”
+The last line must be: “If you don't want to enable it, just type continue.” Do not append another
+question, skill explanation or any lines after that. When the user returns with `continue`, check
+actual state: an enabled feature must have a current receipt; if it is still off, the explicit
+skip path means leave it off. This does not apply to an already enabled feature: ask whether to
+keep it enabled or change it, without requesting new acceptance when its receipt is current.
+
+**Do not infer an enablement preference from an unspecified or ambiguous answer.** If the user
+does not clearly choose on or off on screen 2 and has not used the explicit `continue` skip path
+above, ask directly: “Do you want this feature enabled or disabled?” Leave its current state
+unchanged, mark the choice pending, and do not describe that
+unchanged state as a confirmed preference. If they choose enablement without submitting the
+required command, prompt them to submit it themselves. Do not move past a pending enablement
+choice or treat silence as either consent or refusal.
+
+Do not assume familiarity with terms such as effort, timeout, rotation or retention. Label every
+item **Adjustable**, **Adjustable but shared** (with its scope), or **Fixed behavior**. Present fixed
+behavior separately and ask for decisions only on supported adjustable controls. Once the user
+has answered a group's keep/change question in this walkthrough, retain that answer unless they
+request another change. Finish independent source/test checks before asking, then wait for the
+answer unless the operator explicitly requests concurrent work. Do not silently reset settings,
+adopt new defaults or apply unanswered preference changes.
+
+Record the answer and baseline. Explain any global setting's effect on other repositories before
+applying a requested change. After installation and restart, resolve the settings again and
+compare them with what the user confirmed, including changes caused by defaults or higher-priority
+overrides. Report mismatches and resolve them before declaring configuration verification complete.
+
+Hook trust, risk acceptance and feature enablement are separate. “Trust all hooks” only permits
+hooks to execute. An update normally retains current receipts and feature flags; verify that for
+the actual target. Present enablement instructions only on screen 2 of each feature group as
+specified above, using the short risk notice rather than the full disclaimer. If the user chooses
+to enable a feature with a missing or stale receipt, require their own exact `on acceptRisk`
+invocation through the
+[operator checkpoint](INSTALL_WITH_AGENT.md#5-human-only-checkpoint-and-final-report).
+If the user says to keep a disabled feature off, record that choice and proceed to the next group;
+no command or acceptance is required for that feature. If their answer does not clearly specify
+the feature's on/off choice, follow the clarification step above instead of assuming either choice.
+A conversational “yes” confirms settings/intent only. Only the user may submit the accepting
+invocation. For Codex, explicitly tell the user to check the repository in the `ON` message,
+then type `continue` as a separate message; the control hook ends its turn without resuming the
+agent. Verify the canonical target, current receipt and actual feature state afterward. Do not enable a previously disabled feature
+unless requested, and do not ask for new acceptance when the existing receipt is current.
+
 ## The one thing that trips up every local update
 
 **`claude plugin update` decides whether there is anything to do by comparing the `version` string
@@ -54,7 +253,7 @@ An update writes outside the repository. The full list, before the first command
 |---|---|---|
 | Claude Code's plugin cache (`~/.claude/plugins/cache/reviewer-agent/…/<version>/`) | a **new** version directory is copied in; the previous one remains until the host garbage-collects it | yes, roll back by reinstalling the prior version |
 | `~/.claude/plugins/installed_plugins.json` | the `reviewer-agent` entry's `version`, `installPath`, `gitCommitSha` and `lastUpdated` are rewritten | yes, reinstall |
-| `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **nothing** — an update does not touch state. Per-repo enablement and the accepted-risk receipt survive, so you do **not** re-accept or re-enable after an update | n/a |
+| `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **preserve and verify** — compare feature flags and receipt validity after update; a current receipt needs no re-acceptance. Confirm effective settings with the user before changing them | n/a |
 | `~/.pi/agent/extensions/git-read-only/` | **nothing** — a plugin update does **not** refresh the Pi extension. If the extension changed and you use the `pi` backend, refresh it by hand (step 6) | yes, delete the directory |
 | the **running** Claude Code session | after a version bump, **nothing takes effect until restart** — the hook list is snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted. A same-version reinstall is the exception: it replaces the scripts in place, so the live session runs the new scripts under its old hook list (step 5) | n/a |
 
@@ -78,9 +277,11 @@ python3 -c "import json,os;p=os.path.expanduser('~/.claude/settings.json');d=jso
 
 If it prints commands under `~/.claude/reviewerAgent/` or `~/.claude/hooks/bash_gate.py`, the
 pre-plugin standalone is still active. Running both copies causes duplicate audits, and older
-`SessionStart` hooks launch Codex even when Pi is selected. Migrate it per the README's
-[*Upgrading from the standalone Claude Code install*](README.md#upgrading-from-the-standalone-claude-code-install)
-before continuing — and read the `bash_gate.py` caution there; do not simply delete it.
+`SessionStart` hooks launch Codex even when Pi is selected. Follow the uninstall guide's
+[backup](AGENT_UNINSTALL.md#step-0--back-up-first) and
+[legacy-hook removal](AGENT_UNINSTALL.md#step-2s--tear-down-the-legacy-standalone-the-delicate-one)
+steps before continuing. Preserve retained state and unrelated hooks; do not run optional data
+purges for this migration. Read the `bash_gate.py` caution there; do not simply delete it.
 
 ---
 
@@ -269,6 +470,8 @@ shows the new version.
 
 The Codex plugin is a separate package with its own procedure, summarised here; the authoritative
 copy is [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md#update-disable-and-uninstall).
+First complete [existing-settings confirmation](#confirm-existing-settings-with-the-user--both-hosts);
+this requirement applies even when entering directly at this Codex section.
 
 Codex resolves cached plugins by version string. Published candidates already contain their
 version and `+codex.<timestamp>` build metadata; keep those committed values when updating.
@@ -276,22 +479,53 @@ The supported local installer also refreshes the canonical cache at an unchanged
 preserving displaced live cache directories for running sessions. Refreshing the cachebuster is
 a maintainer's release-preparation step, not an end-user update step.
 
+Before updating, record the installed version, the target of
+`~/plugins/reviewer-agent-codex`, and the existing feature settings and risk receipts. Preserve
+unrelated plugin/configuration entries. If the checkout has local edits, preserve them and use a
+separate clean checkout of the selected commit; do not pull over them. For a pinned candidate,
+record its full SHA and use that exact checkout or its verified permanent export throughout.
+Do not pull a pinned candidate or an export; an export has no Git metadata.
+
+Use separate Python paths: `<TEST_VENV>/bin/python` is the test interpreter with development
+dependencies; `<RUNTIME_PYTHON>` is an absolute path to a **permanent Python 3.9+ interpreter**.
+The installer saves its interpreter path for hooks and MCP. A temporary test venv must not become
+that runtime, including accidentally through an activated venv's `python3`.
+
 ```bash
-git -C <PLUGIN_DIR> pull --ff-only               # if updating a clean tracked checkout
-python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
-(cd <PLUGIN_DIR>/plugins/reviewer-agent-codex && python -m pytest -p no:cacheprovider)
-python3 <PLUGIN_DIR>/plugins/reviewer-agent-codex/scripts/install_local.py
+git -C <PLUGIN_DIR> pull --ff-only               # only a clean, unpinned tracked checkout
+<TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
+(cd <PLUGIN_DIR>/plugins/reviewer-agent-codex && <TEST_VENV>/bin/python -m pytest -p no:cacheprovider)
+<RUNTIME_PYTHON> <PLUGIN_DIR>/plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
-After installation, run `codex` in a terminal and use `/hooks` in that interactive CLI to trust
-the plugin hooks again.
-Exit the CLI, fully quit and restart the Codex GUI, and start a new GUI chat. `/hooks` is not a
-Codex GUI command. State under `~/.codex/reviewer-agent-codex/` survives,
-so features stay enabled per repository — no re-acceptance.
+If the package's source path changes, the installer deliberately refuses to overwrite the
+existing source symlink. Before the last command, follow
+[Changing the existing source directory](plugins/reviewer-agent-codex/README.md#changing-the-existing-source-directory).
+That procedure invokes the same installer while preserving the previous source and recording
+the link target for recovery. Do not uninstall merely to move the source.
+
+**Check before restart:** record the installer's actual cache path and version; compare every
+package file in that cache with the verified source, excluding generated `__pycache__` files.
+Confirm the saved `~/.codex/reviewer-agent-codex/python-path` is permanent, the previous live cache
+still exists, and feature settings, risk receipts and unrelated configuration are unchanged.
+Initialize a fresh MCP process using the installed `.mcp.json` command, arguments and working
+directory: its version must match the candidate and its tool inventory must be exactly
+`review_commit`, `stop_hook`, and `interrupt_stop`. Initialization and `tools/list` are read-only;
+do not manually call the lifecycle tools. This checks the installed launcher, not whether the
+current developer host has reloaded it.
+
+After installation, follow the [host-specific trust and restart checkpoint](INSTALL_WITH_AGENT.md#4-hook-trust-and-host-restart).
+For terminal use, restart Codex in the target repository and inspect `/hooks`; trust only entries
+requiring approval. For GUI use, complete that CLI inspection, then fully quit and restart the GUI
+in the target repository. `/hooks` is not a GUI command. Already-trusted entries need no repeated
+trust action. State under `~/.codex/reviewer-agent-codex/` survives, so existing features and a
+current receipt normally survive. A changed disclaimer or corrected
+repository identity can require new acceptance; see the package README. New disposable targets
+also need their own operator acceptance.
 
 The commands above install test dependencies and run the native plugin suite in an explicit
 package-directory subshell before installation. Use an available Python 3.9+ interpreter
-(and a virtual environment if needed) for `python`.
+in the test environment, and the separate permanent interpreter for installation.
 The root suite does not collect it. Its backend and installer regressions exercise review launches
 during cache parking, after restoration, and after cache eviction without model calls.
 
@@ -325,7 +559,7 @@ one runner, `tools/release_matrix.py`, against **real hosts and real backends** 
 ```bash
 python3 tools/release_matrix.py --list                      # the scenarios, and the manual ones
 python3 tools/release_matrix.py --all --stub                # fast; no model calls
-python3 tools/release_matrix.py --all --report /tmp/matrix.md   # real reviewer calls (spends quota)
+python3 tools/release_matrix.py --all --keep --report /tmp/matrix.md   # real calls; retain evidence
 python3 tools/release_matrix.py --scenario claude-pi        # one combination
 ```
 
@@ -338,6 +572,12 @@ The runner also prints **six scenarios it cannot script** — they need a person
 pressing Escape mid-review, restarting to prove persistence, a clean-profile install, native-Codex
 shell-commit redirection, the `AskUserQuestion` reroute in a real interactive session, and uninstall-survival of unrelated
 plugins. Report these as "requires a human" rather than claiming them green.
+
+Retain the workspace printed by `--keep` and save a sanitized summary separately from private
+reviewer transcripts. The current matrix's unfinished-Stop assertion can also accept a diagnostic
+containing `stopContinue`; inspect the actual `decision: block`, directive and successful reviewer
+outcome before counting that check as acceptance. A fail-open diagnostic is not continuation or
+approval. See the [Linux acceptance runbook](docs/LINUX_RELEASE_ACCEPTANCE.md) for host evidence.
 
 Alongside the matrix, the always-run gates for any release are the two unit suites plus the
 structural and parity checks — see [`CONTRIBUTING.md`](CONTRIBUTING.md#running-the-suites).
@@ -366,14 +606,15 @@ afterwards: the next release installs normally through `claude plugin update`.
 **Commits not pushed, or a build you want to pin:** install an **export** of them at the version
 label they already carry, test, then return to the GitHub marketplace.
 
-1. **Export to a permanent directory**, named for the commit so a later export can sit beside it.
+1. **Export to a permanent directory**. Replace `<EXPORT_DIR>` with your chosen absolute
+   destination, named for the commit so a later export can sit beside it.
    The export copies the **working tree**, so run it from a clean checkout of that commit (a
    `git worktree add <dir> <sha>` is the simplest), and confirm `git status --short` prints
    nothing first. Otherwise you test edits the named commit does not contain.
 
    ```bash
    git -C <clean-checkout> status --short          # must print nothing
-   python3 <clean-checkout>/tools/release_export.py --target ~/reviewer-agent-builds/<short-sha>
+   python3 <clean-checkout>/tools/release_export.py --target <EXPORT_DIR>
    ```
 
    **Never use a scratchpad or anything under `/tmp`.** A Directory marketplace runs the plugin's
@@ -386,7 +627,7 @@ label they already carry, test, then return to the GitHub marketplace.
 
    ```bash
    claude plugin marketplace remove reviewer-agent
-   claude plugin marketplace add ~/reviewer-agent-builds/<short-sha>
+   claude plugin marketplace add <EXPORT_DIR>
    claude plugin install reviewer-agent@reviewer-agent
    ```
 
@@ -436,9 +677,36 @@ from the parity check by design.
 
 ## Report when done
 
-Lead with the **installed version before and after**, the **marketplace source** (GitHub vs
+When installation/update and the required setup checks are complete, lead the final response
+with “Installation is complete and set up for <TARGET_REPO>” (or “Update is complete” for an
+update). Do not describe hypothetical changes or distinguish walkthrough choices from
+configuration in vague terms.
+Report a concrete unresolved mismatch if there is one, and do not claim completion while a
+required setup step is pending. Keep detailed verification evidence in the handoff; summarize
+material limits accurately without obscuring the completion result.
+
+For native Codex, finish by explaining that the plugin does not need reinstalling for each
+repository: start `codex` in the other repository and enable either or both features there.
+Show these commands again, labeled by feature:
+
+```text
+$reviewer-agent-codex:reviewer-agent on
+$reviewer-agent-codex:stop-continue on
+```
+
+Submit each selected command separately. If the repository has no current risk receipt, the
+first plain `on` refuses and displays the accepting form: read the disclaimer, then, only if
+agreeing, repeat that feature's command with `on acceptRisk`. One current receipt covers both
+features in that repository; it does not enable the other feature. A new repository also needs
+its own project-specific `reviewerAgent.md` for commit review; preserve an existing customized
+brief and resolve a missing brief before enabling that feature. Existing shared settings remain
+in effect. Autocomplete via `$reviewer` or `$stop` is available as described above.
+
+Then report the **installed version before and after**, the **marketplace source** (GitHub vs
 Directory), and — for a Directory source — **whether you had to bump the version** to make the
 update take. Then state plainly: whether the restart happened, whether state survived (it should
-have, so per-repo enablement needs no redo), whether the Pi extension needed refreshing, which
+have; verify receipt validity before assuming enablement needs no action), the effective settings
+and sources before/after, the user's keep/change decision and any unresolved mismatch, whether
+the Pi extension needed refreshing, which
 matrix scenarios you ran and their result, and which human-only scenarios remain outstanding. If
 you stopped early, say at which step and why.
