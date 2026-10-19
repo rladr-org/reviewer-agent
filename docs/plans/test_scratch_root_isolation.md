@@ -17,7 +17,8 @@ a name with a real session's dir, which a test's rotation would then delete.
 ## Fix
 
 Add an autouse fixture to `tests/conftest.py` that points `REVIEWER_SCRATCH_ROOT`
-at a fresh temp dir for every test via `monkeypatch.setenv`, so both in-process
+at a dir inside each test's own `tmp_path` via `monkeypatch.setenv` (created lazily
+by the code under test, as in production), so both in-process
 calls and hook subprocesses (which copy `os.environ`) inherit it. Tests that set
 their own root keep working: their `setenv` runs after the autouse fixture and
 wins. Subprocess tests that build an env from scratch (`test_host_versions`,
@@ -30,8 +31,8 @@ conftest has no equivalent gap.
 
 1. Commit this plan.
 2. Add a regression in `tests/test_scratch_cleanup.py` asserting that, with no
-   per-test setup, `commit_scratch_root()` lies under pytest's base temp dir and is
-   exported in `os.environ`. Run it red; commit.
+   per-test setup, `commit_scratch_root()` lies under the test's own `tmp_path` and
+   is exported in `os.environ`. Run it red; commit.
 3. Add the conftest fixture; run the regression plus `test_scratch_cleanup.py`,
    `test_commit_hook.py` and `test_session_start_hook.py` green; confirm a run of
    those files leaves nothing new in the real scratch root; commit.
