@@ -223,6 +223,10 @@ claude plugin uninstall reviewer-agent
 claude plugin marketplace remove reviewer-agent      # optional: only if nothing else uses it
 ```
 
+The marketplace is unused once the `plugins` list in its `.claude-plugin/marketplace.json` names
+only `reviewer-agent`. For a Folder source that file is in the folder `claude plugin marketplace
+list` shows. Removing the marketplace leaves that folder on disk.
+
 **Check:** `claude plugin list` no longer shows `reviewer-agent`. **If Step 1 also found standalone
 artifacts** (commands under `~/.claude/reviewerAgent/`, or a `bash_gate.py` wrapper), do **Step 2S**
 next — the plugin uninstall does not touch them, and leaving them causes duplicate/again-firing hooks.
