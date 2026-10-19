@@ -42,6 +42,31 @@ override, JSON or default. Inspect only plugin settings; do not print unrelated 
 Use the host-specific controls and defaults in
 [the installation settings checklist](INSTALL_WITH_AGENT.md#2-resolve-choices-once).
 
+**Claude Code: how to read the effective values and their sources.** The plugin's show forms are
+read-only and print each value with its source. From a session opened in the target they are
+`/reviewer-agent:reviewerModel`, `/reviewer-agent:reviewerSession`, `/reviewer-agent:reviewerHistory`,
+`/reviewer-agent:stopContinue delay status` and `/reviewer-agent:stopContinueWatchdog status`.
+The agent doing the update is usually not in the target, so it runs the same scripts directly,
+from the target repository (`<PLUGIN_DIR>` is the checkout or installed plugin directory):
+
+```bash
+cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py model ""
+cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py session ""
+cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py history ""
+cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py stopcontinue "delay status"
+cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py watchdog status
+```
+
+Do not run the `agent` or `stopcontinue` subcommands with any other argument: those change state.
+These show nothing for the supervisor's effort. Resolve it by hand: `REVIEWER_STOPCONTINUE_EFFORT`
+in the hooks' environment, else `stopContinueEffort` in `~/.claude/reviewer-agent/config.json`,
+else `low`. Feature state is the `<project-stem>.active` (commit review) and
+`<project-stem>.stopcontinue.active` (Stop) files in `~/.claude/reviewer-agent/state/`. The receipt
+is `<project-stem>.risk.accepted.json`: it is current only while its `disclaimer_sha256` equals
+`sha256sum` of the **installed** `DISCLAIMER.md`. Compare it against both the installed copy and
+the one this update will install. If the update changes `DISCLAIMER.md`, the receipt becomes stale
+at the update; see the screen-2 rule for an enabled feature with a receipt that will go stale.
+
 Explain in both feature groups that commit review and Stop supervision have independent on/off
 switches: the user may enable either one, both, or neither. An update must preserve the confirmed
 combination, and changing one switch must not silently change the other. Shared settings and a
@@ -117,6 +142,14 @@ choices in the settings table; those belong to the next enablement screen. The t
 the explanation of system behavior rather than replacing it. End with one conversational
 keep/change question and wait. Use a different format only if the operator explicitly requests it.
 
+**Keep every screen short: roughly 15–25 lines.** The rules above say what to cover, not how much
+to write. Use two or three plain sentences for what the feature does, then the table, then the
+question. Keep each table cell to a few words; state a trade-off as a phrase, not a paragraph.
+Group rarely changed settings in one row (for example, the codex backend's first-output and idle
+timeouts). Say “no environment overrides” in one line instead of listing what you checked. The
+introduction before step 1 (target, current on/off state, receipt, the five step names) takes at
+most about eight lines. Operators reject long screens; when they do, shorten, do not re-explain.
+
 Once the settings screen is presented, yield for the operator's answer. Finish independent guide
 edits and checks before presenting that screen rather than continuing them behind a pending
 question. If the operator explicitly asks for concurrent work, describe what will run. Silence,
@@ -161,6 +194,33 @@ requires no command or acceptance. With a current receipt, show the applicable p
 if enablement is needed; do not request acceptance again. Preserve an already enabled feature
 when the user chooses to keep it on. Show only the command for the host and feature being discussed,
 and explain that it enables only that feature.
+
+**Same ending on both hosts, for both features.** Every screen 2 (commit review at step 2,
+Stop supervision at step 4) ends with the exact command to type, then `continue`, or `continue`
+alone to leave the feature off. Claude Code uses the same form as Codex:
+
+> If you want to enable it, type:
+>
+> `/reviewerAgent on acceptRisk`   (Stop: `/stopContinue on acceptRisk`)
+>
+> After the ON message, check that it names `<TARGET_REPO>`, then type **continue** as a
+> separate message.
+>
+> If you don't want to enable it, just type **continue**.
+
+Use `on acceptRisk` when the receipt is missing or stale, plain `on` when it is current. Nothing
+follows those lines.
+
+**A revised disclaimer requires accepting again, even for an enabled feature.** When the update
+changes `DISCLAIMER.md`, the existing receipt no longer matches, so treat each enabled feature as
+needing acceptance: show the short risk notice, the disclaimer link and the `on acceptRisk`
+ending above. Do not offer “keep it on as it is.” The accepting command hashes the **installed**
+disclaimer, so the operator types it **after** the update and restart, in a session opened in
+the target; typed earlier, it re-records the old hash. When this walkthrough runs before the
+update, tell the operator that, record their choice, and present the ending at the post-restart
+checkpoint. If they type only `continue`, the feature must end up off: the hooks of both hosts
+check only the feature flag, not the receipt, so a feature left on would keep running under the
+stale receipt. Turn it off with the feature's `off` command from the target and verify the flag.
 
 For Codex, screen 2 must also say: “After the `ON` message, check that it names the intended
 repository, then type `continue` as a separate message so I can verify enablement and resume.”
@@ -288,25 +348,43 @@ purges for this migration. Read the `bash_gate.py` caution there; do not simply 
 ## Step 1 — identify what is installed and its source
 
 ```bash
-claude plugin list                 # note the reviewer-agent@… version and that it is enabled
+claude plugin list                 # note that reviewer-agent@reviewer-agent is enabled
 claude plugin marketplace list     # note the reviewer-agent marketplace's Source
+python3 -c "import json,os;e=json.load(open(os.path.expanduser('~/.claude/plugins/installed_plugins.json')))['plugins']['reviewer-agent@reviewer-agent'][0];print(e['version'], e['installPath'], e.get('gitCommitSha'), e['lastUpdated'])"
 ```
 
 **Check:** you can state (a) the installed version, and (b) whether the reviewer-agent marketplace
-`Source:` is `GitHub (…)` or `Directory (/path/to/checkout)`. The rest of the procedure branches on
-that source. `<PLUGIN_DIR>` below is that checkout path for a Directory source.
+`Source:` is `GitHub (…)` or a local directory. The rest of the procedure branches on that source.
+`<PLUGIN_DIR>` below is that checkout path for a Directory source.
+
+- **Installed version:** take it from the `installed_plugins.json` line (version, install path,
+  commit, last update). For a local directory source, `claude plugin list` prints
+  `Read from: <checkout>` and the version label currently in that checkout's manifest, which is not
+  necessarily what was installed. Seen with Claude Code 2.1.303 on 2026-10-19: `plugin list` showed
+  1.4.3 while the recorded installation was still 1.3.1 in the `…/1.3.1/` cache directory.
+- **Source label:** Claude Code 2.1.303 prints a local source as `Folder (/path/to/checkout)`; older
+  versions print `Directory (/path/to/checkout)`. Both mean the Directory source in this guide.
 
 ## Step 2 — verify the checkout before trusting it (Directory source)
 
 Skip to step 3 for a GitHub source. For a Directory source you are the one publishing the new code,
-so prove it first — do not ship a gate whose own tests fail:
+so prove it first — do not ship a gate whose own tests fail.
+
+The suite needs pytest and the other development dependencies, which the plugin itself does not
+use and which a normal `python3` usually lacks (`No module named pytest`). Install them into a test
+environment. Choose a new `<TEST_VENV>` **outside** the checkout; it may be temporary, because only
+the tests use it. Use a Python 3.9+ interpreter for `python3`:
 
 ```bash
-cd <PLUGIN_DIR>
-python3 -m pytest tests/ -q -p no:cacheprovider
-python3 tools/check_split_layering.py
-python3 tools/release_versions.py
+python3 -m venv <TEST_VENV>
+<TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
+cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
+cd <PLUGIN_DIR> && python3 tools/check_split_layering.py
+cd <PLUGIN_DIR> && python3 tools/release_versions.py
 ```
+
+The suite takes several minutes (about 1,700 tests). If your shell's foreground timeout is shorter,
+run it in the background and wait for its final exit status; do not continue while it is running.
 
 **Check:** the suite passes (a small number of environment-dependent skips is normal);
 `check_split_layering.py` prints `PASS [VERIFY]: acyclic, zero back-edges`; and
@@ -393,7 +471,15 @@ same-version reinstall (step 4): it replaces the scripts in place. A running ses
 old hook list, but each hook runs the new script files from disk, so commits in that session may be
 gated by the new scripts before the restart. Restart to make the hook list and the scripts match.
 
-**Check (after restart):** `claude plugin list` shows the new version. The accepted-risk receipt and
+Ask the operator to restart Claude Code **in the target repository** (`cd <TARGET_REPO> && claude`),
+not in the checkout the update ran from. The settings walkthrough's enablement screens and the
+step 7 commit check happen there, and an `on acceptRisk` typed in another repository records a
+receipt for that repository instead. Before yielding, record the checkpoint (target, versions
+before/after, completed checks, settings answers so far, next step) in the existing handoff file:
+the restarted session does not have this conversation.
+
+**Check (after restart):** the `installed_plugins.json` line from step 1 shows the new version (for a
+Directory source, `claude plugin list` alone does not prove this; see step 1). The accepted-risk receipt and
 per-repo enablement are unchanged, because state was never touched.
 
 If `stopContinue` and `stopContinueWatchdog` are active for a repository, the watchdog recovery cron

@@ -316,6 +316,14 @@ choices in the settings table; those belong to the next enablement screen. The t
 the explanation of system behavior rather than replacing it. End with one conversational
 keep/change question and wait. Use a different format only if the operator explicitly requests it.
 
+**Keep every screen short: roughly 15–25 lines.** The rules above say what to cover, not how much
+to write. Use two or three plain sentences for what the feature does, then the table, then the
+question. Keep each table cell to a few words; state a trade-off as a phrase, not a paragraph.
+Group rarely changed settings in one row (for example, the codex backend's first-output and idle
+timeouts). Say “no environment overrides” in one line instead of listing what you checked. The
+introduction before step 1 (target, current on/off state, receipt, the five step names) takes at
+most about eight lines. Operators reject long screens; when they do, shorten, do not re-explain.
+
 Once the settings screen is presented, yield for the operator's answer. Finish independent guide
 edits and checks before presenting that screen rather than continuing them behind a pending
 question. If the operator explicitly asks for concurrent work, describe what will run. Silence,
