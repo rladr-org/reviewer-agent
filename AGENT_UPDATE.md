@@ -34,9 +34,11 @@ Introduce the walkthrough as a review of installation-wide settings followed by 
 repository's feature enablement and risk acceptance. Name that repository and preserve any
 current acceptance receipt; shared settings and repository-specific state have different scopes.
 
-Before changing an installation, identify the target repository and show the user its current
-feature states, receipt validity, selected backend, effective reviewer model, reasoning effort,
-and timeouts. Include applicable Stop delay/effort, session rotation, history retention and
+**When:** run this walkthrough **after** the update and restart (step 5), in the restarted session
+opened in the target. Then each enablement screen's command can be typed at once, and it records
+the new release's disclaimer. Before the update, only record a **baseline**, without asking
+anything: identify the target repository and note its current feature states, receipt validity,
+selected backend, effective reviewer model, reasoning effort, and timeouts. Include applicable Stop delay/effort, session rotation, history retention and
 Claude watchdog settings. Show where each effective value comes from: environment, saved command
 override, JSON or default. Inspect only plugin settings; do not print unrelated configuration.
 Use the host-specific controls and defaults in
@@ -57,20 +59,18 @@ cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py stopcontinue "delay sta
 cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py watchdog status
 ```
 
-Use the **currently installed** `<PLUGIN_DIR>`: the walkthrough confirms the values in effect now.
+For the baseline, `<PLUGIN_DIR>` is the old installed code; for the walkthrough, the updated code.
 A version older than 1.4.3 has no `delay` form; its `stopcontinue` prints a `usage:` line instead,
-changes nothing, and that version has no configurable Stop delay. The new release can introduce
-settings and defaults the old one lacks (1.4.3 adds the 60-second Stop delay); name them on the
-screen as what the update will add. Do not run the `agent` or `stopcontinue` subcommands with any
+changes nothing, and that version has no configurable Stop delay. On each screen, name every
+value the update changed against the baseline, such as a new default. Do not run the `agent` or `stopcontinue` subcommands with any
 other argument: those change state.
 These show nothing for the supervisor's effort. Resolve it by hand: `REVIEWER_STOPCONTINUE_EFFORT`
 in the hooks' environment, else `stopContinueEffort` in `~/.claude/reviewer-agent/config.json`,
 else `low`. Feature state is the `<project-stem>.active` (commit review) and
 `<project-stem>.stopcontinue.active` (Stop) files in `~/.claude/reviewer-agent/state/`. The receipt
 is `<project-stem>.risk.accepted.json`: it is current only while its `disclaimer_sha256` equals
-`sha256sum` of the **installed** `DISCLAIMER.md`. Compare it against both the installed copy and
-the one this update will install. If the update changes `DISCLAIMER.md`, the receipt becomes stale
-at the update; see the screen-2 rule for an enabled feature with a receipt that will go stale.
+`sha256sum` of the **installed** `DISCLAIMER.md`. If the update changed `DISCLAIMER.md`, the
+receipt is stale after the update; see the screen-2 rule for a revised disclaimer.
 
 Explain in both feature groups that commit review and Stop supervision have independent on/off
 switches: the user may enable either one, both, or neither. An update must preserve the confirmed
@@ -221,9 +221,7 @@ changes `DISCLAIMER.md`, the existing receipt no longer matches, so treat each e
 needing acceptance: show the short risk notice, the disclaimer link and the `on acceptRisk`
 ending above. Do not offer “keep it on as it is.” The accepting command hashes the **installed**
 disclaimer, so the operator types it **after** the update and restart, in a session opened in
-the target; typed earlier, it re-records the old hash. When this walkthrough runs before the
-update, tell the operator that, record their choice, and present the ending at the post-restart
-checkpoint. If they type only `continue`, the feature must end up off: the hooks of both hosts
+the target, which is where this walkthrough runs. If they type only `continue`, the feature must end up off: the hooks of both hosts
 check only the feature flag, not the receipt, so a feature left on would keep running under the
 stale receipt. Turn it off with the feature's `off` command from the target and verify the flag.
 
@@ -261,8 +259,8 @@ request another change. Finish independent source/test checks before asking, the
 answer unless the operator explicitly requests concurrent work. Do not silently reset settings,
 adopt new defaults or apply unanswered preference changes.
 
-Record the answer and baseline. Explain any global setting's effect on other repositories before
-applying a requested change. After installation and restart, resolve the settings again and
+Record the answer. Explain any global setting's effect on other repositories before
+applying a requested change. After applying changes, resolve the settings again and
 compare them with what the user confirmed, including changes caused by defaults or higher-priority
 overrides. Report mismatches and resolve them before declaring configuration verification complete.
 
@@ -431,8 +429,8 @@ it (see the [checklist](#appendix--cutting-the-new-version-directory-source)).
 
 Then remove the worktree (`git -C <PLUGIN_DIR> worktree remove <TEST_TREE>`).
 
-**2c. Pull.** Only after the settings walkthrough's configuration questions are answered (the pull
-changes the code and the installed `DISCLAIMER.md` that every running session uses):
+**2c. Pull.** This changes the code and the installed `DISCLAIMER.md` that every running session
+uses, so record the [settings baseline](#confirm-existing-settings-with-the-user--both-hosts) first:
 
 ```bash
 git -C <PLUGIN_DIR> merge --ff-only '@{upstream}'
@@ -524,12 +522,15 @@ Ask the operator to restart Claude Code **in the target repository** (`cd <TARGE
 not in the checkout the update ran from. The settings walkthrough's enablement screens and the
 step 7 commit check happen there, and an `on acceptRisk` typed in another repository records a
 receipt for that repository instead. Before yielding, record the checkpoint (target, versions
-before/after, completed checks, settings answers so far, next step) in the existing handoff file:
+before/after, completed checks, the settings baseline, next step) in the existing handoff file:
 the restarted session does not have this conversation.
 
 **Check (after restart):** the `installed_plugins.json` line from step 1 shows the new version (for a
 Directory source, `claude plugin list` alone does not prove this; see step 1). The accepted-risk receipt and
 per-repo enablement are unchanged, because state was never touched.
+
+Then run the [settings walkthrough](#confirm-existing-settings-with-the-user--both-hosts), starting
+at step 1 of 5, before step 6.
 
 If `stopContinue` and `stopContinueWatchdog` are active for a repository, the watchdog recovery cron
 needs no re-arming by hand. Whether it survives the restart depends on the host. On Claude Code
