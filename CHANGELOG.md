@@ -7,6 +7,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.3] — unreleased
+
 ### Changed
 
 - **Claude Code stops now wait 60 seconds before the supervisor reviews them**, so the

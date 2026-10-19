@@ -118,7 +118,11 @@ prints. Both wrappers prefer the plugin-creator tooling when it is installed and
 perform the same documented transform, so the procedure works in CI and on a contributor's
 machine.
 
-To cut a new version:
+Freeze the candidate's version before final platform acceptance so it tests the identity intended
+for release. Keep the tag and GitHub release unpublished until acceptance and operator approval.
+Use the [Linux acceptance runbook](docs/LINUX_RELEASE_ACCEPTANCE.md) for the final Linux checks.
+
+To prepare a new version:
 
 1. Edit `RELEASE` and `PEP440_RELEASE` in `tools/release_versions.py` (`TAG` derives from
    `RELEASE`). This is the single source of truth; the matrix runner reads `RELEASE` directly, so
@@ -135,8 +139,9 @@ To cut a new version:
 6. Commit before publishing, so a directory-source install's recorded `gitCommitSha` matches the
    files it copies.
 
-Bumping the version is also what lets an **installed** copy pick the change up: Claude Code
-(from either a GitHub or a local directory marketplace) and the Codex host both resolve an
-installed plugin by version string, so `claude plugin update` / a Codex reinstall does nothing until
-the version changes. See [`AGENT_UPDATE.md`](AGENT_UPDATE.md) for updating an existing installation, and
+Bumping the version lets normal cached updates distinguish a release from its predecessor.
+Claude Code's `claude plugin update` compares version strings for both GitHub and directory
+marketplaces; an unchanged label requires the documented reinstall. Codex's supported local
+installer can also refresh an unchanged label while preserving displaced live caches. Users
+should not edit release metadata just to update. See [`AGENT_UPDATE.md`](AGENT_UPDATE.md) for updating an existing installation, and
 [*Running the suites*](#running-the-suites) for the live backend matrix that validates a release.

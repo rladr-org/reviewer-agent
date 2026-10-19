@@ -393,13 +393,14 @@ python3 scripts/install_local.py --prepare-only
 
 ## Update, disable and uninstall
 
-**Update** an existing installation by pulling the checkout and reinstalling; the version's
-`+codex.<timestamp>` build metadata is what makes Codex notice the change rather than serving
-its cache.
+**Update** an existing installation by pulling the clean checkout and running the local
+installer. Keep the release's committed version and `+codex.<timestamp>` metadata. The installer
+refreshes the canonical cache even at the same label, preserving displaced live directories
+for running sessions. Maintainers refresh the cachebuster when preparing a release; users
+do not need to change it during an update.
 
 ```bash
-git pull
-python3 tools/release_cachebuster.py          # from the repository root
+git pull --ff-only
 python3 plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 

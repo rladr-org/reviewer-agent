@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 [project]
 name = "reviewer-agent-codex"
-version = "1.4.2"
+version = "1.4.3"
 description = "Codex-native autonomous commit reviewer and stop supervisor"
 requires-python = ">=3.9"
 license = { text = "MPL-2.0" }

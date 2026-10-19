@@ -78,6 +78,7 @@ Everything you might need, in one place:
 - **Codex-native package** — [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md)
 - **Risk & data handling** — [`DISCLAIMER.md`](DISCLAIMER.md) · [`SECURITY.md`](SECURITY.md) · [`PRIVACY.md`](PRIVACY.md) · [`LICENSE`](LICENSE)
 - **Project** — [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`CHANGELOG.md`](CHANGELOG.md) · [`BACKLOG.md`](BACKLOG.md)
+- **Linux release testing** — [Codex and Claude Code agent runbook](docs/LINUX_RELEASE_ACCEPTANCE.md)
 
 # Project state
 

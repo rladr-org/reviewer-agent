@@ -40,6 +40,8 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
 - [x] Update CHANGELOG with the final fixes and document known supervisor limitations.
 - [x] Verify local links, versions, layering, release-content scanning and export reproducibility.
   Commit the documentation together.
+- [x] Provide a [Linux agent acceptance runbook](../LINUX_RELEASE_ACCEPTANCE.md) with shared
+  artifact checks, separate Codex/Claude tests, operator checkpoints and an evidence template.
 
 ## Acceptance and release
 
@@ -70,8 +72,11 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
   afterward.
 - [ ] Keep the intermittent Codex desktop text-visibility incident open until its cause and
   resolution are established. Removing the wait does not prove that display behavior is fixed.
-- [ ] After acceptance passes, cut 1.4.3 and refresh the Codex cachebuster; verify version parity,
-  both full suites, packaging and an installed-artifact smoke check. Do not bump early.
+- [x] Prepare unpublished 1.4.3 metadata and refresh the Codex cachebuster before final Linux
+  acceptance, so the last platform test exercises the intended release identity. This supersedes
+  the earlier plan to bump after Linux testing. It does not publish a tag or GitHub release.
+- [ ] Complete final artifact suites, installation and Linux acceptance against one frozen
+  candidate SHA. Publish only that tested candidate after the release decision and approval.
 - [x] Review what will become public, including history if changing repository visibility.
   The existing content scanner checks the shipping tree, not every historical revision.
 - [x] Prepare current GitHub release notes and the public install/reporting instructions. Keep
@@ -83,7 +88,8 @@ practical. Do not stage the operator's existing handover edits or untracked Linu
 Before this work, the local root suite passed 1,701 tests with 8 skipped and the Codex suite
 passed. CI on the pushed runtime passed the macOS/Python matrix, Ubuntu/Python 3.9 through 3.14,
 Git 2.25 and Pi checks. Local layering, version parity and release-content scanning passed.
-Version identity is still 1.4.2. Keep the human acceptance gates pending until actually exercised.
+Version identity is now an unpublished 1.4.3 candidate. Keep the human acceptance gates pending
+until actually exercised; earlier CI results are not current-candidate CI evidence.
 
 ### Current verification
 
@@ -106,8 +112,8 @@ Version identity is still 1.4.2. Keep the human acceptance gates pending until a
   and default Ubuntu account paths, also reachable from remote refs/tags. Those do not appear
   in the current shipping tree. This pattern scan is limited to the existing scanner's rules;
   publishing an export remains distinct from exposing all repository history.
-- [Draft release notes](../release-1.4.3.md) are prepared locally. No version bump or publication
-  has occurred.
+- [Draft release notes](../release-1.4.3.md) are prepared. Version metadata is stamped for final
+  acceptance; no tag, GitHub release or visibility change has been published for 1.4.3.
 - Desktop acceptance on 2026-10-17 passed restart/persistence, commit rejection and correction,
   and commit-review Escape/retry in a detached disposable worktree. The release branch was not
   changed by these fixture commits. Reply cancellation failed: the timed observer saw the
@@ -116,6 +122,17 @@ Version identity is still 1.4.2. Keep the human acceptance gates pending until a
   a desktop delivery limitation rather than proving cancellation during the actual GUI check.
   Both READMEs and the draft release notes now qualify the behavior. The local timing report
   and remaining operator checks are recorded in the uncommitted handover.
+- Delay removal is pushed in `d9db155`: 23 new regressions failed before implementation;
+  38 focused checks passed afterward. The unchanged-runtime baseline is 901 passing Codex tests
+  and 1,703 passing root tests with 8 skips, run in `dev-env`. The same-label local install
+  matched all 105 tracked package files and passed its MCP inventory/preservation checks.
+  The operator reported restarting afterward; immediate-review and post-change Escape checks
+  still require direct host evidence. Metadata/docs preparation does not establish those passes.
+- GitHub's jobs did not start because of the account's payment/spending-limit restriction.
+  Current [Python](https://github.com/rladr-org/reviewer-agent/actions/runs/39205042409) and
+  [Pi](https://github.com/rladr-org/reviewer-agent/actions/runs/39205042289) runs are blocked by
+  that infrastructure issue, not demonstrated code failures. The owner must resolve billing
+  before rerunning CI. The local Pi dependency audit reported zero vulnerabilities.
 
 ### Supervisor diagnosis
 

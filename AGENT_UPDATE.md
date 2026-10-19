@@ -270,15 +270,16 @@ shows the new version.
 The Codex plugin is a separate package with its own procedure, summarised here; the authoritative
 copy is [`plugins/reviewer-agent-codex/README.md`](plugins/reviewer-agent-codex/README.md#update-disable-and-uninstall).
 
-Codex, like a Directory-source Claude Code install, resolves an installed local plugin **by version
-string** and will serve its cache for an unchanged version. The `+codex.<timestamp>` build metadata
-exists precisely to defeat that: refreshing it is what makes Codex notice a reinstall.
+Codex resolves cached plugins by version string. Published candidates already contain their
+version and `+codex.<timestamp>` build metadata; keep those committed values when updating.
+The supported local installer also refreshes the canonical cache at an unchanged label while
+preserving displaced live cache directories for running sessions. Refreshing the cachebuster is
+a maintainer's release-preparation step, not an end-user update step.
 
 ```bash
-git -C <PLUGIN_DIR> pull                         # if updating a tracked checkout
+git -C <PLUGIN_DIR> pull --ff-only               # if updating a clean tracked checkout
 python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
 (cd <PLUGIN_DIR>/plugins/reviewer-agent-codex && python -m pytest -p no:cacheprovider)
-python3 <PLUGIN_DIR>/tools/release_cachebuster.py  # refresh +codex.<UTC>; never edit it by hand
 python3 <PLUGIN_DIR>/plugins/reviewer-agent-codex/scripts/install_local.py
 ```
 
@@ -343,8 +344,10 @@ structural and parity checks — see [`CONTRIBUTING.md`](CONTRIBUTING.md#running
 
 ## Testing an unreleased build without a version bump
 
-A version bump on the public repository tells every user to upgrade, so it waits until testing is
-complete. There are two ways to try unreleased commits first.
+Usually keep the existing version while diagnosing unreleased changes. For final acceptance,
+maintainers may first freeze the next release's metadata so the last platform test exercises
+the intended version; a version bump alone does not publish a GitHub release. There are two
+ways to try unreleased commits without changing their version locally.
 
 **Commits already pushed to `main` (GitHub source):** stay on the GitHub marketplace and reinstall
 at the same label. `claude plugin update` alone copies nothing here (see
