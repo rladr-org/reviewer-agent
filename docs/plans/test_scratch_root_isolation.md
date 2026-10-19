@@ -36,3 +36,13 @@ conftest has no equivalent gap.
 3. Add the conftest fixture; run the regression plus `test_scratch_cleanup.py`,
    `test_commit_hook.py` and `test_session_start_hook.py` green; confirm a run of
    those files leaves nothing new in the real scratch root; commit.
+
+## Verification
+
+- Plan commit: `abb7002`; red test commit: `fdfa2d7` (1 failed: the root resolved to
+  the real `$TMPDIR/reviewer-agent-scratch`).
+- Reproduced on macOS before the fix: `test_commit_hook.py` + `test_session_start_hook.py`
+  left 12 empty dirs in the real root (`sid-A`..`sid-H`, `sid-1`, `sid-EF`,
+  `preexisting-sid`, `fake-session-0001`); removed by name afterwards.
+- After the fix, `test_scratch_cleanup.py`, `test_commit_hook.py` and
+  `test_session_start_hook.py` passed (91 tests) and added nothing to the real root.
