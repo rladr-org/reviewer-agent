@@ -412,15 +412,17 @@ for `python3`:
 git -C <PLUGIN_DIR> worktree add --detach <TEST_TREE> '@{upstream}'
 python3 -m venv <TEST_VENV>
 <TEST_VENV>/bin/python -m pip install -r <TEST_TREE>/requirements-dev.txt
-cd <TEST_TREE> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
+cd <TEST_TREE> && <TEST_VENV>/bin/python -m pytest -m smoke -q -p no:cacheprovider -rs
 cd <TEST_TREE> && python3 tools/check_split_layering.py
 cd <TEST_TREE> && python3 tools/release_versions.py
 ```
 
-The suite takes several minutes (about 1,700 tests). If your shell's foreground timeout is shorter,
-run it in the background and wait for its final exit status; do not continue while it is running.
+`-m smoke` is the install-time subset and takes under a minute. A published release has already
+passed the full suite (about 1,700 tests, 5–12 minutes); that is for maintainers
+([`CONTRIBUTING.md`](CONTRIBUTING.md#running-the-suites)), not for an update.
 
-**Check:** the suite passes (a small number of environment-dependent skips is normal);
+**Check:** every smoke test passes, with only the skips listed in
+[`AGENT_INSTALL.md` step 3](AGENT_INSTALL.md#step-3--verify-the-checkout-before-trusting-it);
 `check_split_layering.py` prints `PASS [VERIFY]: acyclic, zero back-edges`; and
 `release_versions.py` prints `PASS: every declared version normalizes to <version>`. That version
 must be **newer** than the installed one from step 1. If it is the same, `claude plugin update` will
