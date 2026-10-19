@@ -42,6 +42,18 @@ def _never_spend_a_real_reviewer_call(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _private_scratch_root(tmp_path, monkeypatch):
+    """Point the reviewer scratch root inside EVERY test's own tmp_path.
+
+    Linux testing 2026-10-18 found sid-A, sid-EF, preexisting-sid and fake-session-0001 in the
+    operator's real $TMPDIR/reviewer-agent-scratch: any test that audits a commit creates a scratch
+    dir, and only a few set this themselves. Those dirs outlived uninstall (only the plugin's own
+    sweep removes them) and could share a name with a real session's dir. setenv (not a patch) so
+    hook subprocesses inherit it; tests that set their own root still win."""
+    monkeypatch.setenv("REVIEWER_SCRATCH_ROOT", str(tmp_path / "reviewer-agent-scratch"))
+
+
+@pytest.fixture(autouse=True)
 def _no_stop_reading_delay(monkeypatch):
     """The stop review waits 60 s by default so the operator can read the reply first. No test
     may sit through that wait; tests of the delay set the variable themselves."""

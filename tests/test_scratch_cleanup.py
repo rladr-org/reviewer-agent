@@ -38,6 +38,19 @@ def _age(path, seconds):
 
 
 # --------------------------------------------------------------------------
+# test isolation: no test writes into the operator's real scratch root
+# --------------------------------------------------------------------------
+def test_every_test_gets_a_private_scratch_root(tmp_path):
+    # Linux testing 2026-10-18 found sid-A, sid-EF, preexisting-sid and fake-session-0001 in the
+    # real $TMPDIR/reviewer-agent-scratch after an update's test run. No per-test setup here: the
+    # root must come from conftest, sit inside THIS test's tmp_path (so no two tests share one),
+    # and be exported so hook subprocesses inherit it too.
+    root = rl.commit_scratch_root()
+    assert os.environ.get("REVIEWER_SCRATCH_ROOT") == str(root)
+    assert tmp_path in root.parents
+
+
+# --------------------------------------------------------------------------
 # scratch_key + commit_scratch_dir: per-id path, filesystem-safe, stable, lazy-create
 # --------------------------------------------------------------------------
 def test_scratch_key_rejects_falsy_and_is_filesystem_safe():
