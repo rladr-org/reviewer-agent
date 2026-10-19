@@ -57,7 +57,12 @@ cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py stopcontinue "delay sta
 cd <TARGET_REPO> && python3 <PLUGIN_DIR>/reviewer_cmd.py watchdog status
 ```
 
-Do not run the `agent` or `stopcontinue` subcommands with any other argument: those change state.
+Use the **currently installed** `<PLUGIN_DIR>`: the walkthrough confirms the values in effect now.
+A version older than 1.4.3 has no `delay` form; its `stopcontinue` prints a `usage:` line instead,
+changes nothing, and that version has no configurable Stop delay. The new release can introduce
+settings and defaults the old one lacks (1.4.3 adds the 60-second Stop delay); name them on the
+screen as what the update will add. Do not run the `agent` or `stopcontinue` subcommands with any
+other argument: those change state.
 These show nothing for the supervisor's effort. Resolve it by hand: `REVIEWER_STOPCONTINUE_EFFORT`
 in the hooks' environment, else `stopContinueEffort` in `~/.claude/reviewer-agent/config.json`,
 else `low`. Feature state is the `<project-stem>.active` (commit review) and
@@ -289,10 +294,19 @@ sources:**
   Claude Code 2.1.302 on 2026-10-17: main had moved from `1de0d8f` to `fffa4f5` under the same
   1.4.2 label, and the update was a no-op. End users are unaffected, because every release bumps
   the version. Commits pushed between releases are what it misses.
-- A **local Directory** source — a checkout you `marketplace add`ed by path, i.e. the developer
-  case. **If the version string has not changed, `claude plugin update` copies nothing, even
+- A **local Directory** source — a checkout you `marketplace add`ed by path. That is the
+  developer case, and also every installation made with [`AGENT_INSTALL.md`](AGENT_INSTALL.md).
+  **If the version string has not changed, `claude plugin update` copies nothing, even
   though the files on disk have changed.** A day of committed work behind an unchanged `version`
-  is invisible to it.
+  is invisible to it. Nothing fetches new commits into the checkout either: an end user's
+  checkout gets the new release only from `git pull` (step 2).
+
+**A Directory source's hooks run from the checkout itself, not from the cached copy.** Verified
+with Claude Code 2.1.303 on 2026-10-19: the live `PreToolUse` hook ran
+`python3 <checkout>/commit_hook.py`, while `installed_plugins.json` named the `…/1.3.1/` cache
+directory. So for a Directory source, changing the checkout's files changes the code every
+running session executes, at once, under that session's existing hook list. `git pull` is the
+moment the new code goes live, and `claude plugin update` mostly updates the recorded metadata.
 
 So **a release must bump the version**, or installed copies stay stale with no error (see
 [Release procedure](CONTRIBUTING.md#release-procedure) and the checklist at the end of this file).
@@ -311,15 +325,16 @@ An update writes outside the repository. The full list, before the first command
 
 | path | what an update does | reversible? |
 |---|---|---|
+| Directory source only: the checkout (`<PLUGIN_DIR>`) | `git pull --ff-only` (step 2) brings in the new release; running sessions execute these files directly | yes, `git -C <PLUGIN_DIR> reset --hard <previous HEAD>` (record it first) |
 | Claude Code's plugin cache (`~/.claude/plugins/cache/reviewer-agent/…/<version>/`) | a **new** version directory is copied in; the previous one remains until the host garbage-collects it | yes, roll back by reinstalling the prior version |
 | `~/.claude/plugins/installed_plugins.json` | the `reviewer-agent` entry's `version`, `installPath`, `gitCommitSha` and `lastUpdated` are rewritten | yes, reinstall |
 | `~/.claude/reviewer-agent/` (flags, risk receipts, backend selection, sessions, verdicts, logs) | **preserve and verify** — compare feature flags and receipt validity after update; a current receipt needs no re-acceptance. Confirm effective settings with the user before changing them | n/a |
 | `~/.pi/agent/extensions/git-read-only/` | **nothing** — a plugin update does **not** refresh the Pi extension. If the extension changed and you use the `pi` backend, refresh it by hand (step 6) | yes, delete the directory |
-| the **running** Claude Code session | after a version bump, **nothing takes effect until restart** — the hook list is snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted. A same-version reinstall is the exception: it replaces the scripts in place, so the live session runs the new scripts under its old hook list (step 5) | n/a |
+| the **running** Claude Code session | Directory source: the scripts change at the `git pull`, the hook list at the restart. GitHub source: after a version bump, **nothing takes effect until restart** — the hook list is snapshotted per session, so the live session keeps running the old code (the gate still works, on the old version) until Claude Code is restarted. A same-version reinstall is the exception: it replaces the scripts in place, so the live session runs the new scripts under its old hook list (step 5) | n/a |
 
 **What this gates is a fail-closed commit gate.** An update never disables it. Throughout the
-version-bump update the repository stays gated on the old code, and after the restart it is gated on
-the new code. The one gap is the uninstall-then-reinstall fallback (step 4), which is briefly
+version-bump update the repository stays gated on the old code (for a Directory source, until the
+pull in step 2), and after the restart it is gated on the new code. The one gap is the uninstall-then-reinstall fallback (step 4), which is briefly
 ungated between the two commands — a reason to prefer the version bump; on the version-bump path, at
 no point is it ungated. That is intended.
 
@@ -365,22 +380,43 @@ python3 -c "import json,os;e=json.load(open(os.path.expanduser('~/.claude/plugin
 - **Source label:** Claude Code 2.1.303 prints a local source as `Folder (/path/to/checkout)`; older
   versions print `Directory (/path/to/checkout)`. Both mean the Directory source in this guide.
 
-## Step 2 — verify the checkout before trusting it (Directory source)
+## Step 2 — fetch, verify, then pull the new release (Directory source)
 
-Skip to step 3 for a GitHub source. For a Directory source you are the one publishing the new code,
-so prove it first — do not ship a gate whose own tests fail.
+Skip to step 3 for a GitHub source. A Directory source's hooks run from the checkout
+([above](#the-one-thing-that-trips-up-every-local-update)), so the moment the checkout changes, the
+new code is live. Prove the new release **before** it reaches the checkout — do not put a gate whose
+own tests fail in front of the target.
 
-The suite needs pytest and the other development dependencies, which the plugin itself does not
-use and which a normal `python3` usually lacks (`No module named pytest`). Install them into a test
-environment. Choose a new `<TEST_VENV>` **outside** the checkout; it may be temporary, because only
-the tests use it. Use a Python 3.9+ interpreter for `python3`:
+**2a. Fetch and see what is new.** The checkout must be clean and on a branch that tracks the
+release source (`origin/main` for a clone of the GitHub repository):
 
 ```bash
+git -C <PLUGIN_DIR> status --short --branch      # no file lines; first line names the upstream
+git -C <PLUGIN_DIR> rev-parse HEAD               # record: the rollback point
+git -C <PLUGIN_DIR> fetch
+git -C <PLUGIN_DIR> log --oneline -1 '@{upstream}'
+git -C <PLUGIN_DIR> rev-list --count 'HEAD..@{upstream}'
+```
+
+**Check:** `status` lists no files, and the count is greater than 0. A count of 0 means there is
+nothing to update: stop and report. If `status` lists files, stop and report — local edits are
+the operator's, and a pull would mix them into the gate (and an install would copy them; see
+above). Do not stash or discard them.
+
+**2b. Test the fetched release in a temporary worktree**, outside the checkout. Running the suite
+in a separate tree leaves the live checkout untouched until it passes. The suite needs pytest and
+the other development dependencies, which the plugin itself does not use and which a normal
+`python3` usually lacks (`No module named pytest`). Choose a new `<TEST_VENV>` and a new
+`<TEST_TREE>`, both outside the checkout; both may be temporary. Use a Python 3.9+ interpreter
+for `python3`:
+
+```bash
+git -C <PLUGIN_DIR> worktree add --detach <TEST_TREE> '@{upstream}'
 python3 -m venv <TEST_VENV>
-<TEST_VENV>/bin/python -m pip install -r <PLUGIN_DIR>/requirements-dev.txt
-cd <PLUGIN_DIR> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
-cd <PLUGIN_DIR> && python3 tools/check_split_layering.py
-cd <PLUGIN_DIR> && python3 tools/release_versions.py
+<TEST_VENV>/bin/python -m pip install -r <TEST_TREE>/requirements-dev.txt
+cd <TEST_TREE> && <TEST_VENV>/bin/python -m pytest tests/ -q -p no:cacheprovider
+cd <TEST_TREE> && python3 tools/check_split_layering.py
+cd <TEST_TREE> && python3 tools/release_versions.py
 ```
 
 The suite takes several minutes (about 1,700 tests). If your shell's foreground timeout is shorter,
@@ -388,9 +424,22 @@ run it in the background and wait for its final exit status; do not continue whi
 
 **Check:** the suite passes (a small number of environment-dependent skips is normal);
 `check_split_layering.py` prints `PASS [VERIFY]: acyclic, zero back-edges`; and
-`release_versions.py` prints `PASS: every declared version normalizes to <version>`. The version it
-names is what you are about to publish — confirm it is the **new** number, not the installed one. If
-it still shows the installed number, bump it first (see the [checklist](#appendix--cutting-the-new-version-directory-source)).
+`release_versions.py` prints `PASS: every declared version normalizes to <version>`. That version
+must be **newer** than the installed one from step 1. If it is the same, `claude plugin update` will
+skip it (step 4). An end user stops and reports here; only a maintainer cutting the release bumps
+it (see the [checklist](#appendix--cutting-the-new-version-directory-source)).
+
+Then remove the worktree (`git -C <PLUGIN_DIR> worktree remove <TEST_TREE>`).
+
+**2c. Pull.** Only after the settings walkthrough's configuration questions are answered (the pull
+changes the code and the installed `DISCLAIMER.md` that every running session uses):
+
+```bash
+git -C <PLUGIN_DIR> merge --ff-only '@{upstream}'
+git -C <PLUGIN_DIR> rev-parse HEAD '@{upstream}'
+```
+
+**Check:** both hashes are equal, and equal to the commit you tested in 2b.
 
 For the full backend matrix (Claude Code × codex/pi/claude and native Codex), see
 [*Testing an update across every supported backend*](#testing-an-update-across-every-supported-backend).
