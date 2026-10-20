@@ -38,7 +38,7 @@ Various methods have been used to prevent this, including Ralph Loops and Claude
 So one separately controllable feature of this package is stop-continue which does exactly that, using the same model 
 as reviewer-agent but a separate session. 
 
-# Examples: commits the gpt-5.6-luna reviewer stopped
+# Examples: Claude Fable 5.1 bugs caught by an inexpensive gpt-5.6-luna reviewer
 
 Two real commit gate rejections from a private data-pipeline project, made on the same day with the same models. The gpt-5.6-luna reviewer's text is verbatim.
 
