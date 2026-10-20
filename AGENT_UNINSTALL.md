@@ -19,7 +19,7 @@ Code)*](README.md#update-disable-and-uninstall-claude-code) is shorter.
 
 ## Codex uninstall and reinstall
 
-Use the supported uninstaller directly, then verify removal before starting a separate install.
+Use the documented uninstaller directly, then verify removal before starting a separate install.
 Do not create a temporary script that combines uninstall, checks and reinstall, or put reinstall
 in an unconditional cleanup/finally block. A failed check must remain visible and stop the
 procedure. If the instructions cannot be followed, record the gap and correct this document
@@ -27,9 +27,15 @@ before continuing; an improvised wrapper does not validate these instructions.
 
 ### C1 — identify the installation and preserve a baseline
 
-Confirm whether the user wants a full uninstall or a deliberate uninstall/reinstall test. An
+Confirm whether the user wants a full uninstall or a deliberate uninstall/reinstall test, and
+whether retained settings and history should survive. An
 explicit request for that test already authorizes both steps; do not ask again. If they only want
 one repository's reviews stopped, use the documented per-repository controls instead.
+Offer two removal modes: **uninstall and keep settings/history** (the default), or **full
+uninstall**, removing both features' plugin configuration and history across all repositories.
+Full uninstall is available whether or not the operator plans to reinstall. If they explicitly
+request it, follow [C3a](#c3a--full-uninstall-remove-plugin-configuration-and-history) after the removal restart.
+That request authorizes the reset; do not ask for the same permission again.
 
 Identify `<TARGET_REPO>`, `<INSTALLER_REPO>` (the permanent combined checkout or verified export),
 the installed cache path/version, and a permanent Python 3.9+ `<RUNTIME_PYTHON>`. Record the source
@@ -49,7 +55,8 @@ validity. Keep the user's project brief unchanged. Ensure no review or commit is
 Explain the external paths before requesting normal host approval: this plugin's installed entry,
 canonical cache under `~/.codex/plugins/cache/`, entry in `~/.agents/plugins/marketplace.json`,
 `~/plugins/reviewer-agent-codex` source link, and saved `python-path` will be removed. Retained
-state, other plugins, unrelated configuration and the permanent source must survive.
+state, other plugins, unrelated configuration and the permanent source must survive this initial
+removal. For an explicitly requested full reset, retained state is removed in C3a after restart.
 
 Back up the existing files privately. The command prints the path; use that exact absolute path
 as `<BACKUP>` in later steps, since shell variables do not persist between tool calls.
@@ -80,7 +87,7 @@ printf 'Backup: %s\nState: %s\n' "$reviewer_backup" "$reviewer_state"
 backup failures. Keep raw configuration and reviewed-code history private. For a procedure test,
 retain snapshots at each phase rather than only a boolean comparison result.
 
-### C2 — run the supported uninstaller
+### C2 — run the documented uninstaller
 
 Invoke this command directly and retain its actual output and exit status:
 
@@ -88,7 +95,7 @@ Invoke this command directly and retain its actual output and exit status:
 "<RUNTIME_PYTHON>" "<INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/uninstall_local.py"
 ```
 
-Do not use `--purge-state`. Read both the removed items and warnings; exit zero alone is not a
+Do not use `--purge-state` during this initial removal from the still-loaded host. Read both the removed items and warnings; exit zero alone is not a
 complete removal check. The uninstaller deliberately reports one manual edit: removing
 `mcp__reviewer_agent` from `features.code_mode.direct_only_tool_namespaces`. Leave other entries
 alone. For a reinstall test, retain this entry because installation still needs it. For permanent
@@ -127,6 +134,60 @@ missing-plugin errors. Preserve unrelated hooks and MCP servers. Do not manufact
 commit in a real project to prove removal. If removal or the host restart is unverified, report
 it as pending; do not silently reinstall and call the entire cycle successful.
 
+### C3a — full uninstall: remove plugin configuration and history
+
+Run this only when the operator has explicitly requested full removal including this plugin's
+settings and history. It removes commit review and Stop supervision state for **all repositories in the resolved
+reviewer state directory**, not just the current target. Preserve Codex authentication, unrelated
+configuration, project source and hand-written `reviewerAgent.md` briefs. Backups outside the
+active plugin directories may remain; disclose their location and that they still contain the
+saved history. If the operator also wants those backups deleted, that is a separate explicit
+choice. Do not restore their settings during a fresh-install test.
+
+Before the initial uninstall, extend C1's private baseline with the plugin's saved hook-trust
+entries in `config.toml`, direct-tool namespace and any parked cache siblings named
+`.reviewer-agent-codex-live-*`. Verify their ownership by checking their plugin manifests;
+an unexpected directory is not safe to remove just because its name looks similar. Record any
+`REVIEWER_CODEX_*` environment overrides that could affect defaults, without exposing secrets.
+Keep backups of each plugin-owned directory that will be removed.
+
+After C3 confirms that the fresh host no longer loads the plugin, ensure other host sessions
+using this plugin have ended too. A shared host daemon can retain an idle reviewer MCP process
+even after the terminal session restarts. If one remains, verify its exact plugin entrypoint and
+source/cache directory, and confirm it has no active review or child process before terminating
+only that leftover reviewer server. Do not terminate unrelated Codex processes. Record the
+cleanup; an active reviewer must finish or be explicitly cancelled before proceeding.
+Then run the official uninstaller again, this time with its
+explicit state-purge option, from the same permanent source:
+
+```bash
+"<RUNTIME_PYTHON>" "<INSTALLER_REPO>/plugins/reviewer-agent-codex/scripts/uninstall_local.py" --purge-state
+```
+
+Verify that the resolved state directory is absent, including settings, flags, risk receipts,
+review history and reviewer/Stop session records. A live old host can recreate it; investigate
+reappearance before claiming a reset. Check the fixed default interpreter-selection path too
+when a custom `REVIEWER_CODEX_STATE_DIR` is used. Do not delete a shared custom directory without
+first establishing that its contents belong entirely to this plugin.
+
+Remove only this plugin's remaining configuration: `mcp__reviewer_agent` from
+`features.code_mode.direct_only_tool_namespaces`, and hook-state entries whose exact plugin ID
+prefix is `reviewer-agent-codex@<MARKETPLACE>:`. Preserve other namespaces and hook-trust entries.
+Use a targeted edit or the host's configuration interface, retaining raw before/after snapshots
+and checking parsed values; do not replace the entire configuration with a template. After all
+old plugin sessions have ended, remove the previously identified parked plugin caches. Keep
+the permanent installer source and private backups outside active cache/state locations.
+
+**Check:** no plugin registration, source link, canonical/parked plugin cache, saved hook trust,
+direct namespace, settings, flags, receipts or retained review history remains in active
+locations. Unrelated configuration and authentication must match the baseline. Project briefs
+are intentionally preserved. Host-wide Codex conversation logs are not plugin-managed review
+history and must not be purged. If environment overrides remain, report them; do not describe
+the resulting settings as untouched defaults. Save evidence of this empty plugin baseline
+before any reinstall. For permanent removal, report completion here and skip C4. If reinstalling
+to test first-time setup, this establishes an empty plugin baseline in an existing Codex setup,
+not installation of Codex on a clean operating-system account.
+
 ### C4 — reinstall through the initial-install guide, when requested
 
 After the uninstall checks pass, start
@@ -139,10 +200,14 @@ update command or a combined uninstall/reinstall helper.
 Preserved state makes this a reinstall, not a clean-profile installation. Existing current risk
 receipts need no repeat acceptance and enabled/disabled choices must be preserved. To exercise
 first-time setup, use a separate disposable target without a receipt and open the developer host
-there; do not purge existing state to simulate it. A new target tests first-time repository setup,
-not a clean host profile. Record these as distinct coverage.
+there; do not purge existing state without the explicit full-removal request required by C3a.
+A new target tests first-time repository setup,
+not a clean host profile. Record these as distinct coverage. The explicitly authorized C3a reset
+is the exception: it tests installation without prior plugin configuration or acceptance receipts.
 
-After reinstalling, compare files and effective settings with the baseline, complete the operator
+After a state-preserving reinstall, compare files and effective settings with the baseline. After
+C3a, verify fresh defaults and disabled features before operator choices; old settings and risk
+acceptance must not return. Complete the operator
 restart, then verify a real gated commit and automatic Stop in the intended enabled test target.
 Report uninstall, reinstall, restart and host checks separately. The rest of this document is for
 Claude Code and must not be run for native Codex.

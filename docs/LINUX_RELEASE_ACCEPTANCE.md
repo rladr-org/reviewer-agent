@@ -59,7 +59,12 @@ initial-install guide works, and an ad hoc combined cycle does not validate the 
 An uninstall that preserves reviewer state is not a clean-profile installation. Use a new
 disposable target without a receipt to exercise first-time brief creation and operator
 acceptance, while keeping the existing targets' state and unrelated host settings. Do not purge
-real reviewer state merely to simulate a clean machine. Report clean-profile coverage separately.
+real reviewer state merely to simulate a clean machine. If the operator explicitly requests a
+full uninstall including all plugin configuration and history, follow
+[AGENT_UNINSTALL.md C3a](../AGENT_UNINSTALL.md#c3a--full-uninstall-remove-plugin-configuration-and-history),
+verify the empty plugin baseline, then follow the initial-install guide. This tests first-time
+plugin installation in an existing host account; it does not establish clean-account or
+clean-machine coverage. Report these separately.
 
 ## 1. Record the environment and preserve state
 

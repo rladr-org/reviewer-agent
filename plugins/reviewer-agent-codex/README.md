@@ -459,8 +459,8 @@ For the complete agent procedure, follow
 backup, removal checks, a fresh-host checkpoint and the handoff to the initial-install guide.
 Run each documented step directly; do not combine uninstall and reinstall in a temporary wrapper.
 
-**Uninstall**, which removes this plugin's configuration and nothing else — other plugins,
-marketplaces, MCP servers and settings are left alone:
+**Uninstall and keep settings/history** (the default). Other plugins, marketplaces, MCP servers
+and unrelated settings are left alone:
 
 ```bash
 python3 plugins/reviewer-agent-codex/scripts/uninstall_local.py
@@ -468,16 +468,29 @@ python3 plugins/reviewer-agent-codex/scripts/uninstall_local.py
 
 It asks Codex to remove the installed plugin, deletes its cache and its entry in the personal
 marketplace, and removes the `~/plugins/reviewer-agent-codex` symlink pointing at this checkout.
-It is designed to tolerate a repeat run or a half-finished prior install. Two things it does not do:
+It is designed to tolerate a repeat run or a half-finished prior install. Some data remains:
 
 - **Retained verdicts and reviewer state survive.** They are your data, not installer output.
-  Add `--purge-state` to delete `~/.codex/reviewer-agent-codex/` as well, or use
+  After restarting without the plugin, add `--purge-state` to delete the resolved reviewer state
+  directory (normally `~/.codex/reviewer-agent-codex/`) as well, or use
   `$reviewer-agent-codex:reviewer-history clear` to purge one repository's review record while
   keeping the plugin.
 - **One config edit is left to you.** Installation added `mcp__reviewer_agent` to
   `features.code_mode.direct_only_tool_namespaces` through Codex's own config RPC. Removing one
   entry from a shared array is left manual to avoid rewriting a running host's shared setting, so the uninstaller
   prints the exact edit instead. Leave the other namespaces alone.
+- **Saved hook trust and parked caches can remain.** These need separate cleanup for full
+  removal; `--purge-state` alone does not remove them.
+
+**Full uninstall**, including commit-review and Stop-supervisor settings, flags, risk receipts,
+sessions and review history for all repositories: follow the
+[full-uninstall procedure](../../AGENT_UNINSTALL.md#c3a--full-uninstall-remove-plugin-configuration-and-history).
+It backs up the data, removes the plugin, verifies removal after a host restart, purges state,
+then removes only this plugin's saved hook trust, direct namespace and identified parked caches.
+Codex authentication, unrelated settings and hand-written project briefs are preserved. Private
+backups still contain the old data and are reported separately. Full uninstall does not require
+reinstallation; if a first-time installation test is requested, verify an empty plugin baseline
+before following the initial-install guide.
 
 ### Changing the existing source directory
 
