@@ -7,7 +7,7 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
-## [1.4.3] — unreleased
+## [1.4.3]
 
 ### Changed
 
@@ -47,6 +47,10 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Claude Code: session start warns when the plugin runs from a temporary directory such as
   `/tmp`. The OS can delete those files, and every hook then fails open, the commit gate
   included.
+- Install, update and uninstall guides (both hosts) walk through settings and enablement one
+  screen at a time in the restarted session, check that the hooks' `python3` is 3.9 or newer,
+  and verify the installed files against the release commit. Rewritten from Ubuntu 20.04 runs,
+  where 1.4.3 was verified on Claude Code (`codex` backend) and the Codex CLI.
 
 ### Fixed
 
@@ -62,6 +66,18 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Both hosts: the commit gate no longer crashes on a large stage. It passed every staged path to
   `git ls-files`, which failed with "Argument list too long" past about 8,800 files. It now reads
   the staged index from one `git diff --cached --raw` call.
+- Tests: the suite no longer creates folders in the real reviewer scratch directory
+  (`$TMPDIR/reviewer-agent-scratch`), which the install and update guides' test runs left
+  behind. Every test now gets its own scratch root.
+
+### Upgrade
+
+- `DISCLAIMER.md` now says the software can run commands in your repository, or have your
+  development agent run them, with any backend (previously "on one backend"). Accepting the risk
+  is tied to the disclaimer's text, so after updating, re-accept it with `on acceptRisk` or turn
+  the feature off.
+- Codex: the Stop hook changed (its timeout returns to 360 seconds). Trust it with `/hooks` in an
+  interactive Codex CLI, then restart the host.
 
 ## [1.4.2]
 

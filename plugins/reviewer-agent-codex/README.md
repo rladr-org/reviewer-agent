@@ -1,7 +1,7 @@
 # reviewer-agent-codex
 
 
-> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has daily private use on macOS Tahoe; an Ubuntu installation produced issue reports, and clean-host acceptance of the current fixes remains pending. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
+> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has daily private use on macOS Tahoe, and 1.4.3 was verified with the Codex CLI on Ubuntu 20.04. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
 
 > **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
 
@@ -48,15 +48,15 @@ The Codex GUI on macOS is tested. On macOS, Codex CLI 0.154.0 has also been exer
 host for stop supervision through automatic Stop rejection and retry. These smoke checks do not establish coverage of every
 interactive terminal, key binding, or the CLI commit-gate flow. See
 [CLI completion checks](#cli-completion-checks) for the repeatable procedure.
-The Ubuntu 1.4.3 candidate passed automated suites and actual CLI commit-review,
-Stop-supervision and uninstall/reinstall checks. Clean-profile acceptance remains pending.
+On Ubuntu 20.04, 1.4.3 passed the automated suites and was verified with the Codex CLI: commit
+review, Stop supervision, and uninstall and reinstall. Other distributions have not been tried.
 Windows through WSL2 is untested. Unit tests run in Linux and
 macOS CI, including Git 2.25 on Ubuntu. Native
 Windows will not work because the reviewer relies on POSIX process and signal APIs. WSL1
 will not work because [Codex's Linux sandbox](https://learn.chatgpt.com/docs/windows/wsl) uses
 `bubblewrap`, which requires WSL2.
 
-### Native Linux (clean-profile acceptance pending)
+### Native Linux
 
 Install Git, `curl`, and Python 3.9 or newer using the distribution's package manager. If Codex is
 not already installed and authenticated, use the

@@ -243,9 +243,10 @@ audits, rejections and approvals, stop supervision, cancellation, process cleanu
 run is not the same as living with something. Nothing selects them for you: `codex` is the
 fallback when nothing is configured.
 
-Both packages have also been installed on native Ubuntu 20.04, where installation and runtime
-issues were reported. Fixes have automated coverage, including Git 2.25, but clean-host acceptance
-of the current candidate is still pending. WSL2 has had neither installation nor CI coverage;
+On native Ubuntu 20.04, 1.4.3 was verified with Claude Code (`codex` backend) and the Codex CLI:
+commit review, Stop supervision, and update, uninstall and reinstall by the guides. Earlier
+installations there produced the issue reports behind the Linux fixes, which also have automated
+coverage, including Git 2.25. WSL2 has had neither installation nor CI coverage;
 other macOS versions have not been tried. **Even the top two rows are not guaranteed to
 work** — they worked on my machine but may not work on yours.
 
@@ -372,7 +373,7 @@ and leaves only the unavoidable human-only checkpoint.
 
 Prerequisites:
 
-- macOS (daily use), native Linux (current acceptance pending), or WSL2 (unverified), with a
+- macOS (daily use), native Linux (1.4.3 verified on Ubuntu 20.04), or WSL2 (unverified), with a
   Claude Code that has plugin support;
 - `python3` 3.9 or newer on `PATH`; the runtime is standard-library-only;
 - one authenticated reviewer backend: `codex`, `pi`, or the `claude` CLI you already have.
@@ -1176,10 +1177,11 @@ every one of them the answer is "not much".
   have had daily use. That is evidence it can work on one machine, not assurance it will work on
   yours.
 - **Other macOS versions** — never tried.
-- **Linux** — both packages were installed on Ubuntu 20.04, producing reports of installation,
-  command-detection, launcher and filesystem issues. Subsequent fixes have CI coverage (Ubuntu,
-  Python 3.9/3.12/3.14 and Git 2.25), but clean-host acceptance of the current candidate remains
-  pending. The earlier installation is evidence of use and findings, not a passing acceptance run.
+- **Linux** — 1.4.3 was verified on Ubuntu 20.04 with Claude Code (`codex` backend) and the
+  Codex CLI: commit review, Stop supervision, and update, uninstall and reinstall by the guides.
+  Earlier installations there reported installation, command-detection, launcher and filesystem
+  issues; the fixes have CI coverage (Ubuntu, Python 3.9/3.12/3.14 and Git 2.25). Other
+  distributions have not been tried.
 - **WSL2** — no CI, no manual run, nothing.
 - **Native Windows and WSL1** — the code is not written for them. The Claude Code package's
   Bash-oriented commands and both packages' POSIX process control have not been ported to native
@@ -1188,11 +1190,12 @@ every one of them the answer is "not much".
   uses `bubblewrap`, which WSL1 does not provide. A Claude Code plus Pi installation might work in
   WSL1; nobody has tried it.
 
-Linux and WSL2 are expected to work, because the runtime and process control use POSIX
-interfaces — but expected is not the same as tried, and this section exists to keep those apart.
-The host's own platform coverage says nothing about whether this project has ever been run there.
+Other Linux distributions and WSL2 are expected to work, because the runtime and process control
+use POSIX interfaces — but expected is not the same as tried, and this section exists to keep
+those apart. The host's own platform coverage says nothing about whether this project has ever
+been run there.
 
-### Native Linux (current acceptance pending)
+### Native Linux
 
 These directions apply to both hosts. Install Git, `curl`, and Python 3.9 or newer with the Linux
 distribution's package manager, and confirm that the interpreter is named `python3`:
