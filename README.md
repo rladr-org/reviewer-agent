@@ -20,11 +20,11 @@ So this project sets up a commit gate which does not allow a commit to proceed u
 completes a plan or code review. If the review agent specifies issues to fix, they must be fixed by the coding agent before 
 the commit will be allowed to proceed. 
 
-An interesting finding is that a small, inexpensive model like gpt-5.6-luna (which I run on xhigh and fast mode) when used as 
-a reviewer agent, finds numerous serious issues, omissions, and errors even when the coding agent is Fable 5, Opus 5, or 
-gpt-5.6-sol, all on xhigh mode. *Note that you can use any model as a reviewer!* 
+An interesting finding is that a small, inexpensive model like gpt-6-luna (which I run on xhigh and fast mode) when used as 
+a reviewer agent, finds numerous serious issues, omissions, and errors even when the coding agent is Fable 5.1, Opus 5.5, 
+gpt-6-astra or gpt-6.1-sol, all on xhigh mode. *Note that you can use any model as a reviewer!* 
 
-It can often take 3 to 9 commit attempts for Fable to get rid of all the bugs found by gpt-5.6-luna, and if you ask it
+It can often take 3 to 9 commit attempts for Fable to get rid of all the bugs found by gpt-6-luna, and if you ask it
 to weigh in on whether the required fixes are valid or not, it overwhelmingly agrees that they are real issues. 
 
 ## Don't stop - Continue! 
