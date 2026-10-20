@@ -52,7 +52,6 @@ def test_internal_docs_and_the_private_term_list_are_excluded_by_pattern():
 @requires_repository
 def test_no_handover_ever_ships():
     # A handover is the operator's working log: machine paths, environment names, session ids.
-    # 1.4.3's export shipped HANDOVER.md because it was tracked and nothing excluded it.
     for name in ("HANDOVER.md", "docs/HANDOVER-2026-10.md", "plugins/reviewer-agent-codex/HANDOVER.md",
                  "docs/plans/handover_notes.md"):
         assert rex.is_excluded(name), name

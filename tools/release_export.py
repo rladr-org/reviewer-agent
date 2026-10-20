@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 """Build the public release tree: what ships, what never ships, and a reproducible archive.
 
-The public repository is created from an EXPORT, not from this checkout: it gets one root
-commit containing exactly the files listed here. Two properties matter more than convenience.
+The release archive attached to each release page is built from an EXPORT, not from this
+checkout: it contains exactly the files listed here. Two properties matter more than convenience.
 
 EXPLICIT EXCLUSION, NOT IGNORE RULES. `.gitignore` decides what Git tracks, which is a different
 question from what a release publishes -- `docs/plans/` ships and `docs/internal/` does not, and

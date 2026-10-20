@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Create and verify the offline archive of the private development history.
+"""Create and verify an offline archive of a repository's full history.
 
-The public repository will have one root commit and no ancestry. Everything before it -- the
-reasoning, the failures, the measurements recorded in commit messages -- survives only in this
-bundle, and only if the bundle actually works. `git bundle create` succeeding proves nothing
-about that: the useful question is whether a repository can be RESTORED from it and worked in.
+The history -- the reasoning, the failures, the measurements recorded in commit messages --
+survives in this bundle only if the bundle actually works. `git bundle create` succeeding proves
+nothing about that: the useful question is whether a repository can be RESTORED from it and
+worked in.
 
 So `verify` does all of:
 
@@ -112,10 +112,10 @@ def resolve_source(bundle_manifest, source=UNSET):
     `None` means "compare against the recorded manifest instead", and that is the normal case
     once the private repository is gone -- which is exactly when an offline copy gets checked.
 
-    The automatic choice is not "whatever repository this script lives in". After the cutover
-    this tool ships INSIDE the public repository, which is a perfectly valid Git repository
-    with one root commit and none of the private history: comparing a good private bundle
-    against it would fail every ref check and read as a corrupt archive. So a candidate source
+    The automatic choice is not "whatever repository this script lives in". The checkout this
+    tool runs from may be a perfectly valid Git repository that shares no commit with the
+    bundle: comparing a good bundle against it would fail every ref check and read as a
+    corrupt archive. So a candidate source
     is used only if it actually contains the commit the manifest recorded as HEAD.
     """
     if source is None:

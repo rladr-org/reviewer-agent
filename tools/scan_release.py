@@ -4,7 +4,7 @@
 
 Publishing is irreversible in a way that a bad release is not: an address is scraped, a token is
 used, a home path names a person. So this runs over the repository on every pull request AND
-over the generated export before it becomes a public repository, and it does not trust
+over the generated export before it is published as the release archive, and it does not trust
 `.gitignore` to be the boundary -- ignore rules are one line away from including a directory
 nobody meant to publish, and `docs/plans/` versus `docs/internal/` differ by exactly that.
 

@@ -9,8 +9,8 @@ The tests in question are all release checks *about the repository*: which files
 whether the export excludes the right ones, whether any content quotes a private commit id.
 Outside a repository those questions have no answer, so they skip with a reason rather than
 failing. The release matrix runs them against an export that HAS been initialised as a
-repository, which is the state the public repository is actually created in, so nothing is
-skipped where it matters.
+repository, as someone who unpacks the release archive and runs `git init` would have, so
+nothing is skipped where it matters.
 """
 import subprocess
 from pathlib import Path

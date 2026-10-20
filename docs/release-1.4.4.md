@@ -4,11 +4,9 @@ Reviewer Agent provides separate commit review and stop supervision for Claude C
 an independent reviewer audits each `git commit` before it lands, and a supervisor reviews each
 stop so the agent does not quit before the request is done.
 
-This is the first public release. It is functionally identical to 1.4.3 and differs only in
-what the repository publishes: the maintainer's working handover log is no longer tracked and
-can never ship in the export, and the shipped design plans no longer name the maintainer's
-local environment or reviewed projects. For everything that changed in 1.4.3, see the
-[1.4.3 release notes](release-1.4.3.md) and the
+This is the first public release. It is functionally identical to 1.4.3; the release export
+now also excludes any working handover log. For everything that changed in 1.4.3, see the
+[1.4.3 release notes](https://github.com/rladr-org/reviewer-agent/blob/main/docs/release-1.4.3.md) and the
 [CHANGELOG](https://github.com/rladr-org/reviewer-agent/blob/main/CHANGELOG.md).
 
 ## Install

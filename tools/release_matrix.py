@@ -643,8 +643,8 @@ def distribution_scenario(workspace, stub):
     result.check("the export verifies", rex.verify(export) == [], str(rex.verify(export)))
     result.check("the export is clean", scanner.scan(export, check_commits=False) == [])
 
-    # Initialise the export as a repository with one root commit, which is exactly what the
-    # cutover does before anything is verified. Without this the release checks -- which files
+    # Initialise the export as a repository with one root commit, as someone who unpacks the
+    # release archive and runs `git init` would. Without this the release checks -- which files
     # are tracked, what the export excludes -- skip for want of a working tree, and skipping
     # them here would leave the release's own verification unverified.
     subprocess.run(["git", "init", "-q", str(export)], check=True)
