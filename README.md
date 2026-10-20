@@ -38,91 +38,67 @@ Various methods have been used to prevent this, including Ralph Loops and Claude
 So one separately controllable feature of this package is stop-continue which does exactly that, using the same model 
 as reviewer-agent but a separate session. 
 
-# Example: two rounds of review on one commit
+# Examples: commits the gpt-5.6-luna reviewer stopped
 
-A real commit gate exchange on a plan commit in a private data-pipeline project.
+Two real commit gate rejections from a private data-pipeline project, made on the same day with the same models. The gpt-5.6-luna reviewer's text is verbatim.
 
-| Role            | Model            | Effort | Host / backend        |
-| --------------- | ---------------- | ------ | --------------------- |
-| Developer agent | Claude Fable 5.1 | xhigh  | Claude Code           |
-| Reviewer        | gpt-6-luna       | xhigh  | Codex backend         |
+| Role            | Model            | Effort | Host / backend |
+| --------------- | ---------------- | ------ | -------------- |
+| Developer agent | Claude Fable 5.1 | high   | Claude Code    |
+| Reviewer        | gpt-5.6-luna     | xhigh  | Codex backend  |
 
-File paths and local environment names are removed; the reviewer's text is otherwise verbatim.
+### A failure reported as success
 
-**Round 1: rejected** (2 required fixes, 2 suggestions)
-
-```text
-REQUIRED FIXES (blocking)
-
-  1.  The plan has incorrect Task 2 test counts. I ran the unchanged baseline with the
-      specified environment: 8 tests pass; appending the 4 staged tests makes the expected
-      GREEN total 12, not 8. Correct the RED expectation to 8 old tests passing and the GREEN
-      expectation and commit message to 12 passed, so the implementer is not asked to stop
-      or report a false count.
-
-  2.  The plan makes the table-wide pooled score sufficient to authorize every
-      identity-passing match, while group scores are informational only. The example iron
-      bar is 42% within 25%; with enough observations, a table just above that share can pass
-      while most of its values exceed 25% error. That does not establish reliability for the
-      individual foods or subgroups, including the cross-country variation the operator
-      raised. Add a binding conditional safeguard and fail closed where subgroup reliability
-      is unsupported.
-
-SUGGESTIONS (non-blocking)
-
-  1.  The staged plans rely on scratch results for match accuracy, USDA agreement, and
-      family-share behavior, but their supporting scripts or outputs are not in the staged
-      set. Include reproducible evidence or mark those figures as unverified before using
-      them to justify thresholds.
-
-  2.  I ran the existing test suite (8 passed) and syntax-checked all 11 staged Python
-      artifacts (no syntax errors). The new tests could not be run against implementations
-      because the modules they specify are planned future work.
-```
-
-**Round 2: rejected again, eleven minutes later** (3 required fixes, 4 suggestions)
+The Fable 5.1 developer agent wrote a wrapper script that runs a set of R validation checks against a freshly loaded database and records whether each one passed. (One of two required fixes shown.)
 
 ```text
 REQUIRED FIXES (blocking)
 
-  1.  [Not fixed: prior finding 2] Groups with fewer than 20 scored foods inherit the pooled
-      table verdict, and `allowed()` permits every verdict except `veto`. Groups with no
-      scored row also inherit. Thus unsupported groups can still receive foreign values under
-      a table-wide pass, contrary to the earlier requirement to fail closed where subgroup
-      reliability is untested.
-
-  2.  The data-rules document marks the group veto as "IN FORCE — Operator-approved plan,"
-      while the main plan says the operator's review of that veto is pending. Separate the
-      approved rules from the pending veto instead of recording the veto as approved.
-
-  3.  The plan says the RED run yields 13 failed tests. The staged test imports `table_trust`
-      at module load; with that module absent as Step 2 specifies, pytest reports one
-      collection error and runs no tests. Correct the expected result and commit message, or
-      change the setup so the tests are collected.
-
-SUGGESTIONS (non-blocking)
-
-  1.  [Fixed: prior finding 1] Task 2 now correctly states 8 existing tests plus 4
-      additions, for 12 total.
-
-  2.  [Fixed: prior evidence suggestion] The three scratch scripts and their outputs are now
-      staged. I reran them; their contents reproduce, with only trailing blank-line
-      formatting differences.
-
-  3.  [Still applies: prior test note] The Task 4 suite cannot be fully validated against
-      current repository implementations because the earlier planned Task 2 changes are not
-      present. Running the staged Task 4 module with the staged Task 1 and Task 3 modules
-      produced 8 passes and 5 failures on the missing `foreign_adjusted.FAMILY_TOTALS`
-      dependency.
-
-  4.  The evidence table lists `family_shares.out.txt` as 9 lines and `three_way.out.txt`
-      as 51; the staged files contain 10 and 52 lines respectively, including trailing blank
-      lines.
+  2.  docs/database-phase-loader/local-load/run_r_checks.sh:4-6 pipes each R check through
+      tail without pipefail or explicit status handling, so a failed Rscript can still
+      produce a zero exit status and be recorded as successful. Preserve and propagate each
+      check's exit status.
 ```
 
-The reviewer ran the tests itself rather than trusting the plan's numbers, caught a claimed fix
-that had not been made (`[Not fixed: prior finding 2]`), and confirmed the fixes that had been
-(`[Fixed: prior finding 1]`). The commit could not land until every required fix was resolved.
+In a shell pipeline the exit status is that of the *last* command, so `Rscript check.R | tail` reports `tail`'s success even when the check fails. Nothing else would have flagged this: the script prints the tail of the failing check's output, exits 0, and records a pass. A broken load would have been certified as validated.
+
+### A validator that could not fail
+
+The Fable 5.1 developer agent wrote a checker that validates a database export before it is published, and a README claiming it validates the export cell by cell.
+
+```text
+REQUIRED FIXES (blocking)
+
+  1.  docs/database-phase-loader/rehearsal/README.md:24 claims every user table was unchanged,
+      but compare-before-vs-first-load.json:55-59 records users_foodcategory_foods changing
+      from 16,247 to 16,221; correct the false rehearsal claim.
+
+  2.  docs/database-phase-loader/rehearsal/check_export.py:35-37 validates only the aggregate
+      exported row count, not exact per-type counts or unique key coverage. A duplicate
+      exported key replacing a missing same-type row can therefore produce passed=true;
+      validate exact (NDB_No, nutr_no) coverage and reject duplicates.
+
+  3.  docs/database-phase-loader/rehearsal/check_export.py:31-37 reads manifest_validation
+      from a nonexistent manifest key; the staged export_manifest.json:3-9 stores the result
+      under consistency. The pass condition ignores consistency.mismatches, so a manifest
+      reporting export mismatches can still pass and export-check.json:23 is misleadingly
+      null.
+```
+
+The Fable 5.1 developer agent fixed those three and tried again. The gpt-5.6-luna reviewer rejected the commit a second time:
+
+```text
+REQUIRED FIXES (blocking)
+
+  1.  docs/database-phase-loader/rehearsal/check_export.py:24-43 never compares exported
+      per_serving values for measured, source_derived, calculated, zero, or logical_zero
+      cells, nor verifies the output file against the manifest hash. A normal nutrient
+      amount can be altered while keys, types, and manifest consistency remain valid, so
+      problems() returns no errors despite README.md:30 claiming cell-by-cell validation.
+      Compare values or verify the actual output hash, with a regression test.
+```
+
+The Fable 5.1 developer agent had declared the rehearsal clean while its own comparison showed a table losing 26 rows. Each checker gap let a corrupted export pass: a missing row hidden by a duplicate, mismatches the export itself reported, and any changed value. The commit was approved only on the third attempt, once the gpt-5.6-luna reviewer found no remaining gap.
 
 # Features
 
