@@ -7,6 +7,18 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.4] — unreleased
+
+The first public release. Functionally identical to 1.4.3; it differs only in what the
+repository publishes.
+
+### Changed
+
+- The operator's working handover log is no longer tracked, is ignored by Git, and can never
+  ship: the public export excludes any file whose name contains "handover", in either case.
+  1.4.3's export included it.
+- Shipped design plans no longer name the maintainer's local environment or reviewed projects.
+
 ## [1.4.3]
 
 ### Changed
