@@ -40,6 +40,10 @@ EXCLUDED_PATHS = (
 
 EXCLUDED_PATTERNS = (
     "docs/internal/*",
+    # The operator's working handover log (machine paths, environment names, session ids).
+    # Untracked and gitignored too; this catches one re-added by mistake, anywhere, either case.
+    "*HANDOVER*",
+    "*handover*",
     "tools/private_terms.txt",
     ".claude/settings.local.json",
 )

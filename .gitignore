@@ -20,6 +20,9 @@ docs/internal/
 # `cd pi-extensions/git-read-only && npm ci`.
 pi-extensions/*/node_modules/
 
+# The operator's working handover log: local only, never committed or published.
+HANDOVER*.md
+
 # Local-only privacy deny list for tools/scan_release.py (see CONTRIBUTING.md).
 tools/private_terms.txt
 
