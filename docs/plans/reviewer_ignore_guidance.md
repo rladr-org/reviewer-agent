@@ -13,7 +13,7 @@ can. Meanwhile these files bloat the audit:
   for each changed path via `_inline_deltas` (`reviewer_prompts.py:921`), consuming prompt tokens
   before codex sees anything.
 
-Live evidence: `reviewed-project/research_out` has hit total-cap timeouts on large commits (staged
+Live evidence: a large reviewed project (`research_out/`) has hit total-cap timeouts on large commits (staged
 2400 s cap; 12:58 today, exit=124, 1003 files / 464,550 lines). The current dodges are "raise
 the total cap" or "split the commit," both of which push effort onto the operator without
 addressing the root cause.

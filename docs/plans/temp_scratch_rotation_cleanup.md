@@ -6,7 +6,7 @@ the same stale-live-tree sync decision as codex-streaming (do not deploy indepen
 ## Why (the general case)
 
 The per-project fixes for the disk fill (`docs/plans/temp_disk_cleanup.md`) are project-local: they
-stop *reviewed-project's* leak but not the next reviewed project's. The reviewer session itself copies the
+stop *that project's* leak but not the next reviewed project's. The reviewer session itself copies the
 staged tree out to audit it, and that scratch is never cleaned up. This adds a **harness-side** guard
 that applies to *every* reviewed project: contain the reviewer's scratch in a session-scoped dir,
 dispose it at rotation (not mid-session), sweep orphans on startup, steer the reviewer to use it, and

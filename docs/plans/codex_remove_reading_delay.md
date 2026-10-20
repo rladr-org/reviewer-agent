@@ -31,7 +31,7 @@ continuation or start a new turn when they finish.
 4. Run focused tests green, the full Codex suite, and affected documentation and
    packaging checks. Commit runtime and documentation together after review.
 
-Use `dev-env`. Keep HANDOVER.md and the operator's Linux reports uncommitted.
+Use the development Python environment. Keep HANDOVER.md and the operator's Linux reports uncommitted.
 After the reviewed source commit, refresh the local Codex installation using the
 existing installer so the operator can test this candidate after hook trust and
 restart. Preserve retained state and unrelated plugins/settings. Do not push.

@@ -1,7 +1,7 @@
 # Release 1.4.3 readiness and public launch tasks
 
 Finish the release fixes, complete the options reference, and collect the remaining host
-acceptance evidence before publishing. Use `dev-env` for local validation. Keep one plan
+acceptance evidence before publishing. Use the development Python environment for local validation. Keep one plan
 commit, one verified red-test commit, one code commit, and one documentation commit where
 practical. Do not stage the operator's existing handover edits or untracked Linux reports.
 
@@ -124,7 +124,7 @@ until actually exercised; earlier CI results are not current-candidate CI eviden
   and remaining operator checks are recorded in the uncommitted handover.
 - Delay removal is pushed in `d9db155`: 23 new regressions failed before implementation;
   38 focused checks passed afterward. The unchanged-runtime baseline is 901 passing Codex tests
-  and 1,703 passing root tests with 8 skips, run in `dev-env`. The same-label local install
+  and 1,703 passing root tests with 8 skips, run in the development Python environment. The same-label local install
   matched all 105 tracked package files and passed its MCP inventory/preservation checks.
   The operator reported restarting afterward; immediate-review and post-change Escape checks
   still require direct host evidence. Metadata/docs preparation does not establish those passes.

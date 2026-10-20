@@ -3,7 +3,7 @@
 ## Why
 
 Live-log observations from `~/.claude/reviewer-agent/logs/reviewer.log` on a large project
-(`reviewed-project/research_out`, ~180 staged files / ~60 k staged lines) show the current defaults
+(a large reviewed project (`research_out/`), ~180 staged files / ~60 k staged lines) show the current defaults
 sit too close to the noise floor and the single-retry cap gives up on transient hangs before
 budget is exhausted.
 

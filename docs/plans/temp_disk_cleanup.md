@@ -1,7 +1,7 @@
 # Temp files fill the disk — exploration + fix plan
 
 **Status:** RESOLVED (2026-08-26). All three culprits are owned and fixed/assigned in the reviewed
-project (`../reviewed-project`) + its launcher cleanup script; **no `reviewer-agent-github` change needed.**
+project (the reviewed project's checkout) + its launcher cleanup script; **no `reviewer-agent-github` change needed.**
 Kept as the record of the investigation and the ownership split. Measured 2026-08-26.
 
 ## Symptom
@@ -59,7 +59,7 @@ None of the three culprits are defects in `reviewer-agent-github`, and **no chan
 warranted.** The considered harness contribution — best-effort `TMPDIR` containment for the reviewer
 subprocess (culprit 1) — was rejected: the reviewer's copies use explicit `/private/tmp/opstate-*`
 paths that do not honor `TMPDIR`, and the reviewed project's brief fix covers the leak at its source.
-All high-value fixes live in the **reviewed project** (`../reviewed-project`, `research_out/`): its
+All high-value fixes live in the **reviewed project** (`research_out/`): its
 `reviewerAgent.md` brief (culprit 1) and `pytest.ini` (culprit 2), plus its launcher cleanup script
 (culprit 3).
 
@@ -76,5 +76,5 @@ All high-value fixes live in the **reviewed project** (`../reviewed-project`, `r
   `/private/tmp/research-out-*`, stale `/private/tmp/<run_id>/work`+`/homes`, and `pytest-of-<user>`
   (all regenerable scratch).
 
-Open questions from the prior draft are answered: opstate lives at `../reviewed-project` and the developer
+Open questions from the prior draft are answered: opstate lives at the reviewed project's checkout and the developer
 owns fixes 1–3 there; harness `TMPDIR` containment is not worth adding.
