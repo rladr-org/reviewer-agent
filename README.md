@@ -24,8 +24,9 @@ An interesting finding is that a small, inexpensive model like gpt-6-luna (which
 a reviewer agent, finds numerous serious issues, omissions, and errors even when the coding agent is Fable 5.1, Opus 5.5, 
 gpt-6-astra or gpt-6.1-sol, all on xhigh mode. *Note that you can use any model as a reviewer!* 
 
-It can often take 3 to 9 commit attempts for Fable to get rid of all the bugs found by gpt-6-luna, and if you ask it
-to weigh in on whether the required fixes are valid or not, it overwhelmingly agrees that they are real issues. 
+It can often take multiple commit attempts for Fable to get rid of all the bugs found by gpt-6-luna, and if you ask it to weigh in on whether the required fixes are valid or not, it overwhelmingly agrees that they are real issues. 
+
+Some data: over four months of daily use of the system while developing it (from late June to October 2026), reviewerAgent (usually a GPT Luna model) gated 3,877 commits, running about 7,600 reviews in total, so about half of those commits were rejected at least once. Each rejection listed an average of two required fixes and most rejected commits were accepted after a second round (90% within five attempts). Rejection rates increased with commit size: only 23% of code commits under 50 lines were sent back, but 72% of those over 1,000 lines were initially rejected. The coding agent (Fable or Opus) almost never disagreed with the reviewer's judgements: over the last month, for example, it pushed back on just 3 of 693 rejections. 
 
 ## Don't stop - Continue! 
 
@@ -60,7 +61,7 @@ REQUIRED FIXES (blocking)
       check's exit status.
 ```
 
-In a shell pipeline the exit status is that of the *last* command, so `Rscript check.R | tail` reports `tail`'s success even when the check fails. Nothing else would have flagged this: the script prints the tail of the failing check's output, exits 0, and records a pass. A broken load would have been certified as validated.
+In a shell pipeline the exit status is that of the *last* command, so `Rscript check.R | tail` reports `tail`'s success even when the check fails. The script prints the tail of the failing check's output, exits 0, and records a pass. A broken load would have been certified as validated.
 
 ### A validator that could not fail
 
