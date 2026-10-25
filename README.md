@@ -99,7 +99,7 @@ REQUIRED FIXES (blocking)
       Compare values or verify the actual output hash, with a regression test.
 ```
 
-The Fable 5.1 developer agent had declared the rehearsal clean while its own comparison showed a table losing 26 rows. Each checker gap let a corrupted export pass: a missing row hidden by a duplicate, mismatches the export itself reported, and any changed value. The commit was approved only on the third attempt, once the gpt-5.6-luna reviewer found no remaining gap.
+The Fable 5.1 developer agent had declared the rehearsal clean while its own comparison showed a table losing 26 rows. Each checker gap let a corrupted export pass: a missing row hidden by a duplicate, mismatches the export itself reported, and any changed value. The commit was approved only on the third attempt, once the gpt-5.6-luna reviewer found no remaining blocking issue.
 
 # Features
 
