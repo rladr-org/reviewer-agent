@@ -22,7 +22,8 @@ import pytest
 import reviewer_lib as rl
 import reviewer_manifest as m
 from test_background_wait_crossturn import _at
-from test_reviewer_lib import _asst, _bg_agent, _human, _job_state, _transcript
+from test_reviewer_lib import (_asst, _attachment_notification, _bg_agent, _human, _job_state,
+                               _queue_op_notification, _transcript)
 from test_stop_hook import FAKE, _input, make_repo, run_hook
 
 needs_lsof = pytest.mark.skipif(shutil.which("lsof") is None, reason="needs lsof")
@@ -144,6 +145,49 @@ def test_a_shell_that_is_not_listening_still_skips_review(tmp_path, probe):
     suppress, listening = m.background_wait_state(path)
     assert suppress is True
     assert listening == []
+
+
+# --- completions queued into a running turn -----------------------------------------------------
+# Observed 2026-10-26: shells that finished while the agent was still working had their completion
+# notices queued into that turn (a `queued_command` attachment), not delivered as a turn of their
+# own. The current-turn scan only read the user-event form, so those finished shells stayed
+# "outstanding" for good: every stop was a background wait, and the stopContinue watchdog's `ok`
+# ticks never reached the idle countdown, so the cron ran every 7 minutes with no end.
+
+def _done(tool_use_id, task_id):
+    return ("<task-notification>\n<task-id>{}</task-id>\n<tool-use-id>{}</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Background command finished</summary>\n"
+            "</task-notification>".format(task_id, tool_use_id))
+
+
+@pytest.mark.parametrize("deliver", [_attachment_notification, _queue_op_notification])
+def test_a_server_beside_a_shell_that_finished_mid_turn_does_not_skip_review(
+        tmp_path, probe, deliver):
+    probe.add("bserver")
+    path = _transcript(
+        tmp_path,
+        _at(_human("restart the desk, run the tests, then tell me what is next"), 10),
+        *_server_launch(minutes_ago=9),
+        _bg_shell("toolu_RUN", "pytest", "Run the tests", 8),
+        _ack("toolu_RUN", "btests", "/tmp/tasks/btests.output", 8),
+        _at(deliver(_done("toolu_RUN", "btests")), 4),
+        _at(_asst("Tests pass and the desk is up. Shall I plan the next checks?"), 1),
+    )
+    suppress, listening = m.background_wait_state(path)
+    assert suppress is False
+    assert [t["task_id"] for t in listening] == ["bserver"]
+
+
+@pytest.mark.parametrize("deliver", [_attachment_notification, _queue_op_notification])
+def test_a_sub_agent_that_finished_mid_turn_is_not_outstanding(tmp_path, probe, deliver):
+    path = _transcript(
+        tmp_path,
+        _at(_human("research the sources and summarize"), 10),
+        _at(_bg_agent("toolu_AG"), 9),
+        _at(deliver(_done("toolu_AG", "aresearch")), 4),
+        _at(_asst("Here is the summary of the sources."), 1),
+    )
+    assert m.background_wait_state(path)[0] is False
 
 
 # --- the probe, against real processes ----------------------------------------------------------
