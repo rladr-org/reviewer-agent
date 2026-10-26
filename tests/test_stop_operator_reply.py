@@ -309,10 +309,10 @@ def test_a_host_injected_queue_entry_does_not_stop_the_directive(tmp_path, monke
     assert "run the remaining tests" in out["reason"]
 
 
-def test_a_message_queued_before_the_final_reply_does_not_stop_the_directive(
+def test_a_message_absorbed_before_the_final_reply_does_not_stop_the_directive(
         tmp_path, monkeypatch):
     home, repo = _setup(tmp_path, monkeypatch)
-    tr = _write(tmp_path, [_enqueue("also check the docs"),
+    tr = _write(tmp_path, [_enqueue("also check the docs"), _absorbed("also check the docs"),
                            _assistant("Docs checked; this is a reasonable stopping point.")])
     p = _run_hook(repo, tr, home)
     assert p.returncode == 0, p.stderr

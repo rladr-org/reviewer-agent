@@ -190,48 +190,66 @@ def ends_with_operator_interrupt(events):
     return False
 
 
-def _reply_signal(ev):
-    """'agent' for the agent's own message, 'reply' for a message the operator submitted while
-    the turn was running, else None. Claude Code writes the submit as a `queue-operation` /
-    `enqueue` event at the moment the operator presses Enter."""
-    kind = ev.get("type")
-    if kind == "assistant":
-        msg = ev.get("message")
-        if ev.get("isSidechain") or (isinstance(msg, dict) and msg.get("model") == "<synthetic>"):
-            return None
-        return "agent"
-    if kind != "queue-operation" or ev.get("operation") != "enqueue":
-        return None
-    content = ev.get("content")
+def _queue_text(content):
     if isinstance(content, list):
         content = "\n".join(b.get("text", "") for b in content
                             if isinstance(b, dict) and b.get("type") == "text")
-    if not isinstance(content, str) or not content.strip():
-        return None
-    low = content.lstrip().lower()
-    if low.startswith("stopcontinuewatchdog tick") or any(
-            low.startswith(pre) for pre in _NON_HUMAN_USER_PREFIXES):
-        return None
-    return "reply"
+    return content if isinstance(content, str) else ""
+
+
+def _is_operator_queue_text(text):
+    """True for a queued message the operator typed, not one the host injected (a watchdog tick,
+    a task notification, hook feedback)."""
+    if not text.strip():
+        return False
+    low = text.lstrip().lower()
+    return not (low.startswith("stopcontinuewatchdog tick") or any(
+        low.startswith(pre) for pre in _NON_HUMAN_USER_PREFIXES))
 
 
 class _OperatorReplyWatch:
-    """Has the operator submitted a reply since the agent's last message? Reads the transcript
-    once, then only what is appended, so a Stop hook can poll it cheaply while a review runs."""
+    """Is a message the operator submitted still waiting to be delivered? Claude Code records its
+    input queue in the transcript: `enqueue` when the operator presses Enter during a running
+    turn, `dequeue` when the oldest entry starts the next turn, `remove` when it is delivered
+    inside the running turn, `popAll` when the queue is pulled back into the input box. Replaying
+    those ops finds a pending reply however many agent messages followed it -- asking only whether
+    a reply came after the agent's last message missed one submitted while the agent was still
+    working (2026-10-26). Reads the transcript once, then only what is appended, so a Stop hook
+    can poll it cheaply while a review runs."""
 
     def __init__(self, transcript_path):
         self._path = transcript_path
         self._offset = 0
-        self._replied = False
-        data = self._read_from(0)
-        end = data.rfind(b"\n") + 1
-        self._offset = end
-        # Only what follows the agent's last message matters, and that is near the end.
-        for line in reversed(data[:end].splitlines()):
-            signal = self._signal(line)
-            if signal is not None:
-                self._replied = signal == "reply"
-                break
+        self._queue = []  # (text, typed by the operator), oldest first
+        self._consume()
+
+    def _consume(self):
+        data = self._read_from(self._offset)
+        end = data.rfind(b"\n") + 1  # a line still being written is read on the next poll
+        self._offset += end
+        for line in data[:end].splitlines():
+            if b"queue-operation" not in line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict) and ev.get("type") == "queue-operation":
+                self._apply(ev.get("operation"), _queue_text(ev.get("content")))
+
+    def _apply(self, op, text):
+        if op == "enqueue":
+            self._queue.append((text, _is_operator_queue_text(text)))
+        elif op == "dequeue":
+            if self._queue:
+                self._queue.pop(0)
+        elif op == "remove":
+            for i, (queued, _) in enumerate(self._queue):
+                if queued == text:
+                    del self._queue[i]
+                    break
+        elif op == "popAll":
+            self._queue = []
 
     def _read_from(self, offset):
         if not self._path:
@@ -243,23 +261,9 @@ class _OperatorReplyWatch:
         except OSError:
             return b""
 
-    @staticmethod
-    def _signal(line):
-        try:
-            ev = json.loads(line)
-        except ValueError:
-            return None
-        return _reply_signal(ev) if isinstance(ev, dict) else None
-
     def replied(self):
-        data = self._read_from(self._offset)
-        end = data.rfind(b"\n") + 1  # a line still being written is read on the next poll
-        self._offset += end
-        for line in data[:end].splitlines():
-            signal = self._signal(line)
-            if signal is not None:
-                self._replied = signal == "reply"
-        return self._replied
+        self._consume()
+        return any(from_operator for _, from_operator in self._queue)
 
 
 def operator_reply_watch(transcript_path):
