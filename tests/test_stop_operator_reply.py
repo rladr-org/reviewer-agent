@@ -43,6 +43,20 @@ def _enqueue(text):
             "content": text}
 
 
+def _queue_op(operation, text=None, **extra):
+    ev = {"type": "queue-operation", "operation": operation,
+          "timestamp": "2026-10-02T23:00:00.000Z", "sessionId": "claude-stop"}
+    if text is not None:
+        ev["content"] = text
+    ev.update(extra)
+    return ev
+
+
+def _absorbed(text):
+    # Claude Code delivered the queued message inside the running turn.
+    return _queue_op("remove", text, reason="absorbed_mid_turn")
+
+
 def _write(tmp_path, events):
     p = tmp_path / "transcript.jsonl"
     p.write_text("".join(json.dumps(e) + "\n" for e in events))
@@ -80,7 +94,37 @@ def test_a_reply_queued_after_the_agents_final_message_is_seen(tmp_path):
 
 
 def test_a_message_absorbed_before_the_final_message_is_not_a_reply(tmp_path):
-    tr = _write(tmp_path, [_enqueue("also check the docs"), _assistant("Done; docs checked.")])
+    tr = _write(tmp_path, [_enqueue("also check the docs"), _absorbed("also check the docs"),
+                           _assistant("Done; docs checked.")])
+    assert rl.operator_reply_watch(tr).replied() is False
+
+
+def test_a_reply_queued_while_the_agent_was_still_working_is_seen(tmp_path):
+    # 2026-10-26: the operator pressed Enter while the turn was still running; the agent's final
+    # message landed after the enqueue, so "a reply after the last agent message" missed it and
+    # the stop got the full reading delay and review (~40s) before the message was delivered.
+    tr = _write(tmp_path, [_assistant("Running the tests now."), _enqueue("we also see this"),
+                           _assistant("Fixed and pushed.")])
+    assert rl.operator_reply_watch(tr).replied() is True
+
+
+def test_a_reply_already_delivered_as_its_own_turn_is_not_pending(tmp_path):
+    tr = _write(tmp_path, [_enqueue("we also see this"), _queue_op("dequeue"),
+                           {"type": "user", "message": {"role": "user",
+                                                        "content": "we also see this"}},
+                           _assistant("That line is expected.")])
+    assert rl.operator_reply_watch(tr).replied() is False
+
+
+def test_a_reply_waiting_behind_a_delivered_tick_is_seen(tmp_path):
+    tr = _write(tmp_path, [_enqueue(_TICK), _enqueue("stop after this"), _queue_op("dequeue"),
+                           _assistant("ok")])
+    assert rl.operator_reply_watch(tr).replied() is True
+
+
+def test_a_queue_pulled_back_with_escape_is_not_a_reply(tmp_path):
+    tr = _write(tmp_path, [_enqueue("hold on"), _queue_op("popAll", "hold on"),
+                           _assistant("Here is where things stand.")])
     assert rl.operator_reply_watch(tr).replied() is False
 
 
@@ -187,8 +231,8 @@ def _payload(repo, tr):
 
 def _run_hook(repo, tr, home, **extra):
     env = dict(os.environ)
-    env.update({"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
-                "FAKE_CODEX_STDOUT": _DIRECTIVE})
+    env.update({"REVIEWER_HOME": home, "REVIEWER_BACKEND": "codex", "REVIEWER_CODEX_BIN": FAKE,
+                "FAKE_CODEX_EXIT": "0", "FAKE_CODEX_STDOUT": _DIRECTIVE})
     env.update(extra)
     return subprocess.run([sys.executable, STOP], input=json.dumps(_payload(repo, tr)),
                           capture_output=True, text=True, env=env)
