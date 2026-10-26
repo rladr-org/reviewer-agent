@@ -708,6 +708,20 @@ def _notification_texts(ev):
     return out
 
 
+def _terminal_tool_use_ids(ev):
+    """Launching <tool-use-id>s resolved by terminal <status> notifications in this event, on
+    every delivery path. A task that finishes while the turn is still running has its notice
+    queued into that turn (queue-operation / attachment), never written as the user event
+    `_completion_tool_use_id` reads, so without this the launch stayed outstanding for good."""
+    ids = set()
+    for text in _notification_texts(ev):
+        if "<status>" in text:
+            m = _TASK_NOTIFICATION_TUID.search(text)
+            if m:
+                ids.add(m.group(1))
+    return ids
+
+
 def _active_monitor_ids(events, now=None):
     """Task ids of Monitor launches still ACTIVE: seen "Monitor started (task <id>...)"
     with (a) no later TaskStop of that id, (b) no terminal <status> notification for that
@@ -931,6 +945,7 @@ def background_wait_state(transcript_path):
             cid = _completion_tool_use_id(ev)
             if cid:
                 completed.add(cid)
+            completed.update(_terminal_tool_use_ids(ev))
             # An inline result is proof the launch did not outlive the turn -- the only
             # discriminator left now that a missing run_in_background means background.
             completed.update(_inline_resolved_tool_use_ids(ev))
@@ -939,7 +954,8 @@ def background_wait_state(transcript_path):
             if lid in completed:
                 continue
             if lid in shell_of_tool_use:
-                shell_ids.add(shell_of_tool_use[lid])
+                if shell_of_tool_use[lid] not in ended:
+                    shell_ids.add(shell_of_tool_use[lid])
             else:
                 other = True
         if other:
