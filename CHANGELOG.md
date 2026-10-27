@@ -7,6 +7,21 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.5] — unreleased
+
+### Fixed
+
+- Claude Code: the stopContinue watchdog stops once the agent is idle, even when a background
+  task finished while the agent was still working. Such a completion is queued into the running
+  turn instead of starting a new one, and it was not recognized, so the task still counted as
+  running. Every watchdog tick then skipped the stop review, and the idle teardown never came:
+  the tick repeated every seven minutes for as long as the session stayed open.
+- Claude Code: the stop supervisor yields to a reply typed while the agent was still working.
+  A reply submitted before the agent's final message waited in the input queue unseen, so the
+  supervisor reviewed the stop and could push the agent on; the reply was only delivered after
+  pressing Escape. A queued reply now ends the stop at once, and a queue pulled back with
+  Escape is not mistaken for a reply.
+
 ## [1.4.4]
 
 The first public release. Functionally identical to 1.4.3.
