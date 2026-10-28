@@ -1337,6 +1337,87 @@ def watchdog_ticks_presumed_dead(proj, claude_session_id):
     return age > watchdog_interval(proj) * 60 * 2
 
 
+# --------------------------------------------------------------------------
+# The API-drop watcher's lease (per Claude session). One background watcher per session resumes
+# a turn that ended on a dropped API connection; see docs/plans/watchdog_api_drop_watcher.md.
+# JSON {pid, ts, fired_uuid, fires}: the watcher rewrites `ts` every poll, so a watcher is alive
+# only while its pid runs AND `ts` is fresh (pids are reused). `pid: null` with a fresh `ts` is a
+# launch the UserPromptSubmit hook has asked for and the agent has not started yet.
+# --------------------------------------------------------------------------
+API_DROP_LEASE_FRESH_SECS = 60
+
+
+def api_drop_lease_file(proj, claude_session_id):
+    stem = _watchdog_marker_stem(proj, claude_session_id)
+    if stem is None:
+        return None
+    return reviewer_home() / "state" / (stem + ".dropwatch")
+
+
+def read_api_drop_lease(proj, claude_session_id):
+    """The lease as a dict, or {} if absent or unreadable."""
+    f = api_drop_lease_file(proj, claude_session_id)
+    raw = _read_state_text(f) if f is not None else None
+    try:
+        lease = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    return lease if isinstance(lease, dict) else {}
+
+
+def write_api_drop_lease(proj, claude_session_id, lease):
+    f = api_drop_lease_file(proj, claude_session_id)
+    if f is not None:
+        _atomic_write_text(f, json.dumps(lease) + "\n")
+
+
+def api_drop_lease_now():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _api_drop_lease_fresh(lease):
+    try:
+        ts = datetime.datetime.fromisoformat(str(lease["ts"]).replace("Z", "+00:00"))
+    except (KeyError, ValueError, TypeError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    age = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds()
+    return age < API_DROP_LEASE_FRESH_SECS
+
+
+def _pid_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except (OSError, OverflowError):
+        return False
+    return True
+
+
+def api_drop_watcher_alive(proj, claude_session_id):
+    lease = read_api_drop_lease(proj, claude_session_id)
+    pid = lease.get("pid")
+    return (isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+            and _api_drop_lease_fresh(lease) and _pid_running(pid))
+
+
+def api_drop_launch_pending(proj, claude_session_id):
+    lease = read_api_drop_lease(proj, claude_session_id)
+    return "pid" in lease and lease["pid"] is None and _api_drop_lease_fresh(lease)
+
+
+def request_api_drop_watcher(proj, claude_session_id):
+    """Record that a launch was asked for, keeping what the last watcher recorded, so a second
+    prompt within a minute does not ask again while the agent is still starting it."""
+    lease = read_api_drop_lease(proj, claude_session_id)
+    lease.update(pid=None, ts=api_drop_lease_now())
+    write_api_drop_lease(proj, claude_session_id, lease)
+
+
 def claude_session_id_from_env():
     """This Claude session's id from the environment, or None. `CLAUDE_CODE_SESSION_ID` is what
     Claude Code exports (its value equals the transcript stem, the same key the hooks derive via

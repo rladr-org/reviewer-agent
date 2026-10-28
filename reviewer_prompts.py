@@ -32,6 +32,7 @@ from reviewer_base import (
     short,
 )
 from reviewer_manifest import (
+    API_DROP_WATCHER_DESCRIPTION,
     session_manifest_block,
 )
 from reviewer_state import (
@@ -234,6 +235,51 @@ def watchdog_arm_instruction(proj, interval, claude_session_id):
         'Post-condition: exactly one marker-tagged cron at "{cron}" carrying the CURRENT tick '
         "prompt. Tick prompt to use verbatim:\n{tick}"
     ).format(marker=WATCHDOG_MARKER, cron=cron, tick=tick)
+
+
+# --------------------------------------------------------------------------
+# The API-drop watcher: a background command that resumes a turn which ended on a dropped API
+# connection. Claude Code starts a turn when a background command exits, so the script's output
+# is what the agent acts on. See docs/plans/watchdog_api_drop_watcher.md. The command must stay
+# the exact shape `reviewer_manifest._is_api_drop_watcher_command` recognizes, or the stop review
+# counts the watcher as background work.
+# --------------------------------------------------------------------------
+def api_drop_watcher_command(proj, claude_session_id, transcript_path):
+    root = Path(__file__).resolve().parent
+    return " ".join(shlex.quote(str(a)) for a in (
+        "/bin/sh", root / "hooks" / "run_hook.sh", root / "api_drop_watch.py",
+        "--cwd", proj, "--session", claude_session_id, "--transcript", transcript_path))
+
+
+def _api_drop_launch_steps(proj, claude_session_id, transcript_path):
+    return (
+        "call the Bash tool with `run_in_background: true` (not a shell `&`), the description "
+        "`{desc}`, and exactly this command:\n{cmd}\n"
+    ).format(desc=API_DROP_WATCHER_DESCRIPTION,
+             cmd=api_drop_watcher_command(proj, claude_session_id, transcript_path))
+
+
+def api_drop_watcher_launch_instruction(proj, claude_session_id, transcript_path):
+    return (
+        "[stopContinueWatchdog] Start the API-drop watcher for THIS session: {steps}"
+        "It waits silently and exits only when a turn of this session ended on a dropped API "
+        "connection, so do not wait for it, poll it or mention it. When it completes, Read its "
+        "output and follow it."
+    ).format(steps=_api_drop_launch_steps(proj, claude_session_id, transcript_path))
+
+
+def api_drop_resume_message(proj, claude_session_id, transcript_path, drop):
+    """What the watcher prints when it fires: relaunch first, so a drop during the resumed work
+    is caught too, then the same pause check the tick makes."""
+    return (
+        "[stopContinueWatchdog] API-drop recovery: this session's last turn ended on `{text}` "
+        "at {ts} and nothing has happened since.\n"
+        "1. First relaunch the watcher: {steps}"
+        "2. Then Read `{paused}`: if it exists, the operator has the turn, so reply `ok` and "
+        "stop. Otherwise resume the unfinished work from before the drop."
+    ).format(text=drop.get("text") or "API Error", ts=drop.get("ts") or "an unknown time",
+             steps=_api_drop_launch_steps(proj, claude_session_id, transcript_path),
+             paused=watchdog_disarm_file(proj, claude_session_id))
 
 
 WATCHDOG_CANCEL_INSTRUCTION = (

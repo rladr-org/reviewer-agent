@@ -289,9 +289,13 @@ def test_the_resume_message_relaunches_first_then_honours_the_pause(tmp_path):
 
 # --- the watcher is not background work ---------------------------------------------------------
 
+def _watcher_command(root="/plugin"):
+    return ('/bin/sh "{0}/hooks/run_hook.sh" "{0}/api_drop_watch.py" --cwd "/repo" '
+            '--session s --transcript "/t.jsonl"'.format(root))
+
+
 def _watcher_launch(tool_use_id="toolu_W", task_id="bwatch", minutes_ago=30, root="/plugin"):
-    command = ('/bin/sh "{0}/hooks/run_hook.sh" "{0}/api_drop_watch.py" --cwd "/repo" '
-               '--session s --transcript "/t.jsonl"'.format(root))
+    command = _watcher_command(root)
     return [
         _bg_shell(tool_use_id, command, rl.API_DROP_WATCHER_DESCRIPTION, minutes_ago + 1),
         _ack(tool_use_id, task_id, "/tmp/tasks/{}.output".format(task_id), minutes_ago),
@@ -329,12 +333,61 @@ def test_a_watcher_in_the_job_state_is_not_a_wait(tmp_path, monkeypatch):
         _at(_asst("Shall I plan the three checks?"), 1),
     )
     monkeypatch.setenv("CLAUDE_JOB_DIR", _job_state(tmp_path, Path(path).stem, [
-        {"id": "bwatch", "kind": "shell", "label": "watcher", "startedAt": 1}]))
+        {"id": "bwatch", "kind": "shell", "label": _watcher_command(), "startedAt": 1}]))
     assert m.background_wait_state(path) == (False, [])
 
 
+def test_a_job_state_watcher_whose_launch_ack_is_gone_is_not_a_wait(tmp_path, monkeypatch):
+    # Compaction or a respawn can drop the launch ack; the job state still lists the task, and
+    # a shell entry's label is its command.
+    path = _transcript(
+        tmp_path,
+        _at(_human("next?"), 3),
+        _at(_asst("Shall I plan the three checks?"), 1),
+    )
+    monkeypatch.setenv("CLAUDE_JOB_DIR", _job_state(tmp_path, Path(path).stem, [
+        {"id": "bwatch", "kind": "shell", "label": _watcher_command(), "startedAt": 1}]))
+    assert m.background_wait_state(path) == (False, [])
+
+
+def test_a_job_state_shell_that_is_not_the_watcher_is_still_a_wait(tmp_path, monkeypatch):
+    path = _transcript(
+        tmp_path,
+        _at(_human("next?"), 3),
+        _at(_asst("The sweep is running."), 1),
+    )
+    monkeypatch.setenv("CLAUDE_JOB_DIR", _job_state(tmp_path, Path(path).stem, [
+        {"id": "bsweep", "kind": "shell", "label": "rg api_drop_watch.py", "startedAt": 1}]))
+    assert m.background_wait_state(path)[0] is True
+
+
+@pytest.mark.parametrize("command", [
+    "rg api_drop_watch.py",
+    "cat /plugin/api_drop_watch.py",
+    _watcher_command() + "; python sweep.py",
+    _watcher_command() + " && python sweep.py",
+    "python3 /plugin/api_drop_watch.py --cwd /repo --session s --transcript /t.jsonl",
+    _watcher_command().replace("--transcript", "--other"),
+], ids=["grep", "cat", "then-more", "and-more", "not-through-run_hook", "other-flags"])
+def test_a_command_that_only_mentions_the_watcher_is_real_background_work(tmp_path, command):
+    path = _transcript(
+        tmp_path,
+        _at(_human("look into it"), 3),
+        _bg_shell("toolu_RG", command, "Look into it", 2),
+        _ack("toolu_RG", "brg", "/tmp/tasks/brg.output", 2),
+        _at(_asst("Running."), 1),
+    )
+    assert m.background_wait_state(path)[0] is True
+
+
+def test_the_generated_command_is_recognized_even_with_spaces_in_its_paths(tmp_path):
+    command = rl.api_drop_watcher_command(str(tmp_path / "my repo"), "s",
+                                          str(tmp_path / "a dir" / "t.jsonl"))
+    assert m._is_api_drop_watcher_command(command)
+
+
 def test_a_watcher_under_a_long_plugin_path_is_still_recognized(tmp_path):
-    root = "/Users/someone/.claude/plugins/cache/reviewer-agent/reviewer-agent/" + "x" * 120
+    root = "/opt/claude/plugins/cache/reviewer-agent/reviewer-agent/" + "x" * 140
     path = _transcript(
         tmp_path,
         _at(_human("plan the checks"), 3),

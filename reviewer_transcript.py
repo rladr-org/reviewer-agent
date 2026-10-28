@@ -270,6 +270,70 @@ def operator_reply_watch(transcript_path):
     return _OperatorReplyWatch(transcript_path)
 
 
+# The API-error entries a retry can fix: connection lost, stopped arriving, no response, 500 and
+# 529 all carry this. Login, rate/usage limits and safeguard refusals carry their own values.
+_API_DROP_ERRORS = frozenset({"server_error"})
+
+
+class _ApiDropScan:
+    """Has a main-session turn ended on a dropped API connection, with nothing since? Fed events
+    in transcript order; see docs/plans/watchdog_api_drop_watcher.md for the rules. A tool-result
+    carrier and the host's bookkeeping (system records, titles, attachments) do not end the wait;
+    a sub-agent's events do not either, but they move the start of the grace to the latest one."""
+
+    def __init__(self):
+        self._drop = None
+        self._quiet_since = None
+
+    def feed(self, ev):
+        if not isinstance(ev, dict):
+            return
+        if ev.get("isSidechain"):
+            ts = _event_epoch_seconds(ev)
+            if self._drop is not None and ts is not None and (
+                    self._quiet_since is None or ts > self._quiet_since):
+                self._quiet_since = ts
+            return
+        kind = ev.get("type")
+        if kind == "assistant" and ev.get("isApiErrorMessage"):
+            if ev.get("error") in _API_DROP_ERRORS:
+                self._drop = ev
+                self._quiet_since = _event_epoch_seconds(ev)
+            else:
+                self._drop = None  # a newer error that a retry cannot fix supersedes it
+            return
+        if self._drop is None:
+            return
+        if kind in ("assistant", "api-request"):
+            self._drop = None
+        elif kind == "queue-operation" and ev.get("operation") == "enqueue":
+            self._drop = None
+        elif kind == "user" and ev.get("toolUseResult") is None and _event_text(ev).strip():
+            c = _event_content(ev)
+            if not (isinstance(c, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in c)):
+                self._drop = None  # a prompt, a tick, a task notification, hook feedback
+
+    def pending(self, fired_uuid=None):
+        """{uuid, text, ts, quiet_since} for the drop still waiting, or None."""
+        ev = self._drop
+        if ev is None or (fired_uuid and ev.get("uuid") == fired_uuid):
+            return None
+        return {"uuid": ev.get("uuid"), "text": _event_text(ev).strip(),
+                "ts": ev.get("timestamp"), "quiet_since": self._quiet_since}
+
+
+def api_drop_scan():
+    return _ApiDropScan()
+
+
+def api_drop_pending(events, fired_uuid=None):
+    scan = _ApiDropScan()
+    for ev in events or []:
+        scan.feed(ev)
+    return scan.pending(fired_uuid)
+
+
 def directives_answered_without_action(events):
     """How many of this turn's most recent stop-hook directives the agent answered without a
     single tool call, counted back from the latest until one it acted on.

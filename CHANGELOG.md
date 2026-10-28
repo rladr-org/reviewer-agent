@@ -9,6 +9,20 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [1.4.5] — unreleased
 
+### Added
+
+- Claude Code: an API-drop watcher resumes a turn that ended on a dropped API connection
+  within about 20 seconds, instead of at the next watchdog tick (up to about ten minutes).
+  Claude Code runs no Stop hook after such a turn and does not retry it itself. While the
+  watchdog is on, the first prompt in a session asks the agent to start the watcher as a
+  background command; it reads the transcript, makes no model calls, and exits when a turn ends
+  on `Connection lost mid-response`, `The response stopped arriving`, `No response from API`, a
+  500 or a 529 with nothing since. That exit starts the resume turn. It leaves login, limit and
+  safeguard errors alone, waits while background work is outstanding or the operator has the
+  turn, and backs off to one resume per five minutes during an outage. The stop review does not
+  count the watcher as background work. `REVIEWER_API_DROP_WATCH=0` turns it off; the cron tick
+  is unchanged and still the backstop.
+
 ### Fixed
 
 - Claude Code: the stopContinue watchdog stops once the agent is idle, even when a background

@@ -29,6 +29,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -835,24 +836,37 @@ def _job_state_live_task_ids(transcript_path):
     is unreadable or malformed, or the state belongs to a DIFFERENT session (sessionId
     must equal the transcript filename stem) -- callers fall through to
     transcript-derived detection."""
+    return {e["id"] for e in _job_state_live_entries(transcript_path)}
+
+
+def _job_state_watcher_ids(transcript_path):
+    """Live job-state tasks that are the API-drop watcher, known by their command -- a shell
+    entry's `label` is the command it runs (observed 2026-10-27, up to 193 characters, uncut) --
+    so the watcher is recognized even when its launch ack is not in the transcript (compaction,
+    respawn)."""
+    return {e["id"] for e in _job_state_live_entries(transcript_path)
+            if e.get("kind") == "shell" and _is_api_drop_watcher_command(e.get("label"))}
+
+
+def _job_state_live_entries(transcript_path):
     job_dir = os.environ.get("CLAUDE_JOB_DIR")
     if not job_dir:
-        return set()
+        return []
     try:
         state = json.loads((Path(job_dir) / "state.json").read_text())
     except (OSError, ValueError):
-        return set()
+        return []
     if not isinstance(state, dict):
-        return set()
+        return []
     sid = Path(transcript_path).stem if transcript_path else ""
     if not sid or state.get("sessionId") != sid:
-        return set()
+        return []
     fan = state.get("fan")
     if not isinstance(fan, list):
-        return set()
-    return {e["id"] for e in fan
+        return []
+    return [e for e in fan
             if isinstance(e, dict) and e.get("kind") != "todo"
-            and e.get("startedAt") and e.get("id") and not e.get("doneAt")}
+            and e.get("startedAt") and e.get("id") and not e.get("doneAt")]
 
 
 def has_outstanding_background_task(transcript_path):
@@ -861,7 +875,7 @@ def has_outstanding_background_task(transcript_path):
     return background_wait_state(transcript_path)[0]
 
 
-def background_wait_state(transcript_path):
+def background_wait_state(transcript_path, strict=False):
     """(suppress, listening). `suppress` is True iff, in the CURRENT turn, the agent launched a
     background task (run_in_background sub-agent or shell) with no matching terminal
     <task-notification> yet -- i.e. the turn ended to PARK on background work the harness will
@@ -875,102 +889,118 @@ def background_wait_state(transcript_path):
     shell, `suppress` is False and `listening` describes those shells for the supervisor; in
     every other case `listening` is empty. See docs/plans/bgwait_server_exception.md.
 
+    The API-drop watcher (a background shell that never exits on its own) is not background work
+    on any path: counted, it would switch supervision off for the whole session. See
+    docs/plans/watchdog_api_drop_watcher.md.
+
     Fail-safe: any error -> (False, []), so a detection bug falls through to normal
-    supervision rather than wedging the agent."""
+    supervision rather than wedging the agent. `strict=True` raises instead, for a caller to
+    whom "no wait" is the dangerous answer (the watcher's automatic resume)."""
     try:
-        events = _transcript_events(transcript_path)
-        if not events:
-            return False, []
-        shells = _background_shell_launches(events)
-        shell_of_tool_use = {info["tool_use_id"]: tid for tid, info in shells.items()
-                             if info.get("tool_use_id")}
-        other = False   # outstanding work that is not a background shell
-        shell_ids = set()
-        ended = _ended_monitor_ids(events)
-        # Amendments 4+5: harness-state liveness. For background jobs the job state
-        # file authoritatively lists in-flight tasks (monitors, shells, any future
-        # kind), so parked-on-live-background-work keeps suppressing for the task's
-        # whole lifecycle -- at any event cadence, across turn boundaries, and with no
-        # visible launch ack (covering compaction/respawn windows). Transcript terminal
-        # evidence (TaskStop / terminal <status>) still WINS over a lingering fan entry.
-        for tid in _job_state_live_task_ids(transcript_path) - ended:
-            if tid in shells:
-                shell_ids.add(tid)
-            else:
-                other = True
-        if _active_monitor_ids(events):
-            other = True
-        # Amendment 7: async SUBAGENTS, tracked across the whole transcript. This is what
-        # covers a FAN-OUT -- the current-turn scan below loses every sibling the moment the
-        # first completion notification becomes the turn boundary, so N-1 running subagents
-        # went unseen and the agent was nudged to act on findings that did not exist yet.
-        if not other and _live_async_agent_ids(events):
-            other = True
-        # Amendment 6: a background SHELL launched in an EARLIER turn. The job-state layer
-        # above covers this only for background-JOB sessions (CLAUDE_JOB_DIR), a shell is not
-        # a Monitor, and the current-turn scan below cannot see a launch from a previous
-        # turn -- so an agent parked on a multi-hour run was nudged mid-wait. The launch ack
-        # carries the task id, and a terminal <task-notification> for that id ends the wait
-        # exactly as it does for monitors (terminal evidence still WINS).
-        shell_signal = _background_shell_last_signal(events)
-        if shell_signal:
-            shell_now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-            shell_ids.update(tid for tid, ts in shell_signal.items()
-                             if tid not in ended and shell_now - ts <= _bg_shell_stale_secs())
-        start = -1  # index of the last turn boundary; -1 => whole transcript in scope
-        for i, ev in enumerate(events):
-            if _is_human_prompt(ev) or _is_task_notification(ev):
-                start = i
-        # Monitor-event boundary (backstop for transcripts where the launch is not
-        # visible, e.g. compaction/resume): if THIS turn was triggered by a monitor
-        # progress <event>, the agent is parked waiting for the next event -- but ONLY
-        # while that monitor has not been explicitly ended (TaskStop / terminal <status>
-        # on any delivery path) and the boundary event itself is FRESH (staleness window;
-        # no timestamp -> no suppression). Amendment 3b: a stale boundary or an ended
-        # monitor must not keep suppressing.
-        if start >= 0 and _is_monitor_event(events[start]):
-            bev = events[start]
-            bc = _event_content(bev)
-            m = _TASK_NOTIFICATION_TASK_ID.search(bc) if isinstance(bc, str) else None
-            tid = m.group(1) if m else None
-            seen_at = _event_epoch_seconds(bev)
-            now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-            if (tid is not None and seen_at is not None
-                    and tid not in ended
-                    and now - seen_at <= _monitor_stale_secs()):
-                other = True
-        launched = []
-        completed = set()
-        for ev in events[start + 1:]:
-            cid = _completion_tool_use_id(ev)
-            if cid:
-                completed.add(cid)
-            completed.update(_terminal_tool_use_ids(ev))
-            # An inline result is proof the launch did not outlive the turn -- the only
-            # discriminator left now that a missing run_in_background means background.
-            completed.update(_inline_resolved_tool_use_ids(ev))
-            launched.extend(_background_launch_ids(ev))
-        for lid in launched:
-            if lid in completed:
-                continue
-            if lid in shell_of_tool_use:
-                if shell_of_tool_use[lid] not in ended:
-                    shell_ids.add(shell_of_tool_use[lid])
-            else:
-                other = True
-        if other:
-            return True, []
-        if not shell_ids:
-            return False, []
-        # Only now, when nothing but shells keeps the wait open, is it worth probing ports.
-        listening = _listening_shell_task_ids(
-            {tid: shells[tid]["output"] for tid in shell_ids
-             if shells.get(tid, {}).get("output")})
-        if shell_ids - listening:
-            return True, []
-        return False, [dict(shells[tid], task_id=tid) for tid in sorted(listening)]
+        return _background_wait_state(transcript_path)
     except Exception:
+        if strict:
+            raise
         return False, []
+
+
+def _background_wait_state(transcript_path):
+    events = _transcript_events(transcript_path)
+    if not events:
+        return False, []
+    all_shells = _background_shell_launches(events)
+    watchers = ({tid for tid, info in all_shells.items() if info.get("watcher")}
+                | _job_state_watcher_ids(transcript_path))
+    shells = {tid: info for tid, info in all_shells.items() if tid not in watchers}
+    shell_of_tool_use = {info["tool_use_id"]: tid for tid, info in all_shells.items()
+                         if info.get("tool_use_id")}
+    other = False   # outstanding work that is not a background shell
+    shell_ids = set()
+    ended = _ended_monitor_ids(events)
+    # Amendments 4+5: harness-state liveness. For background jobs the job state
+    # file authoritatively lists in-flight tasks (monitors, shells, any future
+    # kind), so parked-on-live-background-work keeps suppressing for the task's
+    # whole lifecycle -- at any event cadence, across turn boundaries, and with no
+    # visible launch ack (covering compaction/respawn windows). Transcript terminal
+    # evidence (TaskStop / terminal <status>) still WINS over a lingering fan entry.
+    for tid in _job_state_live_task_ids(transcript_path) - ended - watchers:
+        if tid in shells:
+            shell_ids.add(tid)
+        else:
+            other = True
+    if _active_monitor_ids(events):
+        other = True
+    # Amendment 7: async SUBAGENTS, tracked across the whole transcript. This is what
+    # covers a FAN-OUT -- the current-turn scan below loses every sibling the moment the
+    # first completion notification becomes the turn boundary, so N-1 running subagents
+    # went unseen and the agent was nudged to act on findings that did not exist yet.
+    if not other and _live_async_agent_ids(events):
+        other = True
+    # Amendment 6: a background SHELL launched in an EARLIER turn. The job-state layer
+    # above covers this only for background-JOB sessions (CLAUDE_JOB_DIR), a shell is not
+    # a Monitor, and the current-turn scan below cannot see a launch from a previous
+    # turn -- so an agent parked on a multi-hour run was nudged mid-wait. The launch ack
+    # carries the task id, and a terminal <task-notification> for that id ends the wait
+    # exactly as it does for monitors (terminal evidence still WINS).
+    shell_signal = _background_shell_last_signal(events)
+    if shell_signal:
+        shell_now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        shell_ids.update(tid for tid, ts in shell_signal.items()
+                         if tid not in ended and tid not in watchers
+                         and shell_now - ts <= _bg_shell_stale_secs())
+    start = -1  # index of the last turn boundary; -1 => whole transcript in scope
+    for i, ev in enumerate(events):
+        if _is_human_prompt(ev) or _is_task_notification(ev):
+            start = i
+    # Monitor-event boundary (backstop for transcripts where the launch is not
+    # visible, e.g. compaction/resume): if THIS turn was triggered by a monitor
+    # progress <event>, the agent is parked waiting for the next event -- but ONLY
+    # while that monitor has not been explicitly ended (TaskStop / terminal <status>
+    # on any delivery path) and the boundary event itself is FRESH (staleness window;
+    # no timestamp -> no suppression). Amendment 3b: a stale boundary or an ended
+    # monitor must not keep suppressing.
+    if start >= 0 and _is_monitor_event(events[start]):
+        bev = events[start]
+        bc = _event_content(bev)
+        m = _TASK_NOTIFICATION_TASK_ID.search(bc) if isinstance(bc, str) else None
+        tid = m.group(1) if m else None
+        seen_at = _event_epoch_seconds(bev)
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        if (tid is not None and seen_at is not None
+                and tid not in ended
+                and now - seen_at <= _monitor_stale_secs()):
+            other = True
+    launched = []
+    completed = set()
+    for ev in events[start + 1:]:
+        cid = _completion_tool_use_id(ev)
+        if cid:
+            completed.add(cid)
+        completed.update(_terminal_tool_use_ids(ev))
+        # An inline result is proof the launch did not outlive the turn -- the only
+        # discriminator left now that a missing run_in_background means background.
+        completed.update(_inline_resolved_tool_use_ids(ev))
+        launched.extend(_background_launch_ids(ev))
+    for lid in launched:
+        if lid in completed:
+            continue
+        if lid in shell_of_tool_use:
+            tid = shell_of_tool_use[lid]
+            if tid not in ended and tid not in watchers:
+                shell_ids.add(tid)
+        else:
+            other = True
+    if other:
+        return True, []
+    if not shell_ids:
+        return False, []
+    # Only now, when nothing but shells keeps the wait open, is it worth probing ports.
+    listening = _listening_shell_task_ids(
+        {tid: shells[tid]["output"] for tid in shell_ids
+         if shells.get(tid, {}).get("output")})
+    if shell_ids - listening:
+        return True, []
+    return False, [dict(shells[tid], task_id=tid) for tid in sorted(listening)]
 
 
 # The launch ack names the task's output file; the shell and every child that inherited its
@@ -978,6 +1008,29 @@ def background_wait_state(transcript_path):
 _BG_SHELL_OUTPUT = re.compile(
     r"Command running in background with ID:\s*([A-Za-z0-9_-]+)\.\s*"
     r"Output is being written to:\s*(/\S+?\.output)(?=[.\s]|$)")
+
+
+# The API-drop watcher (docs/plans/watchdog_api_drop_watcher.md). Defined here rather than with
+# the rest of its text in reviewer_prompts because this layer must recognize it and cannot
+# import that one.
+API_DROP_WATCHER_DESCRIPTION = (
+    "reviewer-agent API-drop watcher -- when it completes, Read its output and follow it")
+_API_DROP_WATCHER_FLAGS = ["--cwd", "--session", "--transcript"]
+
+
+def _is_api_drop_watcher_command(command):
+    """True only for the exact launch `api_drop_watcher_command` builds:
+    `/bin/sh <root>/hooks/run_hook.sh <root>/api_drop_watch.py --cwd X --session Y --transcript Z`.
+    A command that merely mentions the script (`rg api_drop_watch.py`) or runs something more
+    after it is real background work and must still count."""
+    try:
+        toks = shlex.split(str(command or ""))
+    except ValueError:
+        return False
+    return (len(toks) == 9 and toks[0] == "/bin/sh"
+            and os.path.basename(toks[1]) == "run_hook.sh"
+            and os.path.basename(toks[2]) == "api_drop_watch.py"
+            and toks[3::2] == _API_DROP_WATCHER_FLAGS)
 
 
 def _background_shell_launches(events):
@@ -1007,12 +1060,16 @@ def _background_shell_launches(events):
             for m in _BG_SHELL_OUTPUT.finditer(cc):
                 tid, out = m.group(1), m.group(2)
                 inp = inputs.get(b.get("tool_use_id")) or {}
+                command = str(inp.get("command") or "")
                 launches[tid] = {
                     "tool_use_id": b.get("tool_use_id"),
                     "output": out if os.path.basename(out) == tid + ".output" else None,
                     "description": str(inp.get("description") or "")[:200],
-                    "command": str(inp.get("command") or "")[:200],
+                    "command": command[:200],
                     "started": ev.get("timestamp") or "",
+                    # Judged on the FULL command: the plugin path can push the script name past
+                    # the display cut above.
+                    "watcher": _is_api_drop_watcher_command(command),
                 }
     return launches
 

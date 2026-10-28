@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""UserPromptSubmit hook: watchdog auto-rearm.
+"""UserPromptSubmit hook: watchdog auto-rearm, and the request to start the API-drop watcher
+(docs/plans/watchdog_api_drop_watcher.md) when this session has none running.
 
 When the operator submits a prompt after the watchdog has torn its cron down (the session went
 idle for a full interval), re-arm it. The re-arm gate is deterministic and hook-side: re-arm iff
@@ -13,6 +14,7 @@ Fail-open: any error emits nothing (a missing re-arm just leaves the SessionStar
 prompt to recover it -- it never wedges the turn). See docs/plans/watchdog_auto_shutoff.md.
 """
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -113,6 +115,26 @@ def _rearm_context(data, cwd):
     return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd), sid)
 
 
+def _api_drop_watch_context(data, cwd):
+    """The instruction to start this session's API-drop watcher, or None when one is running or
+    was just asked for. Never on a tick: its own instruction is to do nothing else when the
+    operator has the turn. See docs/plans/watchdog_api_drop_watcher.md."""
+    if os.environ.get("REVIEWER_API_DROP_WATCH", "").strip() == "0":
+        return None
+    if "stopContinueWatchdog tick" in str(data.get("prompt") or ""):
+        return None
+    if not rl.is_stopcontinue_watchdog_effective(cwd):
+        return None
+    sid = rl.claude_session_key(data)
+    transcript = rl.resolve_transcript_path(data)
+    if not sid or not transcript:
+        return None
+    if rl.api_drop_watcher_alive(cwd, sid) or rl.api_drop_launch_pending(cwd, sid):
+        return None
+    rl.request_api_drop_watcher(cwd, sid)
+    return rl.api_drop_watcher_launch_instruction(cwd, sid, transcript)
+
+
 def main():
     try:
         raw = sys.stdin.read()
@@ -122,7 +144,8 @@ def main():
         if block is not None:
             print(json.dumps(block))
             return 0
-        ctx = _rearm_context(data, cwd)
+        parts = [c for c in (_rearm_context(data, cwd), _api_drop_watch_context(data, cwd)) if c]
+        ctx = "\n\n".join(parts)
         if ctx:
             rl.log("[userpromptsubmit] key={} watchdog re-arm context injected".format(
                 rl.canonical_project_key(cwd)))

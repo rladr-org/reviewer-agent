@@ -4,8 +4,21 @@ Reviewer Agent provides separate commit review and stop supervision for Claude C
 an independent reviewer audits each `git commit` before it lands, and a supervisor reviews each
 stop so the agent does not quit before the request is done.
 
-1.4.5 fixes two Claude Code stop-supervision bugs. Codex is unchanged apart from its version
-label.
+1.4.5 resumes Claude Code sessions within seconds after a dropped API connection and fixes two
+Claude Code stop-supervision bugs. Codex is unchanged apart from its version label.
+
+## Added
+
+- **Resume within seconds after a dropped API connection.** Claude Code ends a turn on
+  `Connection lost mid-response`, `The response stopped arriving` or `No response from API`, runs
+  no Stop hook after it, and does not retry it, so until now the session waited for the next
+  watchdog tick (up to about ten minutes). While the watchdog is on, the first prompt in a
+  session now asks the agent to start an API-drop watcher: a background command that reads the
+  session transcript without model calls and exits about 20 seconds after such a turn, which
+  starts the resume turn. It also covers 500 and 529 errors, leaves login, limit and safeguard
+  errors alone, waits while background work is outstanding or you have the turn, and backs off
+  to one resume per five minutes during an outage. Outside auto mode Claude Code may ask you to
+  approve the command once. `REVIEWER_API_DROP_WATCH=0` turns it off.
 
 ## Fixed
 
@@ -58,7 +71,8 @@ on the PATH Claude Code starts with is not rejected. The install and update guid
 
 macOS has daily use and automated coverage. On Ubuntu 20.04, 1.4.3 was verified with Claude Code
 (`codex` backend) and the Codex CLI: commit review, Stop supervision, and update, uninstall and
-reinstall. 1.4.5 changes Claude Code stop-hook code and has not been re-verified on Linux. Other
+reinstall. 1.4.5 changes Claude Code stop-hook code and adds the watcher; neither has been verified on
+Linux. Other
 distributions and WSL2 are unverified. No platform or model configuration is guaranteed to work.
 
 Reviewer calls send project context to the selected provider and may consume quota. Read

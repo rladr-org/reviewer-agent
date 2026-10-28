@@ -101,10 +101,16 @@ The Stop hook skips supervision while the agent is parked on an outstanding back
 (`background_wait_state`), and a session's ticks only reach the idle teardown through a
 supervised stop. The watcher never exits on its own, so counted as background work it would
 switch stop supervision off for the whole session and keep the cron alive forever. So
-`background_wait_state` drops every shell whose launch command runs `api_drop_watch.py`, on every
-path that can count a shell: the current turn's launches, a shell from an earlier turn that is
-still signalling, and the job-state list. It is matched on the FULL command, not the 200-character
-copy kept for display, because the plugin path can push the script name past that cut. With only
+`background_wait_state` drops the watcher on every path that can count a shell: the current
+turn's launches, a shell from an earlier turn that is still signalling, and the job-state list.
+A shell is the watcher only when its command is EXACTLY the launch the plugin generates --
+`/bin/sh <root>/hooks/run_hook.sh <root>/api_drop_watch.py --cwd X --session Y --transcript Z`,
+nine shell words -- so a command that merely mentions the script (`rg api_drop_watch.py`) or
+runs something more after it still counts as work. It is matched on the FULL command, not the
+200-character copy kept for display, because the plugin path can push the script name past that
+cut. In the job state the same match runs on a shell entry's `label`, which is its command
+(observed, up to 193 characters, uncut), so the watcher is recognized even when compaction or a
+respawn has removed its launch acknowledgement from the transcript. With only
 the watcher outstanding, a stop is supervised as if nothing were running; with the watcher and a
 real job, the real job still parks the stop.
 
