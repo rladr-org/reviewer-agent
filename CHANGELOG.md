@@ -17,8 +17,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   watchdog is on, the first prompt in a session asks the agent to start the watcher as a
   background command; it reads the transcript, makes no model calls, and exits when a turn ends
   on `Connection lost mid-response`, `The response stopped arriving`, `No response from API`, a
-  500 or a 529 with nothing since. That exit starts the resume turn. It leaves login, limit and
-  safeguard errors alone, waits while background work is outstanding or the operator has the
+  500 or a 529 with nothing since. That exit starts the resume turn. It leaves login, limit,
+  safeguard and proxy or gateway configuration errors alone, lets Claude Code's own "Waiting for
+  API response · will retry" loop run (resuming only if that loop gives up), waits while background work is outstanding or the operator has the
   turn, and backs off to one resume per five minutes during an outage. The stop review does not
   count the watcher as background work. `REVIEWER_API_DROP_WATCH=0` turns it off; the cron tick
   is unchanged and still the backstop.

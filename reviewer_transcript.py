@@ -273,6 +273,10 @@ def operator_reply_watch(transcript_path):
 # The API-error entries a retry can fix: connection lost, stopped arriving, no response, 500 and
 # 529 all carry this. Login, rate/usage limits and safeguard refusals carry their own values.
 _API_DROP_ERRORS = frozenset({"server_error"})
+# Connection failures that path also tags server_error, but from configuration: a proxy's
+# certificate the client does not trust, a gateway answering in the wrong format. Every retry
+# fails the same way.
+_API_DROP_CONFIG_FAILURES = frozenset({"tls_untrusted_ca", "gateway_content_type"})
 
 
 class _ApiDropScan:
@@ -296,7 +300,8 @@ class _ApiDropScan:
             return
         kind = ev.get("type")
         if kind == "assistant" and ev.get("isApiErrorMessage"):
-            if ev.get("error") in _API_DROP_ERRORS:
+            if (ev.get("error") in _API_DROP_ERRORS
+                    and ev.get("apiError") not in _API_DROP_CONFIG_FAILURES):
                 self._drop = ev
                 self._quiet_since = _event_epoch_seconds(ev)
             else:

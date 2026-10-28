@@ -15,8 +15,9 @@ Claude Code stop-supervision bugs. Codex is unchanged apart from its version lab
   watchdog tick (up to about ten minutes). While the watchdog is on, the first prompt in a
   session now asks the agent to start an API-drop watcher: a background command that reads the
   session transcript without model calls and exits about 20 seconds after such a turn, which
-  starts the resume turn. It also covers 500 and 529 errors, leaves login, limit and safeguard
-  errors alone, waits while background work is outstanding or you have the turn, and backs off
+  starts the resume turn. It also covers 500 and 529 errors, leaves login, limit, safeguard and
+  proxy or gateway configuration errors alone, lets Claude Code's own "Waiting for API response ·
+  will retry" loop run (resuming only if that loop gives up), waits while background work is outstanding or you have the turn, and backs off
   to one resume per five minutes during an outage. Outside auto mode Claude Code may ask you to
   approve the command once. `REVIEWER_API_DROP_WATCH=0` turns it off.
 

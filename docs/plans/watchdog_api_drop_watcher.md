@@ -35,7 +35,10 @@ All of:
 1. The latest main-session (non-sidechain) API-error entry has `isApiErrorMessage: true` and
    `error: "server_error"`. That covers connection lost, stopped arriving, no response, 500 and
    529. Login (`authentication_failed`), rate and usage limits (`rate_limit`) and safeguard
-   refusals (`invalid_request`) are excluded: retrying does not help them.
+   refusals (`invalid_request`) are excluded: retrying does not help them. So are the two
+   configuration failures Claude Code's connection-error path also tags `server_error`, told
+   apart by `apiError`: `tls_untrusted_ca` (a proxy's certificate the client does not trust) and
+   `gateway_content_type` (a gateway answering in the wrong format) fail the same way every time.
 2. Nothing after it shows the session moved on: no main-session assistant event, no
    `api-request` record, no main-session user turn-start (operator prompt, tick, task
    notification), and no `queue-operation` enqueue. A tool-result carrier does not count.
@@ -68,9 +71,13 @@ All of:
 Backoff: if it has fired 3 times in the last 10 minutes, the grace becomes 5 minutes, so an API
 outage produces a resume every few minutes rather than a burst.
 
-Claude Code's own pre-output retry loop ("Waiting for API response · will retry in 2m") writes
-no error entry while it runs, so the watcher leaves it alone. If that loop finally gives up with
-a server error, condition 1 covers it.
+Claude Code's own pre-output retry loop ("Waiting for API response · will retry in 2m 1s ·
+check your network") writes no error entry while it runs -- the spinner is the only sign of it;
+the transcript gains one `api-request` record per attempt -- so the watcher leaves it alone:
+nothing is pending, and a request record would cancel an earlier drop anyway. When the loop
+gives up it writes an ordinary error entry ("Unable to connect to API (...) ... switch networks,
+then try again", or "Connection to the API was lost (ECONNRESET) ..."), both `server_error`
+(read from Claude Code 2.1.311), so condition 1 covers the final failure.
 
 ## Starting it, and keeping exactly one
 

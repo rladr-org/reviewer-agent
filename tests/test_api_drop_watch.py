@@ -113,6 +113,44 @@ def test_anything_showing_the_session_moved_on_cancels_the_drop(after):
     assert rl.api_drop_pending(_turn(_drop(), after)) is None
 
 
+# Claude Code's own pre-output retry loop ("Waiting for API response · will retry in 2m 1s ·
+# check your network") writes no error entry while it waits: no saved transcript on the machine
+# this was built on has one. What the transcript shows is the request, and one more per attempt
+# (observed 2026-10-27: requests at 05:00:39 and 05:03:57, the 3-minute first-byte wait and its
+# retry). Only when the loop gives up does an error entry appear.
+
+def _retry_loop(*before):
+    return [*before, _human("fix the table"), _asst("Editing."), _tool_result(),
+            {"type": "api-request"}, {"type": "api-request-blob"}, {"type": "api-request"}]
+
+
+def test_claude_codes_own_retry_loop_is_not_a_drop():
+    assert rl.api_drop_pending(_retry_loop()) is None
+
+
+def test_a_retry_loop_after_an_earlier_resumed_drop_is_not_a_drop():
+    assert rl.api_drop_pending(_retry_loop(_human("go"), _drop(uuid="old"))) is None
+
+
+@pytest.mark.parametrize("text", [
+    "API Error: Unable to connect to API (ENOTFOUND). A VPN, firewall, or security software can "
+    "cause this. Check those or switch networks, then try again.",
+    "API Error: Connection to the API was lost (ECONNRESET). This is usually temporary — try "
+    "again.",
+], ids=["unable-to-connect", "connection-lost-code"])
+def test_a_retry_loop_that_gives_up_is_a_drop(text):
+    assert rl.api_drop_pending(_retry_loop() + [_drop(text)]) is not None
+
+
+@pytest.mark.parametrize("api_error", ["tls_untrusted_ca", "gateway_content_type"])
+def test_a_connection_failure_from_configuration_is_not_a_drop(api_error):
+    # The same connection-failure path tags these server_error too, but a proxy's untrusted
+    # certificate or a gateway's wrong content type fails the same way on every retry.
+    ev = _drop("API Error: Unable to connect to API (SELF_SIGNED_CERT_IN_CHAIN).",
+               apiError=api_error)
+    assert rl.api_drop_pending(_turn(ev)) is None
+
+
 def test_a_classifier_failure_that_carries_on_is_cancelled_by_its_next_request():
     # The auto-mode classifier's own API call failed: same error entry, then a tool result, then
     # the turn carries on with a new request. That turn is alive.
@@ -572,6 +610,15 @@ def test_the_watcher_keeps_waiting_while_the_turn_carries_on(tmp_path, watchers)
     _effective(repo)
     tr = _transcript(tmp_path, _human("fix the table"), _drop(), _tool_result(),
                      {"type": "api-request"})
+    proc = _start_watch(repo, tr)
+    watchers.append(proc)
+    assert _still_running(proc, 2.0)
+
+
+def test_the_watcher_keeps_waiting_through_claude_codes_retry_loop(tmp_path, watchers):
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, *_retry_loop())
     proc = _start_watch(repo, tr)
     watchers.append(proc)
     assert _still_running(proc, 2.0)
