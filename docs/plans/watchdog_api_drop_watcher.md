@@ -36,19 +36,34 @@ All of:
    `error: "server_error"`. That covers connection lost, stopped arriving, no response, 500 and
    529. Login (`authentication_failed`), rate and usage limits (`rate_limit`) and safeguard
    refusals (`invalid_request`) are excluded: retrying does not help them.
-2. Nothing after it shows the session moved on: no assistant event, no `api-request` record, no
-   user turn-start (operator prompt, tick, task notification), and no `queue-operation`
-   enqueue. A tool-result carrier does not count. This matters: when the auto-mode classifier's
+2. Nothing after it shows the session moved on: no main-session assistant event, no
+   `api-request` record, no main-session user turn-start (operator prompt, tick, task
+   notification), and no `queue-operation` enqueue. A tool-result carrier does not count.
+   Sub-agent (sidechain) events neither count nor are ignored: they are not the main turn, so
+   they do not cancel the drop, but something is still active, so the grace (condition 3) runs
+   from the latest of them rather than from the error. This matters: when the auto-mode classifier's
    own API call fails, Claude Code records the same kind of error entry, writes a tool result,
    and carries on with a new API request within a second -- that turn is alive, and the
    `api-request` that follows cancels the drop.
-3. The error is at least 20 seconds old (`GRACE`), so a turn that is carrying on has written
+3. The error -- or the latest sub-agent event after it -- is at least 20 seconds old (`GRACE`),
+   so a turn that is carrying on has written
    its next record and the operator has a moment to type `continue` themselves.
 4. The watchdog is effective for the project (stopContinue and the watchdog both on) and the
    session's disarm marker is absent. Disarm means the operator has the turn (an approved stop,
    an interrupt), exactly as for the tick; a dropped tick turn that started while disarm was
    set must not start work.
 5. It has not already fired for this error (its `uuid` is recorded in the lease file).
+6. No background work is outstanding: `background_wait_state` (the Stop hook's own check, which
+   counts live background sub-agents, monitors and non-server background shells, and leaves the
+   watcher itself out) reports no wait. While such work is outstanding Claude Code starts a turn
+   when it completes, so there is nothing to resume -- and a background sub-agent can be inside
+   a long tool call for minutes without writing anything, so quiet alone does not mean it ended.
+   A synchronous sub-agent cannot outlive a main-session drop: it runs as a tool call, while no
+   main-session request is open. The check runs only when a drop is otherwise due, so a large
+   transcript is not re-parsed on every poll. The Stop hook's form of the check reads any
+   internal error as "no wait" (fail-open toward supervision); that is the wrong direction for
+   an automatic resume, so the watcher uses a strict form that raises instead, and an error
+   means keep waiting -- the cron tick is still there to recover.
 
 Backoff: if it has fired 3 times in the last 10 minutes, the grace becomes 5 minutes, so an API
 outage produces a resume every few minutes rather than a burst.
@@ -122,7 +137,8 @@ operator may have been given the turn between the fire and the turn starting.
 
 - Detection (pure, over event lists): each server-error kind fires; auth, rate-limit and
   safeguard errors do not; an api-request, assistant event, human prompt, tick or enqueue after
-  the error cancels it; a tool result alone does not; sidechain errors are ignored; the grace
+  the error cancels it; a tool result alone does not; sidechain errors are ignored, and
+  sidechain activity after a drop moves the start of the grace to its latest event; the grace
   and the backoff grace; an already-fired uuid does not refire.
 - Lease: alive needs a running pid AND a fresh ts; a provisional lease suppresses a second
   launch instruction for a minute; a second watcher exits when one is alive.
@@ -132,6 +148,10 @@ operator may have been given the turn between the fire and the turn starting.
   watcher running.
 - UserPromptSubmit: launch instruction present when effective and no live watcher; absent on a
   tick, when the watchdog is off, when `REVIEWER_API_DROP_WATCH=0`, and when a watcher is alive.
+- The script does not fire while a background sub-agent launched in the dropped turn is still
+  outstanding, and does fire when the only background shell is the watcher itself. A failure
+  inside the background check reads as outstanding work for the watcher, while the Stop hook's
+  form still reads it as no wait.
 - The script end to end (subprocess, short grace via an environment override): exits with the
   instruction after a dropped turn is appended; keeps running while the turn carries on; exits
   immediately when another watcher is alive.
