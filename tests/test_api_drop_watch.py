@@ -44,7 +44,7 @@ OVERLOADED = ("API Error: 529 Overloaded. This is a server-side issue, usually t
 def _isolate_env(monkeypatch, tmp_path):
     for var in ("REVIEWER_STATE_DIR", "REVIEWER_BACKEND", "CLAUDE_CODE_SESSION_ID",
                 "CLAUDE_SESSION_ID", "REVIEWER_API_DROP_WATCH", "REVIEWER_API_DROP_GRACE_SECS",
-                "REVIEWER_API_DROP_POLL_SECS"):
+                "REVIEWER_API_DROP_POLL_SECS", "CLAUDE_PID"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
 
@@ -539,10 +539,11 @@ def test_no_request_when_turned_off_by_environment(tmp_path):
 
 # --- the script, end to end ---------------------------------------------------------------------
 
-def _start_watch(repo, transcript, sid="s"):
+def _start_watch(repo, transcript, sid="s", **env_extra):
     env = dict(os.environ)
     env["REVIEWER_API_DROP_GRACE_SECS"] = "0.5"
     env["REVIEWER_API_DROP_POLL_SECS"] = "0.1"
+    env.update(env_extra)
     return subprocess.Popen(
         [sys.executable, WATCH, "--cwd", repo, "--session", sid, "--transcript", transcript],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
@@ -689,3 +690,73 @@ def test_a_second_watcher_exits_at_once_and_leaves_the_lease_alone(tmp_path, wat
     assert proc.returncode == 0
     assert "already running" in out.lower()
     assert Path(rl.api_drop_lease_file(repo, "s")).read_text() == before
+
+
+# --- the watcher exits once its session is gone (docs/plans/watchdog_api_drop_watcher_exit.md) ---
+
+def _continued_in(new_sid="s-next"):
+    return {"type": "continued-in", "timestamp": "2026-10-29T02:58:58.269Z", "sessionId": "s",
+            "continuedInSessionId": new_sid}
+
+
+def test_a_watcher_whose_claude_code_process_exited_stops_without_firing(tmp_path, watchers):
+    # Live, 2026-11-02: two watchers polled for 8.7 hours after their Claude Code processes had
+    # exited, reparented to launchd, still holding their sessions' leases.
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("fix the table"), _drop())
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(_dead_pid()))
+    watchers.append(proc)
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, err
+    assert LOST not in out
+
+
+def test_a_watcher_whose_claude_code_process_runs_keeps_waiting(tmp_path, watchers):
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("fix the table"), _asst("Editing."))
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(os.getpid()))
+    watchers.append(proc)
+    assert _still_running(proc, 2.0)
+
+
+def test_a_handoff_to_a_new_session_stops_the_watcher(tmp_path, watchers):
+    # Live, 2026-10-29: the watcher for 29311a44 kept running after the conversation continued
+    # as 1460d5a1, beside the new session's own watcher.
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("fix the table"), _asst("Editing."))
+    proc = _start_watch(repo, tr)
+    watchers.append(proc)
+    _wait_for_lease_pid(repo, proc.pid)
+    assert _still_running(proc, 1.0)
+    _append(tr, _continued_in("s-next"))
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, err
+    assert "s-next" in out
+
+
+def test_a_handoff_already_in_the_transcript_stops_the_watcher_without_firing(tmp_path, watchers):
+    # A drop the old session never resumed must not be resumed into the conversation that now
+    # owns the process.
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("fix the table"), _drop(), _continued_in("s-next"))
+    proc = _start_watch(repo, tr)
+    watchers.append(proc)
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, err
+    assert LOST not in out
+    assert "s-next" in out
+
+
+def test_a_handoff_followed_by_more_messages_does_not_stop_the_watcher(tmp_path, watchers):
+    # Claude Code's own rule: a continued-in record counts only when no message follows it.
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("fix the table"), _continued_in("s-next"),
+                     _human("back to this one"), _asst("Carrying on."))
+    proc = _start_watch(repo, tr)
+    watchers.append(proc)
+    assert _still_running(proc, 2.0)
