@@ -14,6 +14,12 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   background shell that never exits, such as a webhook forwarder, used to keep the ticks running
   every interval until the cron expired after seven days. The turn a background completion starts
   still clears the pause and re-arms the cron.
+- Claude Code: the API-drop watcher exits once its session is gone, that is, when the Claude Code
+  process that started it has exited (Claude Code does not kill background shells on exit) or
+  when the conversation has continued under a new session id. Leftover watchers used to keep
+  running indefinitely. A leftover also held its session's lease, so a resumed session's watcher
+  stopped at once, and it could resume an old dropped turn into the conversation that took over
+  its process.
 
 ## [1.4.5]
 

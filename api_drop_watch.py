@@ -64,13 +64,26 @@ def background_work_outstanding(transcript_path):
         return True
 
 
+def _launcher_pid():
+    """The Claude Code process that started this watcher: it exports CLAUDE_PID into every shell
+    it starts. None when absent (an older Claude Code, or a watcher started by hand)."""
+    try:
+        pid = int(os.environ.get("CLAUDE_PID", ""))
+    except ValueError:
+        return None
+    return pid if pid > 1 else None
+
+
 class _Tail:
-    """Feeds the transcript's complete lines to the drop scan as they are appended."""
+    """Feeds the transcript's complete lines to the drop scan as they are appended, and notes a
+    handoff: a `continued-in` record with no message after it means the conversation now lives
+    under another session id, the rule Claude Code itself applies to supersede a session."""
 
     def __init__(self, path, scan):
         self._path = path
         self._scan = scan
         self._offset = 0
+        self.continued_in = None
 
     def poll(self):
         try:
@@ -86,6 +99,11 @@ class _Tail:
                 ev = json.loads(line)
             except ValueError:
                 continue
+            kind = ev.get("type") if isinstance(ev, dict) else None
+            if kind == "continued-in":
+                self.continued_in = str(ev.get("continuedInSessionId") or "another session")
+            elif kind in ("user", "assistant"):
+                self.continued_in = None
             self._scan.feed(ev)
 
 
@@ -105,16 +123,30 @@ def watch(cwd, sid, transcript):
     poll = _env_secs("REVIEWER_API_DROP_POLL_SECS", POLL_SECS)
     scan = rl.api_drop_scan()
     tail = _Tail(transcript, scan)
+    launcher = _launcher_pid()
     first_seen = {}
     background_checked = {}
     while True:
+        # A lost session ends the watch before anything else, without touching the lease: this
+        # pid stops running, so the lease reads as dead at once. Claude Code does not kill a
+        # background shell when it exits, and a session that continues under a new id keeps its
+        # process; either way a leftover polled for hours, and could have resumed a drop into a
+        # conversation it no longer belongs to (docs/plans/watchdog_api_drop_watcher_exit.md).
+        if launcher is not None and not reviewer_state._pid_running(launcher):
+            print("The Claude Code process that started this API-drop watcher (pid {}) has "
+                  "exited; the watcher stopped.".format(launcher))
+            return 0
+        tail.poll()
+        if tail.continued_in is not None:
+            print("This conversation continued as session {}, which starts its own API-drop "
+                  "watcher; this one stopped. No action needed.".format(tail.continued_in))
+            return 0
         lease = rl.read_api_drop_lease(cwd, sid)
         if _held_by_another(lease, me):
             print("Another API-drop watcher took over for this session; this one stopped.")
             return 0
         lease.update(pid=me, ts=rl.api_drop_lease_now())
         rl.write_api_drop_lease(cwd, sid, lease)
-        tail.poll()
         drop = scan.pending(fired_uuid=lease.get("fired_uuid"))
         now = time.time()
         if drop is not None:
