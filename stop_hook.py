@@ -176,11 +176,18 @@ def _main(data):
     # background task. The harness auto-re-invokes this session the moment that task
     # completes, so nudging the parked agent only makes it spin. Allow the stop with NO
     # supervisor call and NO budget consumption; the session resumes on completion.
+    # A tick's bare `ok` here found no unfinished work, which is the question the ticks exist to
+    # ask, so it advances the pause and idle teardown as it would outside a wait. Otherwise a
+    # background shell that never ends (a webhook forwarder) kept the ticks running for the
+    # cron's full seven days (docs/plans/watchdog_tick_pause_during_background_wait.md).
     if bg_wait:
+        tick_ok = is_tick and text.strip().lower().rstrip(".") == "ok"
         rl.log(
             "[stop] key={} background wait (harness auto-wakes on completion) -> allow stop, "
-            "no supervisor call".format(key)
+            "no supervisor call{}".format(key, "; tick replied ok -> pause" if tick_ok else "")
         )
+        if tick_ok:
+            _watchdog_on_stop_ok(cwd, claude_sid, is_tick)
         return 0
     if bg_servers:
         rl.log("[stop] key={} only listening background shells remain ({}) -> not a background "

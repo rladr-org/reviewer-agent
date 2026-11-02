@@ -1000,7 +1000,10 @@ anything. The Codex package exposes the same two actions as
 The stop hook allows a turn to end without a supervisor call when the transcript shows a live
 harness-managed background shell, subagent, or monitor. The host is expected to resume the session
 when that work completes. Staleness windows prevent abandoned markers from suppressing supervision
-indefinitely.
+indefinitely. A watchdog tick that replies `ok` during such a wait found nothing unfinished, so the
+watchdog pauses and then removes its cron as it does for any idle session, even while a shell that
+never exits (a webhook forwarder, a log follower) is still running. The turn a completion starts
+clears the pause and re-arms the cron.
 
 Every stop-hook invocation writes a `[stop] ENTER` record to
 `~/.claude/reviewer-agent/logs/reviewer.log`. If an expected stop was not supervised:

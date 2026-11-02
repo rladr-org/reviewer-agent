@@ -7,6 +7,14 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude Code: a stopContinue watchdog tick that replies `ok` while the agent is parked on
+  background work now pauses the watchdog, and the idle teardown removes the cron as usual. A
+  background shell that never exits, such as a webhook forwarder, used to keep the ticks running
+  every interval until the cron expired after seven days. The turn a background completion starts
+  still clears the pause and re-arms the cron.
+
 ## [1.4.5]
 
 ### Added
