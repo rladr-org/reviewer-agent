@@ -1097,3 +1097,104 @@ def test_a_tick_that_did_more_than_reply_ok_is_still_supervised(tmp_path, monkey
                  {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
                   "FAKE_CODEX_STDOUT": "Finish the two remaining steps."})
     assert json.loads(p.stdout)["decision"] == "block"
+
+
+# --------------------------------------------------------------------------
+# A tick during a background wait (docs/plans/watchdog_tick_pause_during_background_wait.md)
+# --------------------------------------------------------------------------
+def _bg_wait_tick_transcript(tmp_path, final_text="ok"):
+    """The agent parked on a background shell that never ends, then a tick fired and replied."""
+    events = [
+        {"type": "user", "message": {"role": "user", "content": "start the webhook forwarder"}},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "name": "Agent", "id": "toolu_BG",
+             "input": {"description": "d", "subagent_type": "Explore", "prompt": "p",
+                       "run_in_background": True}}]}},
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": "Forwarder running; your call on the next step."}]}},
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": _TICK_BODY}},
+        {"type": "assistant", "message": {"role": "assistant",
+            "content": [{"type": "text", "text": final_text}]}},
+    ]
+    return _write_jsonl(tmp_path, "bgwait_tick.jsonl", events)
+
+
+def _stop_bg_wait_tick(tmp_path, repo, home, final_text="ok"):
+    argv = str(tmp_path / "argv.jsonl")
+    p = run_stop(_stop_input(repo, _bg_wait_tick_transcript(tmp_path, final_text)),
+                 {"REVIEWER_HOME": home, "REVIEWER_CODEX_BIN": FAKE, "FAKE_CODEX_EXIT": "0",
+                  "FAKE_CODEX_STDOUT": "Check the forwarder and report.",
+                  "FAKE_CODEX_ARGV_FILE": argv})
+    assert p.returncode == 0, p.stderr
+    assert "decision" not in (json.loads(p.stdout) if p.stdout.strip() else {})
+    assert _supervisor_calls(argv) == []                      # still a background-wait stop
+    return p
+
+
+def test_a_ticks_ok_during_a_background_wait_marks_the_pause(tmp_path, monkeypatch):
+    # Live, 2026-11-02: a never-ending Stripe listener kept a session in a background wait, and
+    # every tick replied `ok` for hours because this stop never wrote the pause marker.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)                                              # no pause marker yet
+    _stop_bg_wait_tick(tmp_path, repo, home)
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_disarm_set(repo, "claude-stop") is True
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is False
+
+
+def test_a_ticks_ok_during_a_background_wait_advances_the_idle_teardown(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)                                              # interval = 1 min
+    old_ts = _write_disarm_age(repo, "claude-stop", 120)      # idle for two intervals
+    _stop_bg_wait_tick(tmp_path, repo, home)
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_teardown_ready(repo, "claude-stop") is True
+    assert _disarm_ts(repo, "claude-stop") == old_ts
+
+
+def test_a_tick_that_resumed_work_during_a_background_wait_marks_no_pause(tmp_path, monkeypatch):
+    # The tick found unfinished work: the session is not idle, so the watchdog stays armed.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _armed(repo)
+    _stop_bg_wait_tick(tmp_path, repo, home, "Resumed the dropped migration step.")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_disarm_set(repo, "claude-stop") is False
+
+
+_TASK_NOTIFICATION = (
+    "<task-notification>\n<task-id>brbg2y4s9</task-id>\n<status>completed</status>\n"
+    "<summary>Background command completed</summary>\n</task-notification>"
+)
+
+
+def test_a_background_completion_turn_ends_the_pause(tmp_path, monkeypatch):
+    # The turn a completion starts runs UserPromptSubmit with this prompt (probed live on
+    # Claude Code 2.1.312), so the work it wakes is protected again.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    rl.set_watchdog_tick_seen(repo, "claude-ups")             # the cron is alive
+    rl.set_watchdog_disarm(repo, "claude-ups")
+    p = run_ups(repo, _TASK_NOTIFICATION, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
+
+
+def test_a_background_completion_turn_re_arms_a_torn_down_watchdog(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    rl.set_watchdog_disarm(repo, "claude-ups")
+    rl.set_watchdog_teardown_ready(repo, "claude-ups")        # the idle teardown went ahead
+    p = run_ups(repo, _TASK_NOTIFICATION, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert rl.WATCHDOG_MARKER in p.stdout
+    assert rl.is_watchdog_teardown_ready(repo, "claude-ups") is False
