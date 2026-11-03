@@ -40,9 +40,10 @@ Stated as a warning, not a boundary you can rely on:
 - `reviewerAgent` and `stopContinue` may return answers, permissions or imperative directions that
   another agent acts on using that agent's own tools and credentials. The supervisor may
   misunderstand the user's scope or incorrectly decide that an action was already authorized.
-- `/reviewerDirective` is handled by a `UserPromptSubmit` hook that reads its text from JSON, not a
-  shell, so shell syntax in a directive cannot execute. Its content is still injected into every
-  reviewer prompt, so pasting untrusted text remains a prompt-injection vector against the reviewer.
+- `/reviewerDirective` and `/stopContinueDirective` are handled by a `UserPromptSubmit` hook that
+  reads their text from JSON, not a shell, so shell syntax in a directive cannot execute. Their
+  content is still injected into reviewer prompts (a stop directive into every stop review), so
+  pasting untrusted text remains a prompt-injection vector against the reviewer.
   The other bundled Claude Code slash commands use `!` shell preprocessing (through one dispatcher)
   and pass their argument text through the shell; they are manual-only and take constrained tokens,
   but users must not paste untrusted text or shell syntax into them.

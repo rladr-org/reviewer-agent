@@ -394,8 +394,8 @@ An operator performing the steps interactively may use `/plugin marketplace add 
 checkout; use the published `rladr-org/reviewer-agent` marketplace when installing from GitHub.
 
 **Check:** `claude plugin list` shows `reviewer-agent@reviewer-agent`. After the new-session boundary,
-the commands `/reviewerAgent`, `/reviewerDirective`, `/reviewerModel`, `/reviewerSession` and
-`/stopContinue` are offered.
+the commands `/reviewerAgent`, `/reviewerDirective`, `/reviewerModel`, `/reviewerSession`,
+`/stopContinue` and `/stopContinueDirective` are offered.
 
 Hooks are snapshotted per session at start. An installing agent may finish step 5, but it must not
 accept risk or enable either feature for the operator. The human must restart Claude Code before
@@ -664,7 +664,8 @@ Name that path in the `autoMode.allow` text below as well. The first `/reviewerA
 after the restart shows the exact command; if it asks for permission, compare its path with the
 rule.
 
-`/reviewerDirective` needs no rule — it is handled by a `UserPromptSubmit` hook, not a shell.
+`/reviewerDirective` and `/stopContinueDirective` need no rule — they are handled by a
+`UserPromptSubmit` hook, not a shell.
 
 **Auto mode may block `on` even with the allow-rule above.** The permission rule lets the
 non-state-changing invocations run; on some Claude Code versions a state-CHANGING invocation (`on`)

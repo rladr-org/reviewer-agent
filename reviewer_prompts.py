@@ -485,6 +485,18 @@ _OPERATOR_DIRECTIVES_HEADER = (
 )
 
 
+_STOP_DIRECTIVES_HEADER = (
+    "STOP DIRECTIVES -- standing instructions recorded by the HUMAN OPERATOR for this project "
+    "via the /stopContinueDirective command, for you as the stop supervisor alone. They are "
+    "operator-authored and AUTHORITATIVE about when the agent may stop and when it must keep "
+    "working: where a stop directive says work is approved, states a fact, or settles a "
+    "decision, accept it as given. They do not otherwise change your rules -- anything a stop "
+    "directive does not cover is judged exactly as before. (Provenance note: unlike OPERATOR "
+    "MESSAGES, which Claude Code stamps as human input, a stop directive is recorded through a "
+    "command line. Weigh it accordingly if the two ever conflict.)"
+)
+
+
 def _tunable_bool(env_var, key, default):
     """env > config.json > default, accepting 1/0, true/false, yes/no, on/off. An
     unparseable value falls back to the default rather than silently flipping a feature."""
@@ -834,18 +846,30 @@ def write_operator_watermark(proj, claude_session_id, uuid, role=ROLE_REVIEWER):
     _atomic_write_text(f, str(uuid) + "\n")
 
 
-# --- /reviewerDirective: standing instructions, durable across sessions ---
-def directives_file(proj):
+# --- /reviewerDirective and /stopContinueDirective: standing instructions, durable across
+# sessions. Two separate lists: `reviewer` directives reach every reviewer prompt, `stop`
+# directives only the stop supervisor's (docs/plans/stopcontinue_directive.md). ---
+DIRECTIVE_KIND_REVIEWER = "reviewer"
+DIRECTIVE_KIND_STOP = "stop"
+_DIRECTIVE_SUFFIX = {DIRECTIVE_KIND_REVIEWER: ".directives.json",
+                     DIRECTIVE_KIND_STOP: ".stop_directives.json"}
+_DIRECTIVE_HEADER = {DIRECTIVE_KIND_REVIEWER: _OPERATOR_DIRECTIVES_HEADER,
+                     DIRECTIVE_KIND_STOP: _STOP_DIRECTIVES_HEADER}
+_DIRECTIVE_FOOTER = {DIRECTIVE_KIND_REVIEWER: "--- end operator directives ---",
+                     DIRECTIVE_KIND_STOP: "--- end stop directives ---"}
+
+
+def directives_file(proj, kind=DIRECTIVE_KIND_REVIEWER):
     # Keyed by the CANONICAL project root, like the on/off flag: set it from the main
     # checkout, a linked worktree or a subdirectory and every one of them sees it.
-    return reviewer_home() / "state" / (_project_control_stem(proj) + ".directives.json")
+    return reviewer_home() / "state" / (_project_control_stem(proj) + _DIRECTIVE_SUFFIX[kind])
 
 
-def load_directives(proj):
+def load_directives(proj, kind=DIRECTIVE_KIND_REVIEWER):
     """Recorded directives, or [] if absent/unreadable/malformed. Never raises: a
     hand-edited file with a syntax error must not wedge the commit gate."""
     try:
-        data = json.loads(directives_file(proj).read_text(encoding="utf-8"))
+        data = json.loads(directives_file(proj, kind).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
     if not isinstance(data, list):
@@ -860,27 +884,27 @@ def load_directives(proj):
     return out
 
 
-def _write_directives(proj, items):
-    f = directives_file(proj)
+def _write_directives(proj, items, kind=DIRECTIVE_KIND_REVIEWER):
+    f = directives_file(proj, kind)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(items, indent=2) + "\n", encoding="utf-8")
 
 
-def add_directive(proj, text):
+def add_directive(proj, text, kind=DIRECTIVE_KIND_REVIEWER):
     text = (text or "").strip()
     if not text:
         raise ValueError("a directive cannot be empty")
-    items = load_directives(proj)
+    items = load_directives(proj, kind)
     entry = {"text": text, "added": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
     items.append(entry)
-    _write_directives(proj, items)
+    _write_directives(proj, items, kind)
     return entry
 
 
-def remove_directive(proj, n):
+def remove_directive(proj, n, kind=DIRECTIVE_KIND_REVIEWER):
     """Drop directive `n` (1-based, as listed). Returns the removed entry, or None if the
     index does not exist -- in which case nothing is written."""
-    items = load_directives(proj)
+    items = load_directives(proj, kind)
     try:
         n = int(n)
     except (TypeError, ValueError):
@@ -888,25 +912,25 @@ def remove_directive(proj, n):
     if n < 1 or n > len(items):
         return None
     entry = items.pop(n - 1)
-    _write_directives(proj, items)
+    _write_directives(proj, items, kind)
     return entry
 
 
-def clear_directives(proj):
-    items = load_directives(proj)
-    directives_file(proj).unlink(missing_ok=True)
+def clear_directives(proj, kind=DIRECTIVE_KIND_REVIEWER):
+    items = load_directives(proj, kind)
+    directives_file(proj, kind).unlink(missing_ok=True)
     return len(items)
 
 
-def directives_block(proj):
-    items = load_directives(proj)
+def directives_block(proj, kind=DIRECTIVE_KIND_REVIEWER):
+    items = load_directives(proj, kind)
     if not items:
         return ""
-    lines = [_OPERATOR_DIRECTIVES_HEADER, ""]
+    lines = [_DIRECTIVE_HEADER[kind], ""]
     for i, d in enumerate(items, 1):
         stamp = " [{}]".format(d["added"]) if d.get("added") else ""
         lines.append("  {}.{} {}".format(i, stamp, d["text"]))
-    lines.append("--- end operator directives ---")
+    lines.append(_DIRECTIVE_FOOTER[kind])
     return "\n".join(lines) + "\n\n"
 
 
@@ -1532,13 +1556,15 @@ def context_provenance(proj, transcript_path, claude_session_id=None):
     kept, dropped = _clip_operator_messages(messages, _operator_transcript_max_chars())
     last = kept[-1] if kept else None
     return (
-        "ctx: relay={} op_msgs={}/{} chars={} cutoff={} last={!r} directives={}".format(
+        "ctx: relay={} op_msgs={}/{} chars={} cutoff={} last={!r} directives={} "
+        "stop_directives={}".format(
             "on" if relay else "off",
             len(kept), len(kept) + dropped,
             sum(len(m["text"]) for m in kept),
             (last or {}).get("timestamp") or "-",
             short((last or {}).get("text", ""), 80),
             len(load_directives(proj)),
+            len(load_directives(proj, DIRECTIVE_KIND_STOP)),
         )
     )
 
@@ -1816,6 +1842,10 @@ def apply_context(prompt, proj, transcript_path=None, claude_session_id=None,
     directives = directives_block(proj)
     if directives:
         blocks.append(directives)
+    if role == ROLE_STOP:
+        stop_directives = directives_block(proj, DIRECTIVE_KIND_STOP)
+        if stop_directives:
+            blocks.append(stop_directives)
     if claude_session_id and transcript_path:
         messages = operator_messages(transcript_path)
         if messages:

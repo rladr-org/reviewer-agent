@@ -7,6 +7,15 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+### Added
+
+- Claude Code: `/reviewer-agent:stopContinueDirective <text>` records a standing rule for the stop
+  supervisor alone, about when the agent may stop or must keep working (for example, "items on
+  HANDOVER.md's approved list are approved; do not stop between them"). It reaches every stop review
+  and never a commit audit. It supports `list`, `remove <n>` and `clear`, and like
+  `/reviewerDirective` it is handled by the `UserPromptSubmit` hook, so its text never reaches a
+  shell. `/reviewerDirective` text still reaches the stop supervisor too.
+
 ## [1.4.6]
 
 ### Fixed

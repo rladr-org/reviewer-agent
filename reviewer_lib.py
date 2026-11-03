@@ -325,6 +325,8 @@ from reviewer_manifest import (  # noqa: F401
 from reviewer_prompts import (  # noqa: F401
     COMMIT_PROMPT,
     DEFAULT_BRIEF,
+    DIRECTIVE_KIND_REVIEWER,
+    DIRECTIVE_KIND_STOP,
     OPERATOR_TRANSCRIPT_MAX_CHARS_DEFAULT,
     CLAUDE_COMMIT_PROMPT,
     PI_COMMIT_PROMPT,

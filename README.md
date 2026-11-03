@@ -122,7 +122,7 @@ Everything below is optional, enabled **per repository** and **per feature**; no
 - **Delta re-review on retries** — after a rejection, the next audit is told exactly which staged paths changed since the last review, with diffs inlined from the index so unstaged edits can't be passed off as reviewed. → [Re-attempted commits](#re-attempted-commits)
 - **Skimmed paths (`reviewerAgent-ignore.md`)** — mark auto-generated data (dataset rows, captured HTML, generated manifests) so the reviewer skims those diffs instead of judging individual records; anti-trojan delayed application, self-exemption, and fail-closed parsing keep it from being abused. → [Skimmed paths](#skimmed-paths-revieweragent-ignoremd)
 - **Per-project reviewer brief** — tailor what the reviewer enforces in each repo: copy `reviewerAgent.md.template` to `reviewerAgent.md` at the root and edit it; it becomes the reviewer's standing instructions (`/reviewer-agent:reviewerAgent on` requires it). → [Project brief and capsule](#project-brief-and-capsule)
-- **Persistent directives** — add a standing fact or authorization to every reviewer prompt: `/reviewer-agent:reviewerDirective <text>`.
+- **Persistent directives** — add a standing fact or authorization to every reviewer prompt: `/reviewer-agent:reviewerDirective <text>`. Rules about when the agent may stop go to the stop supervisor alone: `/reviewer-agent:stopContinueDirective <text>`.
 
 **Fits your workflow**
 
@@ -792,6 +792,7 @@ convention for namespaced commands).
 | `/reviewer-agent:stopContinue delay [<0..300>\|status\|clear]` | Show or set how long each stop waits before its review (default 60 seconds, every project). Replying during the wait skips the review. |
 | `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. A tick does not start work while you have the turn: after an approved stop or your interrupt it replies `ok` until your next message. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. While the watchdog is on, your first prompt in a session also asks the agent to start an **API-drop watcher**: a background command that reads the session transcript, makes no model calls, and exits about 20 seconds after a turn ends on a dropped API connection (`Connection lost mid-response`, `The response stopped arriving`, `No response from API`, 500, 529) with nothing since. Its exit starts the resume turn, so recovery takes seconds instead of up to a tick. It leaves login, limit, safeguard and proxy or gateway configuration errors alone, lets Claude Code's own "Waiting for API response · will retry" loop run (resuming only if that loop gives up), waits while background work is outstanding or you have the turn, and backs off to one resume per five minutes during an outage. It exits by itself once its Claude Code process exits or the conversation continues under a new session id. Outside auto mode, Claude Code may ask you to approve the command once. `REVIEWER_API_DROP_WATCH=0` turns it off. |
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
+| `/reviewer-agent:stopContinueDirective <text>` | Add a persistent rule about when the agent may stop or must keep working. Only the stop supervisor receives it, on every stop review; commit audits never do. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
 | `/reviewer-agent:reviewerModel <model>` | Set the model for the selected backend. |
 | `/reviewer-agent:reviewerModel <model> <seconds>` | Set that backend's model and the shared commit-audit timeout together. |
@@ -806,15 +807,17 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerHistory` | Show how many reviews this project has retained, where, and the retention cap. |
 | `/reviewer-agent:reviewerHistory clear` | Delete this project's retained reviews, saved rulings, audit log, and the stored prompt parts no other project uses. |
 
-Bare `/reviewer-agent:reviewerDirective` also lists directives. Model and audit-effort overrides
+Bare `/reviewer-agent:reviewerDirective` also lists directives, and bare
+`/reviewer-agent:stopContinueDirective` lists stop directives. Model and audit-effort overrides
 are global per backend; timeout, reading delay and automatic commit-reviewer rotation settings
 apply across repositories. Feature flags, directives and review history are per repository.
 `clear` removes only the command-written override, exposing any remaining environment or config
 setting; it does not necessarily restore the built-in default.
 
-> `/reviewer-agent:reviewerDirective` is handled by a `UserPromptSubmit` hook that reads its text
-> from JSON rather than a shell, so shell syntax in a directive no longer matters. Its content is
-> still injected into every reviewer prompt, so do not paste untrusted text into it -- a crafted
+> `/reviewer-agent:reviewerDirective` and `/reviewer-agent:stopContinueDirective` are handled by a
+> `UserPromptSubmit` hook that reads their text from JSON rather than a shell, so shell syntax in a
+> directive no longer matters. Their content is still injected into reviewer prompts (stop
+> directives into every stop review), so do not paste untrusted text into them -- a crafted
 > directive is a prompt-injection vector against the reviewer, not a shell one. The other manual
 > commands run through Claude Code `!` shell preprocessing (via one `reviewer_cmd.py` dispatcher),
 > so their arguments are processed by the shell; keep them to the documented keywords and ids and

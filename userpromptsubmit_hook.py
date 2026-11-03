@@ -33,23 +33,36 @@ DIRECTIVE_SENTINEL = "<<reviewer-agent directive>>"
 # the skill body carrying the sentinel is expanded (verified on 2.1.285), so the typed command is
 # the form that actually arrives. It is read from the same JSON field, so it stays injection-proof.
 _DIRECTIVE_COMMAND = re.compile(r"\A\s*/(?:reviewer-agent:)?reviewerDirective(?=\s|\Z)")
+# The same pair for /stopContinueDirective, whose rules reach only the stop supervisor
+# (docs/plans/stopcontinue_directive.md).
+STOP_DIRECTIVE_SENTINEL = "<<reviewer-agent stop directive>>"
+_STOP_DIRECTIVE_COMMAND = re.compile(r"\A\s*/(?:reviewer-agent:)?stopContinueDirective(?=\s|\Z)")
+_DIRECTIVE_FORMS = (
+    (rl.DIRECTIVE_KIND_REVIEWER, "reviewerDirective", DIRECTIVE_SENTINEL, _DIRECTIVE_COMMAND),
+    (rl.DIRECTIVE_KIND_STOP, "stopContinueDirective", STOP_DIRECTIVE_SENTINEL,
+     _STOP_DIRECTIVE_COMMAND),
+)
 
 
 def _directive_remainder(prompt):
-    """The directive arguments when `prompt` invokes reviewerDirective, else None."""
-    if prompt.lstrip().startswith(DIRECTIVE_SENTINEL):
-        return prompt.split(DIRECTIVE_SENTINEL, 1)[1].strip()
-    match = _DIRECTIVE_COMMAND.match(prompt)
-    return prompt[match.end():].strip() if match else None
+    """(kind, command name, arguments) when `prompt` invokes a directive command, else None."""
+    for kind, name, sentinel, command in _DIRECTIVE_FORMS:
+        if prompt.lstrip().startswith(sentinel):
+            return kind, name, prompt.split(sentinel, 1)[1].strip()
+        match = command.match(prompt)
+        if match:
+            return kind, name, prompt[match.end():].strip()
+    return None
 
 
 def _directive_block(data, cwd):
-    """If the prompt is a reviewerDirective invocation, record it under the payload cwd (the
-    AUTHORITATIVE project, not the hook process's own directory) and return a top-level blocking
-    result so the model turn is suppressed and the outcome is shown; else None."""
-    remainder = _directive_remainder(str(data.get("prompt") or ""))
-    if remainder is None:
+    """If the prompt is a reviewerDirective or stopContinueDirective invocation, record it under the
+    payload cwd (the AUTHORITATIVE project, not the hook process's own directory) and return a
+    top-level blocking result so the model turn is suppressed and the outcome is shown; else None."""
+    invocation = _directive_remainder(str(data.get("prompt") or ""))
+    if invocation is None:
         return None
+    kind, name, remainder = invocation
     toks = remainder.split()
     verb = toks[0].lower() if toks else ""
     is_command = (
@@ -60,16 +73,15 @@ def _directive_block(data, cwd):
     # A recognized subcommand needs its tokens; free text is passed as ONE verbatim element so it is
     # recorded exactly as typed (no whitespace normalization, no re-parse).
     args = toks if is_command else [remainder]
-    code, message = directive_toggle.run(args, cwd)
-    rl.log("[userpromptsubmit] key={} reviewerDirective handled".format(
-        rl.canonical_project_key(cwd)))
+    code, message = directive_toggle.run(args, cwd, kind)
+    rl.log("[userpromptsubmit] key={} {} handled".format(rl.canonical_project_key(cwd), name))
     # Claude Code titles every blocked prompt "UserPromptSubmit operation blocked by hook", which
     # reads as a failure; lead with the real outcome so a recorded directive is visibly a success.
     if code == 0:
-        status = ("reviewerDirective SUCCEEDED (\"blocked\" above only means the command was handled "
-                  "here and not sent to the model).")
+        status = ("{} SUCCEEDED (\"blocked\" above only means the command was handled "
+                  "here and not sent to the model).".format(name))
     else:
-        status = "reviewerDirective FAILED:"
+        status = "{} FAILED:".format(name)
     message = status + "\n" + message
     return {"decision": "block", "reason": message, "systemMessage": message}
 
