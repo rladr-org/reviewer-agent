@@ -92,9 +92,13 @@ def test_claude_commands_do_not_hardcode_the_python_install_path():
     """Slash commands are markdown, but this is not a prose check: the frontmatter and the `!`
     line are what Claude Code executes, so a hardcoded interpreter breaks the command. The six
     CONSTRAINED toggles ship as skills that run a bang pre-exec through the single reviewer_cmd.py
-    dispatcher; the free-text reviewerDirective is injection-proof via the UserPromptSubmit hook and
-    so carries NO bang (its arguments must never reach a shell). All skills stay non-model-invocable
-    and never hardcode the interpreter path."""
+    dispatcher; the free-text reviewerDirective and stopContinueDirective are injection-proof via the
+    UserPromptSubmit hook and so carry NO bang (their arguments must never reach a shell). All skills
+    stay non-model-invocable and never hardcode the interpreter path."""
+    hook_handled = {
+        "reviewerDirective": "<<reviewer-agent directive>>",
+        "stopContinueDirective": "<<reviewer-agent stop directive>>",
+    }
     skill_paths = tuple(sorted((ROOT / "skills").glob("*/SKILL.md")))
     assert skill_paths, "expected at least one skills/<name>/SKILL.md"
 
@@ -102,11 +106,11 @@ def test_claude_commands_do_not_hardcode_the_python_install_path():
         text = path.read_text(encoding="utf-8")
         assert "/usr/bin/python3" not in text, path
         assert "disable-model-invocation: true" in text, path
-        if path.parent.name == "reviewerDirective":
+        if path.parent.name in hook_handled:
             # Hook-based: no bang (arguments must never reach a shell); carries the sentinel the
             # UserPromptSubmit hook detects.
             assert "!`python3 " not in text, path
-            assert "<<reviewer-agent directive>>" in text, path
+            assert hook_handled[path.parent.name] in text, path
         else:
             assert "Bash(python3:*)" in text, path
             assert "!`python3 " in text, path
