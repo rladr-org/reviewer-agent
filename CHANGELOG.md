@@ -16,6 +16,16 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   `/reviewerDirective` it is handled by the `UserPromptSubmit` hook, so its text never reaches a
   shell. `/reviewerDirective` text still reaches the stop supervisor too.
 
+### Fixed
+
+- Claude Code: the API-drop watcher also exits when the Claude Code process that started it moves
+  on to another session without writing the `continued-in` handoff that 1.4.6 watches for. This
+  was seen live in interactive processes and in background hosts, and is the likely result of
+  `/clear` or `/resume`. Each such switch left one more watcher polling, and a stale watcher could
+  resume an old dropped turn into the session that replaced it. The watcher reads the process's
+  own entry in Claude Code's session registry (`sessions/<pid>.json` under `$CLAUDE_CONFIG_DIR`,
+  by default `~/.claude`). If that entry is missing or unreadable, the watcher keeps waiting.
+
 ## [1.4.6]
 
 ### Fixed

@@ -56,9 +56,9 @@ Watchers still accumulated after 1.4.6. On 2026-11-08 there were 13 running. Fiv
 from before the launcher check (1.4.5). Four belonged to Claude Code processes that were alive and
 had moved on to a different session: interactive pid 92723 ran watchers for 27062789, d0670610 and
 f65989f9, and bg host pid 549 ran them for 89fbbd1f and e41487a4. None of the abandoned
-transcripts contains a `continued-in` record. `/clear`, `/resume`, and a bg host taking a new job
-switch the session inside the same process without writing one. So neither check above fires,
-and each switch leaves one more watcher polling forever.
+transcripts contains a `continued-in` record, so the process switched sessions without writing
+one. `/clear` and `/resume` are the likely cause, though no switch was traced to its command. So
+neither check above fires, and each switch leaves one more watcher polling forever.
 
 Claude Code keeps a registry entry per live process at `<config dir>/sessions/<pid>.json`. The
 config dir is `$CLAUDE_CONFIG_DIR`, defaulting to `~/.claude`. The entry's `sessionId` is the
