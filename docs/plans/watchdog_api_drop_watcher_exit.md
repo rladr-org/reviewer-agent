@@ -49,3 +49,40 @@ not depend on it.
 - A handoff appended while the watcher runs makes it exit, and its output names the new session.
 - A handoff already present at startup makes it exit on the first poll.
 - A handoff followed by more messages (the session was resumed under its old id) does not.
+
+## Addendum (2026-11-08): the process moved to another session without a handoff
+
+Watchers still accumulated after 1.4.6. On 2026-11-08 there were 13 running. Five were orphans
+from before the launcher check (1.4.5). Four belonged to Claude Code processes that were alive and
+had moved on to a different session: interactive pid 92723 ran watchers for 27062789, d0670610 and
+f65989f9, and bg host pid 549 ran them for 89fbbd1f and e41487a4. None of the abandoned
+transcripts contains a `continued-in` record. `/clear`, `/resume`, and a bg host taking a new job
+switch the session inside the same process without writing one. So neither check above fires,
+and each switch leaves one more watcher polling forever.
+
+Claude Code keeps a registry entry per live process at `<config dir>/sessions/<pid>.json`. The
+config dir is `$CLAUDE_CONFIG_DIR`, defaulting to `~/.claude`. The entry's `sessionId` is the
+session the process runs now. It is rewritten on a switch: 549's entry lists e41487a4 under
+`formerNames`.
+
+### Change
+
+3. **Its launcher now runs another session.** Each poll, once the launcher is known to be running,
+   the watcher reads the launcher's registry entry. If the entry's `sessionId` names a different
+   session, the watcher stops quietly and says which session the process runs now. Like the
+   handoff exit, this starts a turn in that session, so the line says no action is needed. The
+   check fails open. If `CLAUDE_PID` is unset, or the entry is missing, unreadable, not JSON, or
+   has no `sessionId`, the watcher keeps waiting as before. The registry is Claude Code's internal
+   file, not a documented interface, so the check may only ever end a watch, never start or fire
+   one.
+
+A `/resume` back to the old id starts a new watcher from that session's next prompt, the same
+way a resumed handoff does.
+
+### Tests
+
+- The registry names another session: the watcher exits without a resume message, even with a
+  drop pending, and its output names the session the process runs now.
+- The registry switches while the watcher runs: it exits.
+- The registry names this session: it keeps waiting.
+- No entry, an unparseable entry, or an entry without `sessionId`: it keeps waiting.
