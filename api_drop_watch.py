@@ -74,6 +74,21 @@ def _launcher_pid():
     return pid if pid > 1 else None
 
 
+def _launcher_session(pid):
+    """The session the launcher runs now, from Claude Code's per-process registry entry
+    (<config dir>/sessions/<pid>.json), which `/clear`, `/resume` and a bg host's next job rewrite
+    without writing any handoff into the old transcript. None when it cannot tell: the file is
+    Claude Code's internal state, so anything unexpected leaves the watch running."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    try:
+        with open(os.path.join(base, "sessions", "{}.json".format(pid))) as fh:
+            entry = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    sid = entry.get("sessionId") if isinstance(entry, dict) else None
+    return sid if isinstance(sid, str) and sid else None
+
+
 class _Tail:
     """Feeds the transcript's complete lines to the drop scan as they are appended, and notes a
     handoff: a `continued-in` record with no message after it means the conversation now lives
@@ -135,6 +150,12 @@ def watch(cwd, sid, transcript):
         if launcher is not None and not reviewer_state._pid_running(launcher):
             print("The Claude Code process that started this API-drop watcher (pid {}) has "
                   "exited; the watcher stopped.".format(launcher))
+            return 0
+        current = _launcher_session(launcher) if launcher is not None else None
+        if current is not None and current != sid:
+            print("The Claude Code process that started this API-drop watcher (pid {}) now runs "
+                  "session {}, which starts its own API-drop watcher; this one (for session {}) "
+                  "stopped. No action needed.".format(launcher, current, sid))
             return 0
         tail.poll()
         if tail.continued_in is not None:
