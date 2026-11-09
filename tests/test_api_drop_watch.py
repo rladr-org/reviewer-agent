@@ -47,6 +47,7 @@ def _isolate_env(monkeypatch, tmp_path):
                 "REVIEWER_API_DROP_POLL_SECS", "CLAUDE_PID"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
 
 
 def _drop(text=LOST, error="server_error", uuid="err-1", **extra):
@@ -735,6 +736,66 @@ def test_a_handoff_to_a_new_session_stops_the_watcher(tmp_path, watchers):
     out, err = proc.communicate(timeout=15)
     assert proc.returncode == 0, err
     assert "s-next" in out
+
+
+# --- the launcher moved to another session without a handoff (addendum 2026-11-08) -------------
+
+def _register(pid, body):
+    """Write Claude Code's registry entry for `pid`: a dict as JSON, or a string as is."""
+    d = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "sessions"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "{}.json".format(pid)).write_text(body if isinstance(body, str) else json.dumps(body))
+
+
+def test_a_launcher_running_another_session_stops_the_watcher_without_firing(tmp_path, watchers):
+    # Live, 2026-11-08: interactive pid 92723 ran watchers for three sessions after /clear and
+    # /resume; none of the abandoned transcripts had a continued-in record.
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    _register(os.getpid(), {"pid": os.getpid(), "sessionId": "s-now"})
+    tr = _transcript(tmp_path, _human("fix the table"), _drop())
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(os.getpid()))
+    watchers.append(proc)
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, err
+    assert LOST not in out
+    assert "s-now" in out
+
+
+def test_a_launcher_switching_session_mid_watch_stops_the_watcher(tmp_path, watchers):
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    _register(os.getpid(), {"pid": os.getpid(), "sessionId": "s"})
+    tr = _transcript(tmp_path, _human("fix the table"), _asst("Editing."))
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(os.getpid()))
+    watchers.append(proc)
+    _wait_for_lease_pid(repo, proc.pid)
+    assert _still_running(proc, 1.0)
+    _register(os.getpid(), {"pid": os.getpid(), "sessionId": "s-cleared"})
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, err
+    assert "s-cleared" in out
+
+
+@pytest.mark.parametrize("entry", [
+    {"sessionId": "s"},
+    None,
+    "{not json",
+    {"pid": 1},
+    {"sessionId": ""},
+    ["s-other"],
+], ids=["this-session", "missing", "unparseable", "no-session-id", "empty-session-id",
+        "not-an-object"])
+def test_a_registry_naming_this_session_or_nothing_usable_keeps_the_watcher_waiting(
+        tmp_path, watchers, entry):
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    if entry is not None:
+        _register(os.getpid(), entry)
+    tr = _transcript(tmp_path, _human("fix the table"), _asst("Editing."))
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(os.getpid()))
+    watchers.append(proc)
+    assert _still_running(proc, 2.0)
 
 
 def test_a_handoff_already_in_the_transcript_stops_the_watcher_without_firing(tmp_path, watchers):
