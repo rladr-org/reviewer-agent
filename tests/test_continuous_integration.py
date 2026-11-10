@@ -48,6 +48,16 @@ def test_the_python_matrix_covers_the_floor_and_current_on_both_platforms():
     assert "macos-system-python" in workflow["jobs"]
 
 
+def test_the_linux_floor_runs_on_an_image_that_still_publishes_it():
+    # `ubuntu-latest` moved to Ubuntu 26.04, for which setup-python publishes no 3.9: the leg
+    # failed at "version 3.9 was not found" before any test ran, on every push. The floor leg
+    # names an image that still has it; the current interpreters stay on `ubuntu-latest`.
+    matrix = load("python.yml")["jobs"]["root-suite"]["strategy"]["matrix"]["include"]
+    floor = [entry["os"] for entry in matrix if str(entry["python"]) == "3.9"]
+
+    assert floor == ["ubuntu-24.04"], floor
+
+
 def test_the_macos_floor_runs_on_the_system_interpreter():
     # /usr/bin/python3 IS the documented macOS install path -- the reason the runtime is
     # standard-library-only. setup-python would test an interpreter no user needs to have, and
