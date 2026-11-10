@@ -48,6 +48,9 @@ def _isolate_env(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    # A watcher started by a test must not end the developer's own orphaned watchers; the test
+    # of that cleanup turns it back on for its one watcher.
+    monkeypatch.setenv("REVIEWER_API_DROP_REAP", "0")
 
 
 def _drop(text=LOST, error="server_error", uuid="err-1", **extra):
@@ -820,3 +823,89 @@ def test_a_handoff_followed_by_more_messages_does_not_stop_the_watcher(tmp_path,
     proc = _start_watch(repo, tr)
     watchers.append(proc)
     assert _still_running(proc, 2.0)
+
+
+# --- a starting watcher ends orphaned watchers left by earlier versions (addendum 2026-11-09) ---
+
+def _row(pid, ppid, command):
+    return (pid, ppid, command)
+
+
+def _watcher_cmd(sid="s-old", script="/c/1.4.5/api_drop_watch.py"):
+    return "python3 {} --cwd /repo --session {} --transcript /t/{}.jsonl".format(script, sid, sid)
+
+
+def _orphans(rows, claude_pids, running=(), me=99999):
+    return _watch_module().orphaned_watchers(
+        rows, me, claude_pids.get, lambda pid: pid in set(running))
+
+
+def test_a_watcher_whose_claude_code_process_exited_is_an_orphan():
+    # Live, 2026-11-09: five 1.4.5 watchers had outlived their Claude Code processes by days.
+    rows = [_row(482, 481, _watcher_cmd("a")), _row(5689, 5688, _watcher_cmd("b"))]
+    assert _orphans(rows, {482: 70000, 5689: 549}, running={549}) == [482]
+
+
+def test_without_claude_pid_a_watcher_whose_shell_was_reparented_is_an_orphan():
+    rows = [_row(481, 1, "/bin/bash -c eval '/bin/sh run_hook.sh api_drop_watch.py --session a'"),
+            _row(482, 481, _watcher_cmd("a")),
+            _row(601, 600, "/bin/bash -c eval '/bin/sh run_hook.sh api_drop_watch.py --session b'"),
+            _row(602, 601, _watcher_cmd("b")),
+            _row(600, 77, "claude")]
+    assert _orphans(rows, {}) == [482]
+
+
+def test_a_python_watcher_reparented_itself_is_an_orphan():
+    assert _orphans([_row(482, 1, _watcher_cmd("a"))], {}) == [482]
+
+
+@pytest.mark.parametrize("command", [
+    "/bin/bash -c eval '/bin/sh /c/hooks/run_hook.sh /c/api_drop_watch.py --cwd /r --session a'",
+    "grep api_drop_watch.py --session",
+    "vim /c/api_drop_watch.py",
+    "python3 /c/api_drop_watch.py --help",
+    "python3 /c/other_script.py --session a",
+], ids=["shell-wrapper", "grep", "editor", "no-session", "other-script"])
+def test_only_a_python_watcher_process_is_ever_selected(command):
+    assert _orphans([_row(482, 1, command)], {482: 70000}) == []
+
+
+def test_the_starting_watcher_never_selects_itself():
+    assert _orphans([_row(482, 1, _watcher_cmd("a"))], {482: 70000}, me=482) == []
+
+
+def test_a_python_path_with_a_version_or_a_framework_name_still_counts():
+    rows = [_row(482, 1, "/usr/local/bin/python3.12 " + _watcher_cmd("a").split(" ", 1)[1]),
+            _row(483, 1, "/Library/Frameworks/Python.framework/Versions/3.9/Resources/Python.app/"
+                         "Contents/MacOS/Python " + _watcher_cmd("b").split(" ", 1)[1])]
+    assert _orphans(rows, {}) == [482, 483]
+
+
+def _fake_watcher(tmp_path, sid, claude_pid):
+    """A process that looks exactly like a watcher to `ps` but only sleeps: a real one would exit
+    by itself once its CLAUDE_PID is gone, which is what the cleanup is for in older versions."""
+    d = tmp_path / sid
+    d.mkdir()
+    script = d / "api_drop_watch.py"
+    script.write_text("import time\ntime.sleep(60)\n")
+    env = dict(os.environ, CLAUDE_PID=str(claude_pid))
+    return subprocess.Popen(
+        [sys.executable, str(script), "--cwd", "/r", "--session", sid, "--transcript", "/t.jsonl"],
+        env=env)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process cleanup is POSIX-only")
+def test_a_starting_watcher_ends_an_orphaned_watcher_and_leaves_a_live_one(tmp_path, watchers):
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    orphan = _fake_watcher(tmp_path, "s-orphan", _dead_pid())
+    alive = _fake_watcher(tmp_path, "s-alive", os.getpid())
+    watchers.extend([orphan, alive])
+    time.sleep(0.5)                       # let both reach their sleep, so `ps` lists their argv
+    tr = _transcript(tmp_path, _human("fix the table"), _asst("Editing."))
+    proc = _start_watch(repo, tr, CLAUDE_PID=str(os.getpid()), REVIEWER_API_DROP_REAP="1")
+    watchers.append(proc)
+    orphan.wait(timeout=15)
+    assert orphan.returncode == -15       # SIGTERM
+    assert alive.poll() is None
+    assert proc.poll() is None            # the new watcher carries on with its own watch
