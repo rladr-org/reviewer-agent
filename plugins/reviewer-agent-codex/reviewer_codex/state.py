@@ -282,7 +282,9 @@ def model_rejection_message(text):
 def _atomic_write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.parent / ("." + path.name + "." + uuid.uuid4().hex + ".tmp")
+    # `.<32 hex>.tmp`, 37 bytes whatever the target is called: embedding the target's name
+    # made the temporary 38 bytes longer than it, over the 255-byte limit for a long name.
+    temporary = path.parent / ("." + uuid.uuid4().hex + ".tmp")
     try:
         temporary.write_text(text, encoding="utf-8")
         os.replace(str(temporary), str(path))
@@ -359,12 +361,23 @@ def project_key(path):
     return _remembered("key", path, compute)
 
 
+# The readable part of a project stem, in BYTES. A file name is limited to 255 bytes; the stem
+# adds "-" and a 20-character digest (21), and the longest suffix appended to it is the
+# last-review file's ".<64 hex>.txt" (69). 165 + 21 + 69 = 255. A repository folder name of
+# 165 bytes or less keeps its whole name, so its existing state files keep theirs.
+_STEM_READABLE_BYTES = 165
+
+
 def _project_stem(path):
     key = project_key(path)
     if not key:
         return None
     readable = Path(key).parent.name or "repo"
     digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
+    # Trimmed on encoded bytes; slicing can cut a multibyte character, and "ignore" drops the
+    # partial tail. Uniqueness comes from the digest of the whole key.
+    trimmed = readable.encode("utf-8", "surrogateescape")[:_STEM_READABLE_BYTES]
+    readable = trimmed.decode("utf-8", "ignore") or "repo"
     return readable.replace(" ", "_") + "-" + digest
 
 

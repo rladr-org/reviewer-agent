@@ -59,7 +59,14 @@ def resolve_transcript_path(data):
         / os.path.realpath(str(cwd)).replace(os.sep, "-")
         / (str(sid) + ".jsonl")
     )
-    return str(guess) if guess.exists() else path
+    try:
+        found = guess.exists()
+    except OSError:
+        # A long working directory makes the folder name longer than a file name may be, and
+        # the question itself then fails (ENAMETOOLONG). There is no transcript at a path
+        # that cannot exist.
+        found = False
+    return str(guess) if found else path
 
 
 def _transcript_events(transcript_path):

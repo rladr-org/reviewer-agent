@@ -5,6 +5,7 @@ The composed brief is sent once, at session creation, and neither backend re-sen
 compaction erodes it (session 019faaea reached 216 turns). The capsule is the durable copy, and it
 carries the absolute path of the project brief so a compacted reviewer can re-read the detail.
 """
+import os
 import subprocess
 from pathlib import Path
 
@@ -587,6 +588,15 @@ def test_control_files_do_not_collide_between_a_space_and_an_underscore(tmp_path
     assert not rl.is_active(str(two))
 
 
+def _legacy_stem(key):
+    """The pre-digest stem for `key`. It carries the whole sanitized path, so under a long
+    temporary directory no file with that name can exist and there is no legacy state to adopt."""
+    legacy = rl._sanitize(key)
+    if len(os.fsencode(legacy + ".stopcontinue.active")) > 255:
+        pytest.skip("a legacy state name for this path exceeds the 255-byte file name limit")
+    return legacy
+
+
 def test_legacy_control_state_is_adopted_under_the_new_name(tmp_path, home):
     # Renaming the file must not silently flip a setting off: whatever the operator had set
     # under the old stem has to keep applying.
@@ -594,9 +604,10 @@ def test_legacy_control_state_is_adopted_under_the_new_name(tmp_path, home):
     key = rl.canonical_project_key(str(repo))
     state = rl.reviewer_home() / "state"
     state.mkdir(parents=True, exist_ok=True)
-    (state / (rl._sanitize(key) + ".active")).write_text("", encoding="utf-8")
-    (state / (rl._sanitize(key) + ".stopcontinue.active")).write_text("", encoding="utf-8")
-    (state / (rl._sanitize(key) + ".backend")).write_text("pi\n", encoding="utf-8")
+    legacy = _legacy_stem(key)
+    (state / (legacy + ".active")).write_text("", encoding="utf-8")
+    (state / (legacy + ".stopcontinue.active")).write_text("", encoding="utf-8")
+    (state / (legacy + ".backend")).write_text("pi\n", encoding="utf-8")
 
     assert rl.is_active(str(repo))
     assert rl.is_stopcontinue_active(str(repo))
@@ -610,7 +621,7 @@ def test_two_projects_sharing_one_legacy_file_both_keep_their_setting(tmp_path, 
     two = _repo(tmp_path / "d_b" / "repo", "B\n")
     state = rl.reviewer_home() / "state"
     state.mkdir(parents=True, exist_ok=True)
-    legacy = rl._sanitize(rl.canonical_project_key(str(one)))
+    legacy = _legacy_stem(rl.canonical_project_key(str(one)))
     assert legacy == rl._sanitize(rl.canonical_project_key(str(two)))
     (state / (legacy + ".active")).write_text("", encoding="utf-8")
 
@@ -624,7 +635,7 @@ def test_turning_the_reviewer_off_is_not_undone_by_the_legacy_file(tmp_path, hom
     repo = _repo(tmp_path / "legacy_off", "B\n")
     state = rl.reviewer_home() / "state"
     state.mkdir(parents=True, exist_ok=True)
-    (state / (rl._sanitize(rl.canonical_project_key(str(repo))) + ".active")).write_text(
+    (state / (_legacy_stem(rl.canonical_project_key(str(repo))) + ".active")).write_text(
         "", encoding="utf-8")
     assert rl.is_active(str(repo))
 

@@ -63,6 +63,14 @@ def _sanitize(path):
 # --------------------------------------------------------------------------
 # publishing: atomic replace, and compare-and-set
 # --------------------------------------------------------------------------
+def _temporary_sibling(path):
+    """A temporary file beside `path`, named `.<32 hex>.tmp`: 37 bytes whatever the target is
+    called. The name used to embed the target's (`.<name>.<32 hex>.tmp`), 38 bytes longer, so
+    a valid target of more than 217 bytes failed with ENAMETOOLONG -- every commit in a
+    repository with a long path. Uniqueness comes from the random part alone."""
+    return Path(path).parent / ".{}.tmp".format(uuid.uuid4().hex)
+
+
 def _atomic_write_text(path, text, encoding="utf-8"):
     """Publish `text` at `path` by writing a sibling temp file and renaming it into place.
     Truncate-then-write leaves a window in which a concurrent reader observes an EMPTY file;
@@ -71,7 +79,7 @@ def _atomic_write_text(path, text, encoding="utf-8"):
     sees either the old content or the new, never a partial file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.parent / ".{}.{}.tmp".format(path.name, uuid.uuid4().hex)
+    tmp = _temporary_sibling(path)
     try:
         with open(str(tmp), "w", encoding=encoding) as fh:
             fh.write(text)
@@ -93,7 +101,7 @@ def _publish_if_absent(path, text, encoding="utf-8"):
     publishes a fully-written file, so a loser never reads a half-written winner."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.parent / ".{}.{}.tmp".format(path.name, uuid.uuid4().hex)
+    tmp = _temporary_sibling(path)
     try:
         with open(str(tmp), "w", encoding=encoding) as fh:
             fh.write(text)

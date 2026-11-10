@@ -22,6 +22,7 @@ lazily briefed here), so it works identically from the main checkout or any
 worktree; the audit runs with `-C <cwd>` so it sees that worktree's own staged
 diff. The exchange is echoed (systemMessage) and logged.
 """
+import errno
 import json
 import sys
 from pathlib import Path
@@ -685,11 +686,20 @@ def _crash_output(exc, raw):
     `/repos/commit-helper`) says nothing about the call."""
     if "commit" not in _crash_subject(raw):
         return None
-    reason = (
-        "reviewerAgent's commit gate crashed ({}: {}) before it could decide, so this call is "
-        "blocked rather than let a commit through unreviewed. Retry; if it repeats, see "
-        "~/.claude/reviewer-agent/logs/reviewer.log.".format(type(exc).__name__, exc)
-    )
+    if isinstance(exc, OSError) and exc.errno == errno.ENAMETOOLONG:
+        # The same call fails the same way, so this does not invite a retry.
+        reason = (
+            "reviewerAgent's commit gate could not use a state file because its name or path "
+            "exceeds the filesystem's limit: {}. This call is blocked rather than let a commit "
+            "through unreviewed. A shorter repository path avoids it; details are in "
+            "~/.claude/reviewer-agent/logs/reviewer.log.".format(exc.filename or exc)
+        )
+    else:
+        reason = (
+            "reviewerAgent's commit gate crashed ({}: {}) before it could decide, so this call "
+            "is blocked rather than let a commit through unreviewed. Retry; if it repeats, see "
+            "~/.claude/reviewer-agent/logs/reviewer.log.".format(type(exc).__name__, exc)
+        )
     return {
         "systemMessage": "[reviewerAgent] commit gate crashed; call blocked (fail-closed).",
         "hookSpecificOutput": {

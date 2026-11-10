@@ -610,8 +610,10 @@ def project_dir():
 
 
 # Budget for the readable half of a project stem, in BYTES. A filename component is capped at 255
-# bytes on the filesystems this runs on, and the longest suffix appended to a stem is
-# ".sess_<uuid-session-id>.reviewer.codex" (57). 160 + 1 + 20 (digest) + 57 = 238.
+# bytes on the filesystems this runs on. The longest suffixes appended to a stem are
+# ".sess_<uuid-session-id>.reviewer-audits.json" and ".sess_<uuid>.commit-retry.pending" (63):
+# 160 + 1 + 20 (digest) + 63 = 244. tests/test_state_name_length.py calls every path builder
+# and fails when a new suffix takes a name past 255, so this sum need not be kept by hand.
 _MAX_STEM_BYTES = 160
 
 

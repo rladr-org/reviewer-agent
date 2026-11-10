@@ -42,7 +42,8 @@ def _challenge_path(path, session_id):
 
 def _atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.parent / ("." + path.name + "." + uuid.uuid4().hex + ".tmp")
+    # A fixed-length name, as in state._atomic_write: it must fit beside any valid target.
+    temporary = path.parent / ("." + uuid.uuid4().hex + ".tmp")
     try:
         temporary.write_text(json.dumps(value), encoding="utf-8")
         os.replace(str(temporary), str(path))

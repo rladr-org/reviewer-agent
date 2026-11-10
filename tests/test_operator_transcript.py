@@ -548,6 +548,11 @@ def test_the_transcript_path_is_derived_when_the_payload_omits_it(tmp_path, monk
     cwd.mkdir()
     projects = (Path(tmp_path) / ".claude" / "projects"
                 / os.path.realpath(str(cwd)).replace(os.sep, "-"))
+    if len(os.fsencode(projects.name)) > 255:
+        # The conventional folder is named after the whole working directory; under a long
+        # temporary directory it cannot exist, and the lookup then answers "no transcript"
+        # (tests/test_state_name_length.py).
+        pytest.skip("the conventional transcript folder name exceeds the 255-byte limit")
     projects.mkdir(parents=True)
     (projects / "sX.jsonl").write_text(json.dumps(_typed("derived")) + "\n", encoding="utf-8")
 

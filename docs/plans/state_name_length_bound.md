@@ -102,6 +102,13 @@ before the 1.4.8 release. The update carries no migration.
    that runs both suites with `TMPDIR` set to a directory whose path is at least 200 bytes, so
    every test repository has a long path. Locally:
    `TMPDIR=<long dir> python3 -m pytest tests -q`.
+
+   Four root tests build, in their own setup, a file or folder named after the whole
+   sanitized path: three legacy-state adoption tests in `test_reviewer_capsule.py` and the
+   derived-transcript test in `test_operator_transcript.py`. Such a name cannot exist under a
+   long temporary directory, so each skips there with that reason. Production already
+   handles the same case: the legacy migration returns on `OSError`, and the transcript
+   fallback now does (change 1).
 5. **Clear message.** When a state write fails with `ENAMETOOLONG`, the commit gate's message says
    a state file name or path exceeds the filesystem's limit and names the file. The gate still
    blocks the commit.
