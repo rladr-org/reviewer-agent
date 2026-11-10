@@ -65,7 +65,7 @@ approved stop, since the next tick is the teardown. Claude Code also appends the
 typed. The block therefore sets `hookSpecificOutput.suppressOriginalPrompt: true`, which Claude
 Code's hook schema describes as "When decision is "block", omit the original prompt from the block
 message". The operator then sees one line: `UserPromptSubmit operation blocked by hook:` and
-the block's reason, `No API timeout detected` (the operator's wording, 2026-11-10). The reason
+the block's reason, `Watchdog: no API failure detected` (the operator's wording, 2026-11-10). The reason
 stays: without one, Claude Code 2.1.322 prints its default `Blocked by hook`. Which case blocked
 the tick goes to `reviewer.log` only. No hook output hides the notice entirely: in Claude
 Code 2.1.322, every way a UserPromptSubmit hook can stop a prompt (a block, `continue: false`,
@@ -93,7 +93,7 @@ notice is the reason line only.
 
 - Disarm fresh: a tick is blocked, the disarm `ts` is unchanged, and no `teardown_ready` exists.
 - Every block sets `hookSpecificOutput.suppressOriginalPrompt` for `UserPromptSubmit`, and its
-  reason is `No API timeout detected`.
+  reason is `Watchdog: no API failure detected`.
 - Disarm aged past the interval: a tick is not blocked and `teardown_ready` is written.
 - `teardown_ready` present: a tick is not blocked.
 - No disarm, transcript parked on a background sub-agent: a tick is blocked and sets the disarm.
