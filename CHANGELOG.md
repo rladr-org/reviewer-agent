@@ -7,7 +7,7 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
-## [1.4.8] — unreleased
+## [1.4.8]
 
 ### Fixed
 
