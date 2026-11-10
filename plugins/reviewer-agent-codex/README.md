@@ -16,8 +16,8 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
    plan/task list, and the proposed final message. It does not receive `reviewerAgent.md` or perform
    a general repository audit. The agent checks its complete draft with `review_completion`
    before publishing; native Stop handles skipped or invalidated checks. A fallback rejection
-   can occur after the response is visible. This is continuation
-   supervision, not a guarantee that every displayed response has been approved.
+   can occur after the response is visible, so a displayed response may not have been
+   approved.
 
 Both features are off by default.
 
@@ -25,10 +25,10 @@ Commit reviewers must report `REVIEW_FAILED:` when they cannot inspect the stage
 That operational failure blocks publication without replacing the previous verdict or advancing
 the review cursor. The gate also blocks direct admissions of uninspected staged files in an
 otherwise `APPROVED` response, including inside `SUGGESTIONS:`. This prose check covers explicit
-failure reports; it is not proof that every other approval performed a complete audit. Optional
+failure reports only; an approval without one may still come from an incomplete audit. Optional
 tests that cannot run after source inspection remain nonblocking suggestions.
 
-> **`stopContinue` is autonomous delegation, not merely a reminder.** Its model output is fed back
+> **`stopContinue` is autonomous delegation.** Its model output is fed back
 > to the developer agent as a next-step directive. The developer agent may act on that output with
 > its own tools, credentials and permissions, potentially without another human confirmation. The
 > supervisor may misunderstand the operator's scope or incorrectly conclude that an action was
@@ -815,7 +815,7 @@ the authorized remaining work and checks its revised draft in the same active tu
 covers publication of exactly that draft without further tools, and its final Stop is silent.
 
 This avoids the native Stop-continuation transition associated with disappearing resumed output.
-It is a workaround, not a repair of the desktop renderer. If the agent skips the tool, changes its
+The desktop renderer itself is unchanged. If the agent skips the tool, changes its
 draft, performs more work, or receives new input, native Stop runs the review as fallback, showing
 `Checking completion`. A fallback rejection can still expose the desktop behavior. Errors remain
 fail-open with a warning. The plugin cannot force history to stay expanded.

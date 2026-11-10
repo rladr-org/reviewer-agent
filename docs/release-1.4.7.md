@@ -23,7 +23,7 @@ publishing it.
   ordinary tool result, so the agent keeps working inside the same turn, and the desktop's
   Stop-continuation path, which can hide resumed output, is not used. An approval covers one exact
   draft in one turn; new work or new input invalidates it. The native Stop review remains the
-  fallback for a skipped or changed draft. This is a workaround, not a fix for desktop rendering.
+  fallback for a skipped or changed draft. Desktop rendering itself is unchanged.
 - **Codex completion reviews see more of the turn.** They read the visible commentary of the
   current turn, so the reviewer can weigh promises and progress against the proposed answer. They
   also keep task context across a session end and resume.
@@ -49,6 +49,10 @@ publishing it.
   `/clear` and `/resume` switch sessions without the handoff record 1.4.6 watched for, so each
   switch left one more watcher running. A stale watcher could also resume an old dropped turn into
   the session that replaced it.
+- **Watchers left behind by earlier versions are ended automatically (Claude Code).** When a
+  watcher starts, it ends every other watcher whose Claude Code process has exited. Watchers from
+  1.4.5 had no exit of their own and kept polling until someone killed them. Watchers inside a
+  running Claude Code process are left alone, and each one ended is logged.
 - **The disclaimer's note on directive commands now says it applies to Claude Code.** The Codex
   plugin has no directive commands.
 
@@ -69,34 +73,24 @@ updating.
 
 - `DISCLAIMER.md` changed. Features that are on stay on. Turning one on again asks you to
   re-accept the risk (`on acceptRisk`), because acceptance is tied to the disclaimer's text.
-- Watchers already running keep their old code until they exit. Find leftovers with
-  `ps -ax | grep api_drop_watch.py`. A watcher whose Claude Code process is gone is safe to end.
-  Ending one whose process is still running starts a turn in that process's current session.
+- The first API-drop watcher to start after the update ends the watchers left behind by earlier
+  versions whose Claude Code process has exited.
 
-Restart into the installed release and confirm its version and source. Check an actual gated
-commit; the absence of an error does not prove a review ran.
+Restart into the installed release and confirm its version and source. Make a gated commit and
+confirm that its review ran.
 
 ## Known limitations
 
-The watchdog's tick answer relies on Claude Code honouring a `UserPromptSubmit` block for a
-prompt fired by a cron, verified with Claude Code 2.1.322. If a version does not, ticks reach the
-model as they did before. Claude Code offers no way for a hook to block a prompt silently, so the
-one-line notice stays.
-
-The watcher's session-switch check reads Claude Code's internal session registry. If the format
-changes, the watcher keeps waiting as it did in 1.4.6. It recognizes its Claude Code process by
-the `CLAUDE_PID` variable Claude Code exports; without it, only the session-handoff exit applies.
-
-The hook launcher checks that a `python3` exists, not its version; a Python older than 3.9 first
-on the PATH Claude Code starts with is not rejected. The install and update guides check it.
+The hook launcher checks only that a `python3` exists. A Python older than 3.9 first on the PATH
+Claude Code starts with is not rejected; the install and update guides check the version.
 
 In Codex, interruption currently requires Escape. Typing or submitting a reply does not interrupt
 the completion review. If the native fallback rejects an answer, that answer may already be
 visible, and continuation can still collapse desktop history.
 
-Stop supervision can misjudge scope, revive completed requests, or return prose instead of its
-required stop token, producing an unwanted continuation. Escape returns control; feature toggles
-let you disable supervision separately from commit review.
+Stop supervision depends partly on the model and the prompt, and its judgments can be wrong.
+Escape returns control, and `stopContinue off` turns supervision off without affecting commit
+review.
 
 macOS has daily use and automated coverage. On Ubuntu 20.04, 1.4.3 was verified with Claude Code
 (`codex` backend) and the Codex CLI. Releases since then change Claude Code hook and watcher code,

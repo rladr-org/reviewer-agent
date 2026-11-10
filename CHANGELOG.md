@@ -37,7 +37,7 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   `review_completion` tool before publishing. Rejected drafts return ordinary tool results,
   keeping retries inside the active turn and avoiding the desktop Stop-continuation path that
   can hide resumed output. Approval covers one exact draft and turn; new work or input invalidates
-  it. Native Stop remains the fallback, so this does not claim to repair desktop rendering.
+  it. Native Stop remains the fallback; desktop rendering itself is unchanged.
 
 ### Fixed
 
@@ -48,6 +48,14 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   resume an old dropped turn into the session that replaced it. The watcher reads the process's
   own entry in Claude Code's session registry (`sessions/<pid>.json` under `$CLAUDE_CONFIG_DIR`,
   by default `~/.claude`). If that entry is missing or unreadable, the watcher keeps waiting.
+- Claude Code: a starting API-drop watcher ends every other watcher whose Claude Code process has
+  exited, so watchers left by 1.4.5 and 1.4.6 no longer need killing by hand after an update. A
+  watcher's process is the `CLAUDE_PID` in its environment (from `/proc` or `ps eww`); without
+  one, a watcher whose shell was reparented to pid 1 counts as orphaned. Only `python` processes
+  running `api_drop_watch.py` with `--session` and owned by the same user are considered, never
+  the starting watcher itself, and each one ended is logged. A watcher inside a running Claude
+  Code process is left alone, since ending it would start a turn in that process's current
+  session. `REVIEWER_API_DROP_REAP=0` turns the cleanup off.
 - Claude Code: a stopContinue watchdog tick with nothing to do no longer costs a model call. Every
   tick is a full turn that re-sends the whole conversation, about 300K tokens in a long session
   for an idle `ok`. The `UserPromptSubmit` hook now answers the tick itself, by blocking it, when

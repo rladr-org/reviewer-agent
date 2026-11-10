@@ -201,7 +201,7 @@ Along with this, I find it useful to let the coding agents have four .MD files:
 **The intended execution boundary** In the current implementation, a Codex commit
 reviewer is configured to run commands in a `workspace-write` sandbox with approvals disabled and
 `.git` read-only. The Pi and Claude reviewer configurations are intended to provide repository-read
-tools without a shell or edit tool. These are implementation descriptions, not security guarantees;
+tools without a shell or edit tool. These describe the implementation and guarantee nothing;
 verify the source and the behavior of the installed host versions before relying on them. Read
 [`SECURITY.md`](SECURITY.md) and [`PRIVACY.md`](PRIVACY.md) before enabling the software.
 
@@ -234,7 +234,7 @@ install a second vendor's CLI. It is **opt-in and never the default**. The child
 through the installed `claude` CLI, so usage, quota, billing and account consequences are governed
 by the provider and the user's plan. The current child-process configuration requests `Read`,
 `Grep` and `Glob`, denies other tools by name, and uses `--safe-mode`; treat those as configuration
-details to verify, not as a guarantee that a provider or later CLI version will behave identically.
+details to verify, since a provider or a later CLI version may behave differently.
 
 Either way the reviewer is a **different session from the developer agent**. One reviewer
 conversation is kept per project, developer session and role, briefed with that project's
@@ -291,8 +291,7 @@ These are the limits of reading a command's text. Keep them in mind when writing
 no supported configuration, no supported platform, and no supported host version — "supported"
 would imply an undertaking, and there is none.
 
-What can be said is how much use each combination has actually had, which is a fact about the
-past rather than a promise about your machine:
+What can be said is how much use each combination has actually had:
 
 | Developer host | Reviewer backend | What was actually done |
 |---|---|---|
@@ -302,9 +301,9 @@ past rather than a promise about your machine:
 | Claude Code | `claude` | automated release matrix on macOS; no sustained use |
 
 The `pi` and `claude` backends pass the same automated live matrix as the other two — commit
-audits, rejections and approvals, stop supervision, cancellation, process cleanup — but a matrix
-run is not the same as living with something. Nothing selects them for you: `codex` is the
-fallback when nothing is configured.
+audits, rejections and approvals, stop supervision, cancellation, process cleanup — but neither
+has had sustained use. Neither option is automatically selected: `codex` is the fallback when
+nothing is configured.
 
 On native Ubuntu 20.04, 1.4.3 was verified with Claude Code (`codex` backend) and the Codex CLI:
 commit review, Stop supervision, and update, uninstall and reinstall by the guides. Earlier
@@ -527,8 +526,8 @@ legacy `stopContinueDelaySecs` and `REVIEWER_STOPCONTINUE_DELAY_SECS` values are
 `$reviewer-agent-codex:stop-continue delay` commands report removal without changing settings.
 **Currently, in Codex, you must press Escape to interrupt a running completion review.** Typing
 or submitting a reply does not interrupt the check. Codex may queue it until the check finishes.
-This is a workaround for the continuation path, not a desktop renderer fix. If native fallback
-rejects an answer, that response may already be visible and continuation can still collapse history.
+The desktop renderer itself is unchanged: if native fallback rejects an answer, that response may
+already be visible, and continuation can still collapse history.
 A question answer also ends a turn; the Stop event alone cannot distinguish that from stopping
 an active work assignment. Reviewer failure or exhausted retries allow stopping under the
 bounded fail-open policy.
@@ -779,8 +778,8 @@ python3 -c "import sys; sys.path.insert(0, '<PLUGIN_DIR>'); import reviewer_lib 
 ```
 
 Valid values are `codex`, `pi` and `claude`. An invalid value is skipped and resolution continues
-to the next source. Nothing selects `claude` for you: it spends your own subscription quota, so it
-is chosen explicitly or not at all.
+to the next source. `claude` is never automatically selected: it spends your own subscription
+quota, so it must be chosen explicitly.
 
 ## Claude Code commands
 
@@ -1089,15 +1088,11 @@ cancellations remain distinct. Each continuation must serve a still-applicable o
 Older reviewer directives cannot create tasks or revive a superseded test procedure. Codex also
 labels the latest recorded operator message separately from earlier context near the final draft.
 
-**Known stop-supervisor limitations.** Captured calls have revived completed requests, demanded
-evidence only available after a stop, or emitted reasoning instead of a valid ruling. In two
-observed cases the reply said "stopping is permitted" but omitted the required `STOP_OK` token,
-so the hook relayed it as a continuation. Scope-reconciliation rules address stale obligations,
-but model judgments can still be wrong; the parser does not infer approval from prose or a
-conditional mention of the token. Escape
-returns control, and `/reviewer-agent:stopContinue off` disables supervision for this repository.
-Record the current request, proposed final, supervisor output and host/backend versions when
-reporting a recurrence; remove private project content before posting them.
+**Known stop-supervisor limitations.** The supervisor's judgments depend partly on the model and
+the prompt, and they can be wrong. Escape returns control, and
+`/reviewer-agent:stopContinue off` disables supervision for this repository. When reporting a
+wrong judgment, include the request, the proposed final answer, the supervisor's output and the
+host and backend versions, with private project content removed.
 
 ## Claude Code configuration
 
@@ -1231,11 +1226,11 @@ warning is the backstop for the rest.
 | Node | 22.19 | Required by Pi itself; only needed for the optional Pi backend. |
 | Python | 3.9 | The macOS system interpreter at `/usr/bin/python3`. |
 
-These are the oldest versions this release was actually *exercised* on, not a minimum anyone
-undertakes to support, and not the oldest that can work. Older hosts are a caveat rather than a
-refusal: a successful `/reviewer-agent:reviewerAgent on` and the Codex installer both detect the host version and print a
-warning below these floors, then continue. Newer versions are equally untested — a host that
-changes underneath this project can break it at any time, and nothing here promises otherwise.
+These are the oldest versions this release was *exercised* on. Nobody undertakes to support them,
+and older versions may also work. Below these floors, a successful
+`/reviewer-agent:reviewerAgent on` and the Codex installer print a warning and continue. Newer
+versions are equally untested: a host that changes underneath this project can break it at any
+time, and nothing here promises otherwise.
 The native Codex installer uses the 0.154.0 baseline; the independent Claude package's Codex
 reviewer backend keeps its 0.147.0 baseline. Native Codex reviewed commits use ordinary Git with
 the repository's configured hooks and signing. See the
@@ -1253,8 +1248,7 @@ every one of them the answer is "not much".
 
 - **macOS Tahoe** — the platform used daily. The release matrix
   (install, reject, approve, cancel, stop, uninstall) is run there by hand, and two configurations
-  have had daily use. That is evidence it can work on one machine, not assurance it will work on
-  yours.
+  have had daily use. That shows it can work on one machine; it may still fail on yours.
 - **Other macOS versions** — never tried.
 - **Linux** — 1.4.3 was verified on Ubuntu 20.04 with Claude Code (`codex` backend) and the
   Codex CLI: commit review, Stop supervision, and update, uninstall and reinstall by the guides.
@@ -1270,8 +1264,7 @@ every one of them the answer is "not much".
   WSL1; nobody has tried it.
 
 Other Linux distributions and WSL2 are expected to work, because the runtime and process control
-use POSIX interfaces — but expected is not the same as tried, and this section exists to keep
-those apart. The host's own platform coverage says nothing about whether this project has ever
+use POSIX interfaces, but nobody has tried them. The host's own platform coverage says nothing about whether this project has ever
 been run there.
 
 ### Native Linux
