@@ -61,9 +61,9 @@ suffix plus the 38-byte temporary addition fits in 255 bytes, and the directory 
 plus `.history` fits. The fifth such name, the last-review file (`.<64 hex>.txt`), cannot exist
 for a folder name over 165 bytes.
 
-The operator accepted the flag and receipt rename on 2026-11-10. The deferred-stop marker and
-the history directory affect the same repositories and are to be confirmed with the operator
-before the 1.4.8 release. The update carries no migration.
+The operator accepted all four renames on 2026-11-10: first the flags and the receipt, then,
+before the 1.4.8 version bump, the deferred-stop marker and the history directory. The update
+carries no migration.
 
 ## Change
 

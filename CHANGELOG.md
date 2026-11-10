@@ -7,6 +7,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.8] — unreleased
+
 ### Fixed
 
 - Claude Code: the commit gate works in a repository with a long path. State files are written
