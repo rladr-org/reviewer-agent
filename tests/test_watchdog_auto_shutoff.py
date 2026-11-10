@@ -748,7 +748,7 @@ def test_ups_stamps_tick_seen_on_a_tick_prompt_body(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
-    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    p = run_ups(repo, _armed_tick(repo), home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""
     monkeypatch.setenv("REVIEWER_HOME", home)
@@ -857,7 +857,7 @@ def test_ups_is_silent_on_a_tick_prompt_body(tmp_path, monkeypatch):
     repo = make_repo(tmp_path)
     _effective(repo)
     rl.set_watchdog_teardown_ready(repo, "claude-ups")
-    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    p = run_ups(repo, _armed_tick(repo), home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""
 
@@ -948,7 +948,7 @@ def test_a_tick_right_after_an_operator_interrupt_marks_the_pause(tmp_path, monk
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 
@@ -962,7 +962,7 @@ def test_a_system_notice_after_the_interrupt_does_not_end_the_pause(tmp_path, mo
     notice = [{"type": "user", "message": {"role": "user", "content":
                "<task-notification><task-id>b1</task-id><status>completed</status>"
                "</task-notification>"}}]
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, notice))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path, notice))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 
@@ -979,7 +979,7 @@ def test_a_compaction_summary_or_tool_result_after_the_interrupt_does_not_end_th
         {"type": "user", "toolUseResult": {"stdout": "x"}, "message": {"role": "user",
             "content": [{"type": "tool_result", "tool_use_id": "t9", "content": "x"}]}},
     ]
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, synthetic))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path, synthetic))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 
@@ -996,7 +996,7 @@ def test_the_hosts_own_filler_reply_after_the_interrupt_does_not_end_the_pause(
                "message": {"role": "assistant", "model": "<synthetic>",
                            "stop_reason": "stop_sequence",
                            "content": [{"type": "text", "text": "No response requested."}]}}]
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, filler))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path, filler))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
 
@@ -1012,7 +1012,7 @@ def test_a_tick_after_the_agent_resumed_does_not_mark_a_pause(tmp_path, monkeypa
         {"type": "assistant", "message": {"role": "assistant",
             "content": [{"type": "text", "text": "Carrying on."}]}},
     ]
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path, resumed))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path, resumed))
     assert p.returncode == 0, p.stderr
     assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
 
@@ -1210,13 +1210,18 @@ def _blocked(p):
     return bool(out) and json.loads(out).get("decision") == "block"
 
 
+def _armed_tick(repo, sid="claude-ups"):
+    """The exact prompt the cron is armed with: only that is answered without the model."""
+    return rl.watchdog_tick_prompt(repo, sid)
+
+
 def test_a_tick_while_the_operator_has_the_turn_is_blocked_before_the_model(tmp_path, monkeypatch):
     home = str(tmp_path / "rh")
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)                                          # interval 1 min
     written = _write_disarm_age(repo, "claude-ups", 5)
-    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    p = run_ups(repo, _armed_tick(repo), home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert _blocked(p)
     assert json.loads(p.stdout)["reason"].strip()
@@ -1232,7 +1237,7 @@ def test_the_first_tick_after_a_full_idle_interval_goes_through_to_tear_down(tmp
     repo = make_repo(tmp_path)
     _effective(repo)
     _write_disarm_age(repo, "claude-ups", 120)                # 2 min old >= 1 min interval
-    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    p = run_ups(repo, _armed_tick(repo), home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""                             # the model deletes the cron
     monkeypatch.setenv("REVIEWER_HOME", home)
@@ -1246,7 +1251,7 @@ def test_a_tick_parked_on_background_work_is_paused_and_blocked(tmp_path, monkey
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _bg_wait_transcript(tmp_path))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _bg_wait_transcript(tmp_path))
     assert p.returncode == 0, p.stderr
     assert _blocked(p)
     monkeypatch.setenv("REVIEWER_HOME", home)
@@ -1271,7 +1276,7 @@ def test_a_tick_kept_open_only_by_a_listening_server_goes_through(tmp_path, monk
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
-        {"cwd": repo, "session_id": "claude-ups", "prompt": _TICK_BODY, "transcript_path": tr,
+        {"cwd": repo, "session_id": "claude-ups", "prompt": _armed_tick(repo), "transcript_path": tr,
          "hook_event_name": "UserPromptSubmit"})))
     assert hook.main() == 0
     assert capsys.readouterr().out.strip() == ""
@@ -1284,7 +1289,7 @@ def test_a_tick_with_nothing_holding_the_session_goes_through_to_resume(tmp_path
     repo = make_repo(tmp_path)
     _effective(repo)
     tr = _real_turn_transcript(tmp_path, "fix the table", "Editing the table now.")
-    p = _ups_with_transcript(repo, _TICK_BODY, home, tr)
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, tr)
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""
     monkeypatch.setenv("REVIEWER_HOME", home)
@@ -1298,7 +1303,7 @@ def test_a_tick_with_the_watchdog_not_effective_goes_through_to_tear_down(tmp_pa
     repo = make_repo(tmp_path)
     rl.set_stopcontinue_active(repo)                          # watchdog OFF
     rl.set_watchdog_disarm(repo, "claude-ups")
-    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    p = run_ups(repo, _armed_tick(repo), home, "claude-ups")
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == ""
 
@@ -1308,6 +1313,26 @@ def test_the_tick_right_after_an_interrupt_is_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv("REVIEWER_HOME", home)
     repo = make_repo(tmp_path)
     _effective(repo)
-    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path))
+    p = _ups_with_transcript(repo, _armed_tick(repo), home, _interrupted_transcript(tmp_path))
     assert p.returncode == 0, p.stderr
     assert _blocked(p)
+
+
+@pytest.mark.parametrize("prompt", [
+    "Loops: stopContinueWatchdog tick -- Check th... every 7m. Why does it use tokens?",
+    "{tick}\n\nWhy does this tick cost 300K tokens?",
+    "stopContinueWatchdog tick -- another wording",
+], ids=["mentions-the-label", "quotes-the-whole-tick", "other-wording"])
+def test_a_prompt_that_is_not_the_armed_tick_is_the_operators(tmp_path, monkeypatch, prompt):
+    # 2026-11-09: the operator pasted the loops panel, tick label included, to ask about cost. As
+    # a tick it would have been blocked (swallowed), or stamped liveness and held off the re-arm
+    # of a dead cron.
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)                                          # no tick ever seen: presumed dead
+    _write_disarm_age(repo, "claude-ups", 5)                  # the operator has the turn
+    p = run_ups(repo, prompt.replace("{tick}", _armed_tick(repo)), home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert not _blocked(p)
+    assert rl.WATCHDOG_MARKER in p.stdout                     # no liveness stamp: re-arm asked for

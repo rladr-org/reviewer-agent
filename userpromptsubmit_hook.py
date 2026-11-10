@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""UserPromptSubmit hook: watchdog auto-rearm, and the request to start the API-drop watcher
-(docs/plans/watchdog_api_drop_watcher.md) when this session has none running.
+"""UserPromptSubmit hook: watchdog auto-rearm, the request to start the API-drop watcher
+(docs/plans/watchdog_api_drop_watcher.md) when this session has none running, and the answer to a
+watchdog tick that has nothing to do (docs/plans/watchdog_tick_hook_short_circuit.md).
 
 When the operator submits a prompt after the watchdog has torn its cron down (the session went
 idle for a full interval), re-arm it. The re-arm gate is deterministic and hook-side: re-arm iff
@@ -86,10 +87,20 @@ def _directive_block(data, cwd):
     return {"decision": "block", "reason": message, "systemMessage": message}
 
 
+def _is_watchdog_tick(data, cwd):
+    """Exactly the tick this session's cron is armed with. An operator's prompt that mentions or
+    quotes the tick is not one: as a tick it would stamp liveness (holding off a dead cron's
+    re-arm), skip the API-drop watcher request, and could be blocked, which swallows it. The
+    wording last changed 2026-09-30 and crons expire after seven days; a future change must keep
+    recognizing the previous wording (docs/plans/watchdog_tick_hook_short_circuit.md)."""
+    prompt = str(data.get("prompt") or "").strip()
+    return bool(prompt) and prompt == rl.watchdog_tick_prompt(
+        cwd, rl.claude_session_key(data)).strip()
+
+
 def _rearm_context(data, cwd):
     """The additionalContext that re-arms the cron, or None. Side effect: clears both watchdog
     markers when the watchdog is effective, and stamps tick liveness."""
-    prompt = str(data.get("prompt") or "")
     sid = rl.claude_session_key(data)
     # Operator intent outranks liveness: a watchdog that is off stays off, however dead its ticks
     # look. This gate is deliberately BEFORE the liveness check below. Clearing on the way out
@@ -101,7 +112,7 @@ def _rearm_context(data, cwd):
         return None
     # Defense in depth: never arm in response to a watchdog tick. The tick reaches the agent
     # THROUGH this hook, so this is also where the cron's liveness is observed, for free.
-    if "stopContinueWatchdog tick" in prompt:
+    if _is_watchdog_tick(data, cwd):
         rl.set_watchdog_tick_seen(cwd, sid)
         # An interrupt is a deliberate pause, like an approved stop: mark it so the tick (which
         # reads this marker next) replies `ok` instead of resuming work. Only if unset, so an
@@ -127,13 +138,47 @@ def _rearm_context(data, cwd):
     return rl.watchdog_arm_instruction(cwd, rl.watchdog_interval(cwd), sid)
 
 
+def _tick_block(data, cwd):
+    """Block a watchdog tick that has nothing to do, or None to let it reach the model. A tick is a
+    full turn that re-sends the whole conversation, so an idle `ok` cost ~300K tokens (2026-11-09).
+    Runs after `_rearm_context`, which stamps liveness and marks an interrupt's pause. Writes only
+    the markers the Stop hook would write for the same tick's `ok`; any doubt lets the tick
+    through, which is the behaviour without this."""
+    if not _is_watchdog_tick(data, cwd):
+        return None
+    sid = rl.claude_session_key(data)
+    if not rl.is_stopcontinue_watchdog_effective(cwd):
+        return None  # the tick deletes the cron itself
+    if rl.is_watchdog_teardown_ready(cwd, sid):
+        return None  # only the model can call CronDelete
+    if rl.is_watchdog_disarm_set(cwd, sid):
+        if rl.watchdog_disarm_deadline_passed(cwd, sid):
+            # Idle a full interval: this tick tears the cron down.
+            rl.set_watchdog_teardown_ready(cwd, sid)
+            return None
+        why = "you have the turn"
+    else:
+        try:
+            waiting = rl.background_wait_state(rl.resolve_transcript_path(data))[0]
+        except Exception:
+            return None
+        if not waiting:
+            return None  # idle with no stop approved: the model resumes the work
+        rl.set_watchdog_disarm(cwd, sid)
+        why = "the session is waiting on background work, whose completion resumes it"
+    rl.log("[userpromptsubmit] key={} watchdog tick blocked, no model call ({})".format(
+        rl.canonical_project_key(cwd), why))
+    return {"decision": "block",
+            "reason": "[stopContinueWatchdog] tick answered without a model call: {}.".format(why)}
+
+
 def _api_drop_watch_context(data, cwd):
     """The instruction to start this session's API-drop watcher, or None when one is running or
     was just asked for. Never on a tick: its own instruction is to do nothing else when the
     operator has the turn. See docs/plans/watchdog_api_drop_watcher.md."""
     if os.environ.get("REVIEWER_API_DROP_WATCH", "").strip() == "0":
         return None
-    if "stopContinueWatchdog tick" in str(data.get("prompt") or ""):
+    if _is_watchdog_tick(data, cwd):
         return None
     if not rl.is_stopcontinue_watchdog_effective(cwd):
         return None
@@ -156,7 +201,12 @@ def main():
         if block is not None:
             print(json.dumps(block))
             return 0
-        parts = [c for c in (_rearm_context(data, cwd), _api_drop_watch_context(data, cwd)) if c]
+        rearm = _rearm_context(data, cwd)
+        block = _tick_block(data, cwd)
+        if block is not None:
+            print(json.dumps(block))
+            return 0
+        parts = [c for c in (rearm, _api_drop_watch_context(data, cwd)) if c]
         ctx = "\n\n".join(parts)
         if ctx:
             rl.log("[userpromptsubmit] key={} watchdog re-arm context injected".format(

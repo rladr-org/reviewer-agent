@@ -46,6 +46,19 @@ tick's outcome. While the watchdog is effective, after those two steps:
 With the watchdog not effective (a flag file missing), the hook returns early as today, and the
 tick goes through and deletes the cron.
 
+A tick is exactly the prompt this session's cron is armed with (`watchdog_tick_prompt` for this
+project and session). Every place the hook asks "is this a tick?" uses that test: the liveness
+stamp, never arming on a tick, the interrupt pause, skipping the API-drop watcher request, and the
+block. The hook used to match the label anywhere in the prompt, so an operator's message that
+mentioned or quoted the tick stamped liveness and held off a dead cron's re-arm for two
+intervals. With a block, it would also have been swallowed.
+
+No cron can carry another wording. The wording last changed on 2026-09-30, crons expire after
+seven days, and a session's hooks and its cron come from the same install. **When the wording
+changes again, the previous wording must stay recognized for at least seven days.** An
+unrecognized tick counts as an operator prompt, which clears the pause, so the model could resume
+work the operator had paused.
+
 A block shows its reason to the operator, so it is one short line. It happens at most once per
 idle period after an approved stop, since the next tick is the teardown.
 
@@ -70,4 +83,6 @@ the next tick after one interval tears the cron down.
 - No disarm, no background wait: a tick is not blocked and writes no marker beyond tick liveness.
 - Watchdog not effective: a tick is not blocked.
 - An interrupt before the tick (which sets the disarm) blocks that same tick.
-- An ordinary prompt with a fresh disarm is never blocked.
+- A prompt that is not the armed tick (one that mentions the label, quotes the whole tick and adds
+  a question, or carries another wording) is not blocked and stamps no liveness: with no tick
+  seen, it still gets the re-arm.

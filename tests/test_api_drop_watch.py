@@ -519,8 +519,7 @@ def test_no_request_on_a_tick(tmp_path):
     repo = make_repo(tmp_path)
     _effective(repo)
     tr = _transcript(tmp_path, _human("hello"))
-    assert "api_drop_watch.py" not in _ups(
-        repo, "stopContinueWatchdog tick -- Check these three paths INDIVIDUALLY", tr)
+    assert "api_drop_watch.py" not in _ups(repo, rl.watchdog_tick_prompt(repo, "s"), tr)
 
 
 def test_no_request_with_the_watchdog_off(tmp_path):
