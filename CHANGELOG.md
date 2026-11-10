@@ -16,6 +16,27 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   `/reviewerDirective` it is handled by the `UserPromptSubmit` hook, so its text never reaches a
   shell. `/reviewerDirective` text still reaches the stop supervisor too.
 
+### Changed
+
+- Codex omits completed reviewer directives from future completion inputs while preserving
+  draft/outcome evidence and the stored audit history. Unresolved feedback remains available;
+  developer guidance also guards against repeating satisfied or superseded steps.
+- Completion supervision now distinguishes standalone discussion from unresolved defects in
+  assigned implementation or validation, and reconciles each continuation with current scope.
+  Old reviewer directives cannot add chores or revive superseded test procedures. Codex labels
+  the latest recorded operator message separately from earlier context near the final draft.
+- Codex completion reviews now read visible current-turn commentary through the local
+  app-server API, so promises and progress can be evaluated alongside the proposed answer.
+  The bounded snapshot excludes reasoning/tool contents and reports unavailable data explicitly.
+- Codex retains task context across SessionEnd/resume and supplies bounded prior completion
+  evidence to fresh and resumed reviews. Approval and observed publication are distinguished.
+  The shared completion policy clarifies that status questions do not cancel active work.
+- Codex stopContinue now asks the agent to check its complete final draft through a blocking
+  `review_completion` tool before publishing. Rejected drafts return ordinary tool results,
+  keeping retries inside the active turn and avoiding the desktop Stop-continuation path that
+  can hide resumed output. Approval covers one exact draft and turn; new work or input invalidates
+  it. Native Stop remains the fallback, so this does not claim to repair desktop rendering.
+
 ### Fixed
 
 - Claude Code: the API-drop watcher also exits when the Claude Code process that started it moves

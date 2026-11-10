@@ -49,7 +49,9 @@ def test_native_context_update_retires_existing_stop_reviewer(
 
 def test_invocation_routes_cannot_change_supervisor_instructions(git_repo, isolated_state):
     common = prompts.stop_prompt(git_repo, "session", "Finished.")
-    assert prompts.stop_prompt(git_repo, "session", "Finished.", prefinal=True) == common
+    draft = prompts.stop_prompt(git_repo, "session", "Finished.", prefinal=True)
+    assert draft.startswith(prompts.STOP_BRIEF)
+    assert draft.replace(prompts._DRAFT_REVIEW_CONTEXT, "") == common
     assert prompts.stop_prompt(git_repo, "session", "Finished.", native=True) == common
 
 

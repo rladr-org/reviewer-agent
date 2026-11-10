@@ -44,7 +44,7 @@ def main() -> int:
     print("GUI users: exit the CLI, fully quit and restart the Codex GUI, then start a fresh chat.")
     print("CLI users: start a fresh interactive CLI session to load the current plugin.")
     print("Upgrades preserve repository feature settings and risk-acceptance receipts.")
-    print("Completion review runs only from Stop; Interrupt cancels active reviews.")
+    print("Check final drafts with review_completion; native Stop is the fallback. Interrupt cancels both.")
     print("Codex invokes stop_hook and interrupt_stop automatically; do not call them manually.")
     print("Verify the connected reviewer server, hook mappings, and actual review outcomes.")
     print("An absent continuation prompt does not prove a review ran; continuation feedback may be visible.")

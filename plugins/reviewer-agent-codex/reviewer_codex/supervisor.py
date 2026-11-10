@@ -56,7 +56,7 @@ def supervise_hook(data, cancel_event=None):
         return _failed_open()
 
 
-def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
+def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False, final_message="", turn_id=""):
     generation = state.stop_generation(cwd, session_id, strict_io=True)
     result = stop_tool.review_stop(cwd, token, cancel_event=cancel_event, native=True, fresh=fresh)
     # The prompt may arrive after the reviewer completed but before its result reaches
@@ -74,7 +74,11 @@ def _review_in_hook(cwd, session_id, token, cancel_event, fresh=False):
                 "Task input or work changed during completion review. Address the new "
                 "request or work before stopping."
             )
-        return {} if permit in ("stop_ok", "stop_wait") else _failed_open()
+        if permit in ("stop_ok", "stop_wait"):
+            stop_tool.record_completion(cwd, session_id, final_message,
+                                        {"status": "published", "ruling": permit}, turn_id)
+            return {}
+        return _failed_open()
     if status in ("cancelled", "disabled"):
         return {}
     if status == "incomplete":
@@ -105,9 +109,18 @@ def _supervise(data, cancel_event=None):
     final_message = data.get("last_assistant_message") or ""
     if not str(final_message).strip():
         return None
-    # Discard any old agent-handoff permit. Each Stop is reviewed here; approval
-    # is consumed only inside _review_in_hook, within that same invocation.
-    state.consume_stop_permit(cwd, session_id, data.get("turn_id"), final_message)
+    # Only a host-bound draft check can cover this exact Stop. Legacy handoffs
+    # are consumed and discarded; stale/missing draft approval falls back below.
+    permit = state.consume_stop_permit(cwd, session_id, data.get("turn_id"), final_message,
+                                       strict_io=True, require_strict=True)
+    if permit in ("stop_ok", "stop_wait"):
+        stop_tool.record_completion(cwd, session_id, final_message,
+                                    {"status": "published", "ruling": permit}, data.get("turn_id"))
+        return {}
+    if permit == "failed_open":
+        return _failed_open()
+    if permit == "budget_exhausted":
+        return {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}
     used, cap = state.read_nudges(cwd, session_id), state.max_nudges()
     if used >= cap:
         return {"systemMessage": "[reviewer-agent-codex] Stop nudge cap reached; allowing the turn to end."}
@@ -123,7 +136,8 @@ def _supervise(data, cancel_event=None):
     )
     state.bump_nudges(cwd, session_id)
     result = _review_in_hook(cwd, session_id, token, cancel_event,
-                             fresh=blocks >= UNCHANGED_BLOCKS_BEFORE_FRESH)
+                             fresh=blocks >= UNCHANGED_BLOCKS_BEFORE_FRESH,
+                             final_message=final_message, turn_id=data.get("turn_id"))
     if result.get("decision") == "block":
         state.record_stop_loop(cwd, session_id, generations, blocks + 1)
     return result

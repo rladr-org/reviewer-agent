@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MPL-2.0
-"""Only the host's Stop handler can initiate completion supervision."""
+"""Native Stop remains the fallback and rejects obsolete or non-host handoffs."""
 import json
 import io
 from pathlib import Path
@@ -21,7 +21,7 @@ def event(repo, name="Stop", **extra):
                 hook_event_name=name, last_assistant_message="17 × 19 = 323.", **extra)
 
 
-@pytest.mark.parametrize("name", ["stop_continue", "review_completion"])
+@pytest.mark.parametrize("name", ["stop_continue"])
 def test_obsolete_tool_cannot_review_even_with_valid_ticket(git_repo, isolated_state, monkeypatch, name):
     state.set_feature(git_repo, "stop")
     token = state.create_stop_ticket(git_repo, "only-stop", "Unfinished work.")
@@ -32,11 +32,11 @@ def test_obsolete_tool_cannot_review_even_with_valid_ticket(git_repo, isolated_s
     assert not state.consume_stop_permit(git_repo, "only-stop")
 
 
-def test_mcp_exposes_only_host_completion_handler_and_no_agent_instructions():
+def test_mcp_exposes_draft_review_and_native_fallback_with_agent_instructions():
     tools = mcp_server.handle_message({"id": 1, "method": "tools/list"})["result"]["tools"]
-    assert {t["name"] for t in tools} == {"review_commit", "stop_hook", "interrupt_stop"}
+    assert {t["name"] for t in tools} == {"review_commit", "stop_hook", "interrupt_stop", "review_completion"}
     instructions = mcp_server.handle_message({"id": 2, "method": "initialize"})["result"]["instructions"]
-    assert "stop_continue" not in instructions and "review_completion" not in instructions
+    assert "stop_continue" not in instructions and "review_completion" in instructions
     assert "automatically" in instructions and "Stop" in instructions
 
 
@@ -60,7 +60,7 @@ def test_completed_answer_runs_one_review_only_at_stop(git_repo, isolated_state,
     monkeypatch.syspath_prepend(str(scripts))
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(prompt)))
     assert runpy.run_path(str(scripts / "hook_prompt.py"))["main"]() == 0
-    assert capsys.readouterr().out == ""
+    assert "review_completion" in json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
     assert seen == [] and state.read_nudges(git_repo, "only-stop") == 0
     payload = event(git_repo)
     payload["last_assistant_message"] = answer

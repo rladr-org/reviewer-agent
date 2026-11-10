@@ -8,6 +8,15 @@ from reviewer_codex import state
 
 
 @pytest.fixture(autouse=True)
+def _no_live_conversation_reads(monkeypatch):
+    # Ordinary unit tests must never inspect the operator's live conversation.
+    # raising=False also permits the red phase before this boundary exists.
+    from reviewer_codex import stop_tool
+    monkeypatch.setattr(stop_tool, 'read_current_turn',
+        lambda *a, **k: {'status': 'unavailable', 'reason': 'isolated test'}, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _forget_project_lookups():
     # state remembers git's project-root answers briefly; no test may see another test's.
     state._project_lookups.clear()

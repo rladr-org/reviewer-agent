@@ -518,15 +518,17 @@ exercised with Codex CLI 0.154.0 on macOS, including native Stop rejection and r
 an agent-initiated review call. This does not establish CLI commit-gate or general terminal UI coverage.
 See the package's [CLI completion checks](plugins/reviewer-agent-codex/README.md#cli-completion-checks).
 
-Codex stopContinue runs automatically when Codex emits its Stop event, without an
-agent-initiated early review. Request receipt and ordinary tool execution only record context.
-The native plugin starts that review immediately. Its blocking reading window has been removed;
+Codex stopContinue asks the agent to call the blocking `review_completion` tool with its complete
+final draft before publishing. A rejection returns during the active turn, so the agent can keep
+working without the desktop's Stop-continuation transition. Approval covers one exact draft and
+turn. The automatic Stop hook reviews skipped or invalidated drafts as fallback. Request receipt
+and ordinary work never start a review themselves. Its blocking reading window has been removed;
 legacy `stopContinueDelaySecs` and `REVIEWER_STOPCONTINUE_DELAY_SECS` values are ignored, and old
 `$reviewer-agent-codex:stop-continue delay` commands report removal without changing settings.
 **Currently, in Codex, you must press Escape to interrupt a running completion review.** Typing
 or submitting a reply does not interrupt the check. Codex may queue it until the check finishes.
-Removing the wait does not establish that intermittent missing or disappearing desktop text is fixed.
-A rejected response may already be visible, and continuation can collapse desktop history.
+This is a workaround for the continuation path, not a desktop renderer fix. If native fallback
+rejects an answer, that response may already be visible and continuation can still collapse history.
 A question answer also ends a turn; the Stop event alone cannot distinguish that from stopping
 an active work assignment. Reviewer failure or exhausted retries allow stopping under the
 bounded fail-open policy.
@@ -1080,11 +1082,19 @@ package writes no log; its `review_commit` result carries the same detail, and
 `$reviewer-agent-codex:reviewer-history status` finds the retained verdicts. Please report what
 you find -- see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+**Completion scope.** Both adapters instruct the supervisor to keep investigation, repair and
+testing active when a defect remains in assigned implementation or validation; reporting the
+diagnosis does not finish that work. Standalone discussions, explicit diagnosis-only requests and
+cancellations remain distinct. Each continuation must serve a still-applicable operator request.
+Older reviewer directives cannot create tasks or revive a superseded test procedure. Codex also
+labels the latest recorded operator message separately from earlier context near the final draft.
+
 **Known stop-supervisor limitations.** Captured calls have revived completed requests, demanded
 evidence only available after a stop, or emitted reasoning instead of a valid ruling. In two
 observed cases the reply said "stopping is permitted" but omitted the required `STOP_OK` token,
-so the hook relayed it as a continuation. These model/context incidents remain unresolved;
-the parser does not infer approval from prose or a conditional mention of the token. Escape
+so the hook relayed it as a continuation. Scope-reconciliation rules address stale obligations,
+but model judgments can still be wrong; the parser does not infer approval from prose or a
+conditional mention of the token. Escape
 returns control, and `/reviewer-agent:stopContinue off` disables supervision for this repository.
 Record the current request, proposed final, supervisor output and host/backend versions when
 reporting a recurrence; remove private project content before posting them.

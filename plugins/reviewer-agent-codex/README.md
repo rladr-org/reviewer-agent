@@ -14,8 +14,9 @@ A Codex-native autonomous reviewer with two independent, per-repository capabili
 2. **stopContinue:** automatically reviews attempted stops and directs Codex to continue when
    authorized work remains. Its dedicated supervisor checks operator prompts, the current Codex
    plan/task list, and the proposed final message. It does not receive `reviewerAgent.md` or perform
-   a general repository audit. Codex invokes the supervisor automatically at Stop. A rejected
-   response can already be visible when Codex resumes work. This is continuation
+   a general repository audit. The agent checks its complete draft with `review_completion`
+   before publishing; native Stop handles skipped or invalidated checks. A fallback rejection
+   can occur after the response is visible. This is continuation
    supervision, not a guarantee that every displayed response has been approved.
 
 Both features are off by default.
@@ -140,6 +141,17 @@ python3 -m venv /absolute/path/to/new-test-venv
 cd plugins/reviewer-agent-codex && /absolute/path/to/new-test-venv/bin/python -m pytest -p no:cacheprovider
 ```
 
+Run the Codex suite from this plugin directory; the repository-root suite exercises the
+Claude adapter and release packaging. Commentary regression coverage is in
+[`tests/test_commentary_context.py`](tests/test_commentary_context.py), including the
+fake app-server transport, identity checks, filtering, bounds, cancellation/cleanup and
+all three completion routes. The tests precede their implementation in separate red-phase
+commits under this repository's TDD protocol; an implementation commit need not duplicate them.
+The opt-in `scripts/check_commentary_context.py --run --turn-id <current-host-turn-id>`
+also checks a real host snapshot locally and sends separate synthetic incomplete, corrected
+and fulfilled-promise fixtures to real reviewers. It uses the current `CODEX_THREAD_ID` by
+default and consumes model usage. Captured host messages are not sent in those synthetic checks.
+
 Substitute your chosen environment path; no named conda environment is required. Test dependencies
 are not runtime dependencies. Run the installer from the combined repository root after the tests
 finish successfully:
@@ -188,7 +200,8 @@ dot-prefixed sibling parking directory. It also uses Codex app-server's atomic c
 to merge `mcp__reviewer_agent` into
 `features.code_mode.direct_only_tool_namespaces`, preserving other configured namespaces. This
 makes the agent's `review_commit` call a blocking direct call instead of a yieldable code-mode
-operation. Completion review is invoked automatically by the Stop lifecycle hook. Use this
+operation. Draft completion review uses the same direct blocking namespace; native Stop is its
+fallback. Use this
 installer for updates rather than invoking `codex plugin add` directly.
 
 Before writing configuration, the installer selects a working Python 3.9+ interpreter and checks
@@ -696,16 +709,61 @@ The stop supervisor has its own thread and uses the same canonical prompt as Cla
 
 - captured operator prompts;
 - the latest `update_plan` plan/task list, when the agent used that Codex tool;
+- bounded prior completion drafts, verdicts and observed publication outcomes;
+- user-visible user and assistant messages from the host-bound current turn, including commentary;
 - the proposed final assistant message; and
 - plan or task documents explicitly named by that context, which the read-only supervisor may
   inspect when needed.
 
 It does not receive the commit reviewer's project brief, inspect code or diffs, check Git state, or
 run tests. Repository-wide correctness review remains exclusively the commit gate's responsibility.
+
+Before each completion review, the plugin reads the current turn through the documented
+local app-server `thread/read` and `thread/turns/list` APIs. The same snapshot reaches draft,
+native Stop and fresh reviews. It validates the conversation, repository and turn identity;
+it does not resume a thread, start a model turn, or parse private rollout files. Only visible
+user/assistant text is included, with role, phase, turn and item labels. Reasoning and tool
+arguments/results are excluded. Commentary is evidence of promises and progress, not new
+operator authority; a prior completed run does not satisfy a new request to repeat the work.
+
+The helper reads one page of at most three recent turns and uses only the matching turn.
+Reads have an eight-second deadline, cancellation support, and byte limits of 4 MiB per
+response line and 8 MiB total. The snapshot retains at most 40 messages and 12,000 text
+characters, with each message capped at 2,000 characters and truncation disclosed. The helper
+is terminated and reaped after the read. Unsupported APIs (including older hosts without turn
+pagination), missing current-turn data and read failures are labelled unavailable in the
+review prompt; they do not themselves grant approval or change the fail-open policy. This
+captures persisted messages available at review time, not future messages or desktop painting.
+See [the app-server protocol](https://learn.chatgpt.com/docs/app-server).
 Within that deliberately limited context, the supervisor treats the agent's own statement of
 remaining work as evidence, requires already-authorized and unfinished plan work to continue, and
 allows a human-decision stop only when the decision is genuinely open and the proposed final message
 presents the decision, options, recommendation, and exact reply needed to unblock progress.
+
+The latest recorded operator message is labelled separately from earlier context near the final
+draft. The supervisor must interpret short replies against that context, follow newer changes to
+the relevant procedure, and retire completed or superseded steps. Prior reviewer directives are
+fallible evidence, not assignments: they cannot create a desktop-observation task or require an
+extra incomplete submission inherited from a different test. There is no fixed review-count limit;
+each additional rejection must concern actual remaining work in the current scope.
+
+A defect reported in assigned implementation or its validation keeps necessary investigation,
+repair and testing in scope. A diagnosis alone does not complete that work, even after an earlier
+completion claim. Standalone explanation requests, explicit diagnosis-only instructions and
+cancellations remain distinct. The synthetic `scripts/check_stop_scope.py --run` replay exercises
+these decisions through completion dispatch with the configured reviewer model and effort,
+isolated state and retained verdicts; it consumes model usage and sends no host conversation.
+
+Codex completion input retains historical drafts, statuses and turn identities, but omits reviewer
+detail text at or before the latest `stop_ok` or `published` record. This keeps completed review
+commands out of the next decision without deleting the stored audit history or assuming all
+assigned work is complete. Feedback after that boundary remains available. Temporary waits,
+failures, cancellation and exhausted budgets do not retire it. Developer guidance also requires
+checking a directive against the current user request and observed work before repeating a step.
+
+`scripts/check_scope_comparison.py --run` exercises the stronger synthetic conversation over
+three fixed trials. Pass `--plugin <plugin-directory>` to compare another version with the same
+fixtures. It uses real reviewers and isolated state; it never reads the host conversation.
 
 After two consecutive blocking reviews without new operator input or observed tool/subagent
 activity, the next Stop receives a fresh completion reassessment. It replaces that Stop's normal
@@ -713,7 +771,7 @@ resumed review, so there is still one reviewer call per Stop. Further unchanged 
 also receive fresh assessments until stopping is allowed, activity resets the chain, or the
 existing nudge cap is reached. The default cap remains ten.
 
-The fresh reviewer receives the current operator context, plan, final response, and background
+The fresh reviewer receives the current operator context, plan, completion evidence, final response, and background
 markers, plus an instruction to reassess the requested scope independently. It has no previous
 supervisor conversation: earlier directives cannot become operator authorization. It can approve
 completed work or a genuine operator-only dependency; lack of tool use, repeated questions, and
@@ -721,6 +779,21 @@ claims of completion do not automatically permit a stop. Authorized unfinished w
 continuation. This check uses the configured reviewer model and effort, read-only access, and the
 normal stop-review timeout. The plugin never saves or resumes its disposable thread ID, and the
 check does not replace the persistent stop or commit-reviewer threads.
+
+`SessionEnd` retains operator prompts, plans and completion evidence for resuming the same
+repository and conversation identity. It clears child reviewer sessions, budgets, transient
+markers, permits and cancellation bypasses. A different conversation or repository receives
+none of that evidence. A status question does not cancel an active assignment; explicit
+cancellation and changes of scope still control. Context already deleted by an older version
+cannot be reconstructed automatically; restate the active assignment in that conversation.
+
+Completion evidence retains at most 20 records, with draft and ruling excerpts capped at
+4,000 and 2,000 characters. Each review receives at most 11,000 characters of those records,
+plus explanatory instructions. Approval is recorded separately from a matching native Stop
+observing publication; neither proves that desktop output painted correctly. Historical
+verdicts are evidence, not current authorization or reusable approval. These local records
+survive SessionEnd until explicit full session-state cleanup or full uninstall; they are
+separate from the commit-review history managed by `reviewer-history`.
 
 The chain is stored per project and developer session, using operator/work generations captured
 by lifecycle hooks rather than rollout parsing. Changing only a host turn ID does not reset it.
@@ -735,12 +808,17 @@ The commit tool advertises the display title
 verdict, findings, and Git output. Codex controls how the tool title and result are displayed.
 
 Commit attempts return immediately with a one-use token tied to the owning Codex session. Codex
-then calls the named MCP tool once. At an attempted turn ending, the bundled Stop hook calls the reviewer server
-directly through Codex's native `mcp_tool` lifecycle handler, showing `Checking completion` while
-it runs. It consumes its review permit within that same hook invocation. Approval adds no routing
-prompt or routine success warning, preserving the original final answer. An incomplete ruling
-adds only the supervisor's actionable continuation. Errors remain fail-open with a warning.
-The plugin cannot force the app's previous-message dropdown to remain expanded.
+then calls the named MCP tool once. With stopContinue enabled, the agent calls `review_completion`
+with its complete final draft before publishing it. PreToolUse supplies a one-use ticket bound to
+the host repository, session, turn and draft. Rejection is ordinary tool output: the agent finishes
+the authorized remaining work and checks its revised draft in the same active turn. Approval
+covers publication of exactly that draft without further tools, and its final Stop is silent.
+
+This avoids the native Stop-continuation transition associated with disappearing resumed output.
+It is a workaround, not a repair of the desktop renderer. If the agent skips the tool, changes its
+draft, performs more work, or receives new input, native Stop runs the review as fallback, showing
+`Checking completion`. A fallback rejection can still expose the desktop behavior. Errors remain
+fail-open with a warning. The plugin cannot force history to stay expanded.
 
 The native Stop hook starts its completion review immediately. The blocking reading window
 has been removed: Codex does not provide a documented signal confirming that the answer has
@@ -764,8 +842,8 @@ The plugin receives new input through the
 Codex delivers it. Use Escape rather than submitting a reply when you want to cancel the check.
 
 Native MCP hooks require an already-connected server and a host supporting `mcp_tool` handlers.
-Completion supervision is invoked only by the Stop hook. The developer model remains suspended
-while the hook review runs. The Interrupt handler cancels matching active reviews.
+The developer model remains suspended during draft or native Stop review. The Interrupt handler
+cancels matching active reviews on both paths.
 The installer marks the reviewer MCP
 namespace direct-only in Codex code mode, so the call cannot yield into a JavaScript cell that
 reactivates the developer model for polling or narration. The stdio server continues reading MCP
@@ -899,12 +977,15 @@ unmodified license text and is the notice location for the source files in this 
 
 ## Completion review in the desktop app and CLI
 
-Codex invokes the supervisor automatically at its Stop event. UserPromptSubmit and ordinary tool
-hooks retain request and work context without initiating completion review. Every eligible Stop,
-including a completed question answer, is reviewed using the same shared prompt as Claude Code.
+Codex requests a blocking `review_completion` call before the agent publishes its complete final
+draft. UserPromptSubmit supplies those instructions and retains the request; ordinary tool hooks
+track work without initiating review. Native Stop checks one-use draft approval or performs the
+review as fallback, including for completed question answers. Both routes use the same shared
+policy as Claude Code, with factual context identifying a draft pending publication.
 
-Approval adds no continuation prompt. Rejection directs further work, and Codex can display the
-rejected answer and collapse earlier messages. The plugin cannot control that desktop behavior.
+Draft rejection keeps work in the active turn; approval adds no continuation prompt. Native fallback
+rejection can display the rejected answer and collapse earlier messages. The plugin cannot control
+that desktop behavior.
 A completed question answer also emits Stop: this lifecycle event does not distinguish that from
 abandoning an active assignment.
 
@@ -928,13 +1009,15 @@ events, together with the host/version tested:
 
 | Case | Required evidence |
 | --- | --- |
-| Completed answer | Stop launches a review and the reviewer approves it. |
-| Unfinished authorized work | Stop launches a review that requests continuation; work resumes, and a later Stop is approved after completion. |
+| Completed draft | Draft review approves it, the exact answer is published, and Stop ends silently without another review. |
+| Unfinished draft | The tool requests remaining work; the agent retries in the same turn and publishes only an approved draft. |
+| Skipped or changed draft check | Native Stop launches a review and either approves or requests continuation. |
 | Interrupt ordinary work before Stop | The turn is interrupted without launching a completion review. |
 | Interrupt an active completion review | The running review is cancelled, without a late continuation from that cancelled review. |
 
-The [CLI completion check](#cli-completion-checks) below automates the unfinished-work and later
-approval sequence; it does not cover either interruption case or desktop rendering. Record any
+The [CLI completion check](#cli-completion-checks) below exercises native fallback. The separate
+`scripts/check_completion_drafts.py --run` exercises real draft rejection, correction and silent
+Stop. These checks do not establish desktop rendering. Record any
 unperformed case as pending. Unit tests alone do not establish that the installed host ran a hook.
 
 An absent continuation prompt does not prove approval: missing hooks, a disconnected server,

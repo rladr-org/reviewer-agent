@@ -1,5 +1,8 @@
 # Review completion before publishing the final response
 
+The [desktop completion workaround](codex_desktop_completion_workaround.md) now revisits this
+approach. This document records the earlier implementation and its validation history.
+
 This design is superseded by [Stop-event timing](codex_stop_event_only.md) and
 [one shared supervisor prompt](shared_stop_supervisor_prompt.md). The early-review
 tool has been removed. The observations below document the previous implementation.

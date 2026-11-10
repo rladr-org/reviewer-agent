@@ -673,6 +673,25 @@ def claim_stop_ticket(token, path, max_age=3600):
     return _claim_ticket(_stop_ticket_file(token), path, max_age)
 
 
+def completion_ticket_event(token, path, max_age=3600):
+    """Read trusted scope for Interrupt routing; the reviewer must still claim the ticket."""
+    target = _stop_ticket_file(token)
+    if target is None:
+        return None
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+        if (not isinstance(value, dict) or value.get("strict_completion") is not True
+                or value.get("root") != project_root(path)
+                or not all(isinstance(value.get(k), str) and value[k].strip()
+                           for k in ("session_id", "turn_id"))
+                or not 0 <= time.time() - float(value.get("created")) <= max_age):
+            return None
+        return dict(cwd=str(path), session_id=value["session_id"], turn_id=value["turn_id"],
+                    hook_event_name="Stop")
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _safe(value):
     text = str(value or "").strip()
     return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else None
@@ -758,7 +777,7 @@ def grant_stop_permit(path, session_id, turn_id=None, final_message="", outcome=
 
 
 def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_age=300,
-                        *, strict_io=False):
+                        *, strict_io=False, require_strict=False):
     """Consume one completion handoff while operator input and observed work are unchanged.
 
     Host continuation turn IDs and final acknowledgments can change after review. The stored
@@ -795,6 +814,8 @@ def consume_stop_permit(path, session_id, turn_id=None, final_message="", max_ag
             if not isinstance(value, dict):
                 return None
             if value.get("scope") != "completion":
+                return None
+            if require_strict and value.get("strict_completion") is not True:
                 return None
             if value.get("strict_completion"):
                 message_hash = hashlib.sha256(str(final_message or "").strip().encode()).hexdigest()
@@ -1387,20 +1408,57 @@ def save_review(path, session_id, text, history=False, ignore_counts=None):
     return target
 
 
-def clear_session_artifacts(session_id):
+def completion_history_file(path, session_id):
+    name = _scoped_name(path, session_id)
+    return state_home() / "completion-history" / (name + ".json") if name else None
+
+
+def recent_completions(path, session_id):
+    target = completion_history_file(path, session_id)
+    if target is None:
+        return []
+    try:
+        with target.open(encoding="utf-8") as handle:
+            value = json.loads(handle.read(1000000))
+        if not isinstance(value, list):
+            return []
+        return [item for item in value[-20:] if isinstance(item, dict)
+                and all(isinstance(item.get(key), str) for key in
+                        ("draft", "status", "detail", "turn_id"))
+                and len(item["draft"]) <= 4000 and len(item["detail"]) <= 2000
+                and len(item["turn_id"]) <= 128 and len(item["status"]) <= 32]
+    except (OSError, ValueError):
+        return []
+
+
+def record_completion(path, session_id, draft, status, detail="", turn_id=""):
+    """Bounded evidence, never a permit or proof that all assigned work is done."""
+    target = completion_history_file(path, session_id)
+    if target is None:
+        return
+    with _mutation_lock():
+        records = recent_completions(path, session_id)
+        records.append(dict(draft=str(draft or "")[:4000], status=str(status)[:32],
+                            detail=str(detail or "")[:2000], turn_id=str(turn_id or "")[:128]))
+        _atomic_write(target, json.dumps(records[-20:], ensure_ascii=False) + "\n")
+
+
+def clear_session_artifacts(session_id, preserve_context=False):
     """Retire ephemeral state when the owning Codex root session ends.
 
-    Session-wide, across every project the session touched: the conversation is over, so none
-    of its per-project threads, ledgers, plans or budgets can be resumed. The session token
-    leads every filename, so one prefix match finds them all without needing the repositories
-    to still exist.
+    SessionEnd can precede resuming the same conversation. Its caller preserves task
+    evidence, while explicit full cleanup still removes it. Neither path preserves
+    child reviewer sessions, budgets, permits or cancellation bypasses.
     """
     token = _safe(session_id)
     if not token:
         return
-    for directory in ("sessions", "prompts", "plans", "nudges",
+    directories = ["sessions", "nudges",
                       "stop-permits", "stop-abort-bypasses", "stop-generations",
-                      "stop-work-generations"):
+                      "stop-work-generations"]
+    if not preserve_context:
+        directories.extend(("prompts", "plans", "completion-history"))
+    for directory in directories:
         root = state_home() / directory
         for path in (root.glob(token + ".*") if root.is_dir() else ()):
             path.unlink(missing_ok=True)

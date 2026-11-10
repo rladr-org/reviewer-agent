@@ -7,7 +7,7 @@ import pytest
 from tools import release_matrix
 
 
-def test_release_matrix_accepts_only_commit_and_lifecycle_tools(tmp_path, monkeypatch):
+def test_release_matrix_accepts_commit_draft_and_lifecycle_tools(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(release_matrix.CODEX_PLUGIN))
     from reviewer_codex import state
 
@@ -27,7 +27,12 @@ def test_release_matrix_accepts_only_commit_and_lifecycle_tools(tmp_path, monkey
     original = release_matrix.McpClient.call
     def call(client, method, *args, **kwargs):
         assert method in ("initialize", "tools/list"), "unexpected model review in inventory test"
-        return original(client, method, *args, **kwargs)
+        response = original(client, method, *args, **kwargs)
+        if method == "tools/list":
+            assert {tool["name"] for tool in response["result"]["tools"]} == {
+                "review_commit", "review_completion", "stop_hook", "interrupt_stop",
+            }
+        return response
     monkeypatch.setattr(release_matrix.McpClient, "call", call)
     result = Result("inventory")
     with pytest.raises(InventoryChecked):

@@ -1,5 +1,8 @@
 # Supervise only attempted stops
 
+The [desktop completion workaround](codex_desktop_completion_workaround.md) supersedes the
+Stop-only transport described here. Native Stop remains its fallback.
+
 **Historical plan.** The operator has now confirmed review at every Stop,
 including completed question answers, and removal of the legacy agent-directed
 fallback. The [approved sprint scope](codex_stop_hook_parity.md) supersedes the

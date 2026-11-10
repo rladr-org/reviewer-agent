@@ -584,8 +584,8 @@ def _codex_scenario_body(result, repo, workspace, state, env, codex_state):
 
         listed = client.call("tools/list", {}, timeout=60)
         names = {tool["name"] for tool in (listed.get("result") or {}).get("tools", [])}
-        result.check("commit review and lifecycle-only completion tools are offered",
-                     names == {"review_commit", "stop_hook", "interrupt_stop"},
+        result.check("commit review, draft review and lifecycle tools are offered",
+                     names == {"review_commit", "stop_hook", "interrupt_stop", "review_completion"},
                      ", ".join(sorted(names)))
 
         stage(repo, "helper.py", DEFECT)

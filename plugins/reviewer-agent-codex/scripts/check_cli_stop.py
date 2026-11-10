@@ -149,7 +149,8 @@ def run_scenario(args, scenario, directory):
                "-c", "mcp_servers.reviewer-agent.command=" + json.dumps(sys.executable),
                "-c", "mcp_servers.reviewer-agent.args=" + json.dumps(proxy_args)]
     common = ("Controlled CLI integration test. Do not edit files, invoke skills, run shell commands, "
-              "or call native lifecycle tools manually. The substantive task is to calculate 17 times 19. ")
+              "or call native lifecycle tools manually. This explicitly tests native Stop fallback: "
+              "skip review_completion for this test. The substantive task is to calculate 17 times 19. ")
     prompt = (common + 'First attempt to end with exactly "' + INCOMPLETE
               + '". If the Stop hook returns a missing-work directive, calculate and report '
               'exactly "' + FINAL + '". The incomplete first response is intentional test '

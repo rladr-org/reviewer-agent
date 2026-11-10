@@ -121,16 +121,19 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   approval returns an empty hook decision without a routine success warning. Only an incomplete
   ruling creates a continuation prompt, containing the actionable directive and the existing
   internal continuation marker. The plugin does not control desktop history expansion.
-- Completion review is exposed only through the native MCP Stop handler. The token-based
-  `stop_continue` tool and legacy command-hook routing script are removed, including instructions
-  telling the developer agent to call them. Completed question answers receive the same Stop
+- The preferred route is a blocking `review_completion` call with the complete draft before
+  publication. PreToolUse binds a one-use ticket to the actual host session, turn, draft and
+  generations, replacing supplied tokens and identities. Rejection returns tool output during
+  the active turn. Exact matching approval lets the subsequent Stop end without another review.
+  The token-based `stop_continue` tool and legacy command-hook routing script remain removed.
+  Completed question answers receive the same completion
   review as completed work; there is no question classifier or active-assignment gate.
 - A stop permit covers one completion handoff, bound to operator-input and observed-work
   generations. It expires after five minutes and is consumed once. New genuine operator prompts,
   tool calls, and subagent starts invalidate it, including approvals still running when new input
   or work arrives. The internal review snapshots work before invoking the reviewer. Its permit
-  validates the result within the same Stop invocation; it is not an agent-facing handoff.
-  Old handoff permits cannot skip a new Stop review. Older permit formats are rejected.
+  validates the result within the same Stop invocation or covers exactly one host-bound draft
+  publication. Old non-strict handoff permits cannot skip a new Stop review. Older formats are rejected.
 - The native Stop hook consumes its permit in the same invocation, including the generation
   checks. It cannot leave an approval behind for a subsequent stop or approve new work/input
   that arrived while the review was running. MCP hook responses use the hook JSON contract,
@@ -172,6 +175,27 @@ This project is a Codex-native implementation, not a compatibility shim for Clau
   A newly appearing shell or subagent marker during the ruling prevents the stop and requires a
   fresh reconciliation pass. An incomplete ruling retains every ticketed marker.
 - Markers expire and are cleared at `SessionEnd`; no transcript heuristics are used.
+- `SessionEnd` preserves operator prompts, plans and bounded completion evidence for the
+  same project/session identity, while retiring transient review authority and child sessions.
+  Explicit full session cleanup also removes retained evidence.
+- Both fresh and resumed completion reviews receive prior draft/outcome evidence. Approval
+  and a matching native Stop observing publication are distinct records; historical verdicts
+  grant no authority. Evidence I/O failures do not change the completion result.
+- All completion routes also receive a bounded, labelled snapshot of visible messages from
+  the exact host-bound current turn through read-only app-server APIs. Commentary supplies
+  commitment/progress evidence, not operator authority. Reasoning, tool contents and other
+  turns are excluded. Missing/unsupported data is explicitly unavailable; helper reads are
+  cancellable and bounded, with process cleanup on success and failure.
+- Stop prompts distinguish the latest recorded operator message from earlier context, retaining
+  earlier messages needed to interpret short replies. The shared policy keeps in-scope regression
+  repair active, respects standalone discussion and cancellation, and requires each continuation
+  step to serve a still-applicable operator outcome. Historical reviewer directives cannot create
+  work or revive a superseded test procedure. This adds no review calls or review-count limit.
+- Completion input omits reviewer detail text through the most recent stop_ok/published record,
+  while retaining drafts, statuses and turn identities and leaving stored audit history intact.
+  The unresolved suffix retains its feedback; non-completion outcomes do not retire directives.
+  Developer guidance requires reconciling reviewer instructions with the current operator scope
+  and observed work rather than repeating an already-satisfied or superseded step.
 
 ## Isolation
 
@@ -224,13 +248,14 @@ have been escalated to the operator.
 
 ## Automatic completion review and one shared prompt
 
-The agent-initiated `review_completion` tool, its instructions, and its token binding are
-removed, as are the legacy `stop_continue` tool and command-hook routing path. Completion
-supervision runs entirely within the automatic Stop event. A question answer also ends a turn
-and receives the same review as completed work. See the
-[approved sprint scope](../../docs/plans/codex_stop_hook_parity.md).
+The blocking `review_completion` tool lets the agent check its complete final draft before
+publication. This deliberately supersedes the earlier Stop-only design as a workaround for
+desktop continuation visibility. Native Stop remains the fallback for skipped checks and invalid
+approvals. Request receipt and ordinary work do not invoke a reviewer. A question answer receives
+the same review as completed work; no question classifier is introduced.
 
 Both applications load `prompts/stop_supervisor.txt` from the Codex plugin distribution.
-Application-specific context supplies evidence, but there are no separate pre-final or
-automatic-Stop instructions. The canonical text participates in Codex's stop-reviewer
-fingerprint. Cancellation and bounded fail-open behavior remain unchanged.
+Application-specific context supplies evidence. Draft invocations also identify the current review
+and pending publication, preventing a circular demand to review or publish the draft again.
+The canonical policy and static draft context participate in Codex's stop-reviewer fingerprint.
+Both routes share cancellation, the retry budget and fresh reassessment after unchanged rejections.

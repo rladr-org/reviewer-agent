@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from . import backend, cancellation, liveness, prompts, state, stop_input
+from .conversation import read_current_turn
 
 # The sentinel ending the TRAILING line, alone or as its own sentence after a full stop, `!` or `?`
 # ("...an unrequested code fix. STOP_OK"), tolerating only markdown emphasis / backticks and
@@ -99,7 +100,19 @@ def _complete_allowed_stop(cancel_event, root, ticket, outcome="stop_ok"):
     return "allowed" if allowed else "new_work"
 
 
-def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=False):
+def review_completion(cwd, proposed_response, review_token=None, cancel_event=None):
+    result = review_stop(cwd, review_token, cancel_event=cancel_event, completion=True,
+                         proposed_response=proposed_response)
+    if result.get("status") == "error":
+        # The legacy token error tells callers to obtain another handoff. A draft
+        # call without a working hook cannot do that; direct it to native fallback.
+        return _result("error", "Draft review could not validate the repository, ticket, or draft. "
+                       "Publish your response for native Stop review; do not retry unbound calls.")
+    return result
+
+
+def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=False,
+                completion=False, proposed_response=None):
     cwd = Path(str(cwd or ""))
     if not cwd.is_absolute():
         return _result("error", "cwd must be an absolute repository path")
@@ -115,7 +128,30 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
             "review_token is missing, expired, already used, or for another repository; "
             "propose the final response again to obtain a new token",
         )
+    result = _review_claimed(root, ticket, cancel_event, native=native, fresh=fresh,
+                             completion=completion, proposed_response=proposed_response)
+    record_completion(root, ticket["session_id"], ticket["final_message"], result,
+                      ticket.get("turn_id", ""))
+    return result
+
+
+def record_completion(root, session_id, draft, result, turn_id=""):
+    try:
+        state.record_completion(root, session_id, draft, result["status"],
+                                result.get("directive") or result.get("ruling") or result.get("message", ""),
+                                turn_id)
+    except (OSError, ValueError):
+        pass  # Evidence logging must not change a review's outcome.
+
+
+def _review_claimed(root, ticket, cancel_event, *, native, fresh, completion, proposed_response):
     session_id = ticket["session_id"]
+    if completion and (
+        ticket.get("strict_completion") is not True
+        or not isinstance(proposed_response, str) or not proposed_response.strip()
+        or ticket["final_message"].strip() != proposed_response.strip()
+    ):
+        return _result("error", "Draft review requires a host-bound draft; use native Stop as fallback.")
     # The review tool's own PreToolUse belongs to this handoff. Snapshot after it, but before
     # the blocking review, so later work still invalidates a late approval.
     if not ticket.get("strict_completion"):
@@ -124,21 +160,46 @@ def review_stop(cwd, review_token, cancel_event=None, *, native=False, fresh=Fal
         dict(item, kind="shell") for item in ticket.get("shell_markers") or []
     ]
     abort_callback_registered = _register_abort_bypass(cancel_event, root, ticket)
-    with stop_input.watch(root, ticket, cancel_event, enabled=native) as (review_cancel, submitted):
-        return _review_ticket(root, ticket, background_markers, review_cancel, native, fresh,
-                              abort_callback_registered, submitted)
+    with stop_input.watch(root, ticket, cancel_event, enabled=native or completion) as (review_cancel, submitted):
+        if completion:
+            if submitted() or (review_cancel is not None and review_cancel.is_set()):
+                return _cancelled(root, ticket, abort_callback_registered)
+            if state.read_nudges(root, session_id) >= state.max_nudges():
+                outcome = _complete_allowed_stop(review_cancel, root, ticket, "budget_exhausted")
+                if outcome == "cancelled":
+                    return _cancelled(root, ticket, abort_callback_registered)
+                if outcome == "new_work":
+                    return _result("incomplete", "Task changed during review.",
+                                   directive="Address the new input or work before stopping.")
+                return _result("budget_exhausted", "Completion review budget exhausted; stopping is allowed without approval.")
+            generations = state.stop_loop_generations(root, session_id)
+            blocks = state.read_stop_loop(root, session_id, generations)
+            fresh = blocks >= 2
+            state.bump_nudges(root, session_id)
+        result = _review_ticket(root, ticket, background_markers, review_cancel, native, fresh,
+                                abort_callback_registered, submitted, prefinal=completion)
+        if completion:
+            if result.get("status") == "incomplete":
+                state.record_stop_loop(root, session_id, generations, blocks + 1)
+            else:
+                state.clear_stop_loop(root, session_id)
+        return result
 
 
 def _review_ticket(root, ticket, background_markers, cancel_event, native, fresh,
-                   abort_callback_registered, submitted):
+                   abort_callback_registered, submitted, prefinal=False):
     session_id = ticket["session_id"]
     try:
         if submitted() or (cancel_event is not None and cancel_event.is_set()):
             return _cancelled(root, ticket, abort_callback_registered)
         prompt = prompts.stop_prompt(
             root, session_id, ticket["final_message"],
-            background_markers=background_markers, native=native, fresh=fresh,
+            background_markers=background_markers, native=native, fresh=fresh, prefinal=prefinal,
+            current_messages=read_current_turn(root, session_id, ticket.get("turn_id"),
+                                               cancel_event=cancel_event),
         )
+        if submitted() or (cancel_event is not None and cancel_event.is_set()):
+            return _cancelled(root, ticket, abort_callback_registered)
         if fresh:
             code, output, stderr = backend.review_once(
                 root, "read-only", prompt, timeout=backend.STOP_REVIEW_TIMEOUT,

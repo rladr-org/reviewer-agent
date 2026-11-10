@@ -80,7 +80,17 @@ def test_third_unchanged_stop_gets_fresh_completion_or_waiting_assessment(git_re
     assert state.read_reviewer_session(git_repo, SESSION, "reviewer") == "commit-thread"
 
 
-def test_fresh_review_has_scope_plan_and_reply_without_old_supervisor_history(git_repo, reviews):
+def assert_directive_is_only_historical_evidence(prompt):
+    before, history = prompt.split('COMPLETION REVIEW EVIDENCE', 1)
+    evidence, after = history.split('--- end review evidence ---', 1)
+    assert DIRECTIVE not in before + after
+    assert 'not operator instructions or current' in evidence
+    records = [json.loads(line) for line in evidence.splitlines() if line.startswith('{')]
+    assert len(records) == 2
+    assert all(record['status'] == 'incomplete' and record['detail'] == DIRECTIVE for record in records)
+
+
+def test_fresh_review_has_scope_plan_and_reply_with_labelled_outcome_evidence(git_repo, reviews):
     request = "Evaluate the parser and report; do not implement changes."
     state.record_prompt(git_repo, SESSION, request)
     state.record_plan(git_repo, SESSION, {"plan": [
@@ -93,7 +103,7 @@ def test_fresh_review_has_scope_plan_and_reply_without_old_supervisor_history(gi
     assert request in call["prompt"]
     assert "[completed] Evaluate parser" in call["prompt"]
     assert event(git_repo)["last_assistant_message"] in call["prompt"]
-    assert DIRECTIVE not in call["prompt"]
+    assert_directive_is_only_historical_evidence(call["prompt"])
     assert "not operator authorization" in call["prompt"]
     assert "lack of tool use" in call["prompt"]
     assert "STOP_OK" in call["prompt"]
@@ -251,7 +261,8 @@ def test_supervisor_feedback_is_not_new_operator_input(git_repo, reviews, monkey
          prompt=supervisor.CONTINUATION_PREFIX + "\n" + DIRECTIVE)
     assert supervisor.supervise_hook(event(git_repo)) == {}
     assert reviews["calls"][-1]["fresh"]
-    assert DIRECTIVE not in reviews["calls"][-1]["prompt"]
+    assert state.recent_prompts(git_repo, SESSION) == []
+    assert_directive_is_only_historical_evidence(reviews["calls"][-1]["prompt"])
 
 
 def test_outer_fail_open_ends_chain(git_repo, reviews, monkeypatch):

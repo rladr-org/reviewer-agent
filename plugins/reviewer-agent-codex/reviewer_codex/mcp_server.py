@@ -6,7 +6,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import state
+from . import state, stop_tool
 from .cancellation import Cancellation
 from .commit_tool import reviewed_commit, split_suggestions
 from .supervisor import supervise_hook
@@ -52,6 +52,30 @@ TOOL = {
     },
 }
 
+COMPLETION_TOOL = {
+    "name": "review_completion",
+    "title": "Check completion before the final response",
+    "description": (
+        "When stopContinue is enabled, call with the complete final draft before publishing it. "
+        "Omit review_token; PreToolUse supplies a host-bound ticket. This blocking call returns "
+        "incomplete with work to finish, stop_ok or stop_wait to publish the exact draft without "
+        "further tools, or failed_open/budget_exhausted to stop without claiming approval. "
+        "On disabled continue normally; on error publish your response for native Stop review "
+        "instead of retrying unbound calls. Supports Escape cancellation."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "cwd": {"type": "string", "description": "Absolute current repository path."},
+            "proposed_response": {"type": "string", "minLength": 1},
+            "review_token": {"type": "string", "description": "Omit; supplied by PreToolUse."},
+        },
+        "required": ["cwd", "proposed_response"],
+        "additionalProperties": False,
+    },
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+}
+
 STOP_HOOK_TOOL = {
     "name": "stop_hook",
     "title": "Check task completion",
@@ -80,7 +104,7 @@ INTERRUPT_TOOL = {
     "name": "interrupt_stop",
     "title": "Cancel interrupted reviews",
     "description": (
-        "Invoked automatically by the Interrupt lifecycle hook to cancel native Stop reviews "
+        "Invoked automatically by the Interrupt lifecycle hook to cancel draft and native Stop reviews "
         "for the interrupted cwd, session, and turn, and pending commit reviews owned by "
         "that developer session. Do not call manually."
     ),
@@ -120,14 +144,13 @@ def _stop_key(arguments, event_name):
         return None
 
 
-def _native_stop(arguments, cancel_event):
+def _registered_stop(key, cancel_event, review):
     token = cancel_event if cancel_event is not None else Cancellation()
-    key = _stop_key(arguments, "Stop")
     if key is not None:
         with _active_stops_lock:
             _active_stops.setdefault(key, set()).add(token)
     try:
-        return supervise_hook(arguments, cancel_event=token)
+        return review(token)
     finally:
         if key is not None:
             with _active_stops_lock:
@@ -136,6 +159,22 @@ def _native_stop(arguments, cancel_event):
                     tokens.discard(token)
                     if not tokens:
                         _active_stops.pop(key, None)
+
+
+def _native_stop(arguments, cancel_event):
+    return _registered_stop(_stop_key(arguments, "Stop"), cancel_event,
+                            lambda token: supervise_hook(arguments, cancel_event=token))
+
+
+def _completion_key(arguments):
+    event = state.completion_ticket_event(arguments.get("review_token"), arguments.get("cwd"))
+    return _stop_key(event, "Stop") if event else None
+
+
+def _review_completion(arguments, cancel_event):
+    return _registered_stop(_completion_key(arguments), cancel_event, lambda token:
+        stop_tool.review_completion(arguments.get("cwd"), arguments.get("proposed_response"),
+                                    arguments.get("review_token"), cancel_event=token))
 
 
 def _interrupt_stop(arguments):
@@ -227,9 +266,10 @@ def handle_message(
                 "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
                 "instructions": (
                     "Call review_commit once when named by a "
-                    "reviewer-agent hook. Completion supervision runs automatically when "
-                    "Codex emits its Stop event. Do not initiate a completion review during "
-                    "ongoing work or manually call stop_hook. All reviews support MCP "
+                    "reviewer-agent hook. When stopContinue is enabled, call review_completion "
+                    "with the complete draft before publishing a final response. Native Stop "
+                    "automatically reviews an unchecked or changed answer as fallback. Do not "
+                    "initiate completion review during ongoing work or manually call stop_hook. All reviews support MCP "
                     "cancellation, including Escape."
                 ),
             },
@@ -237,9 +277,9 @@ def handle_message(
     if method == "ping":
         return _response(request_id, {})
     if method == "tools/list":
-        return _response(request_id, {"tools": [TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL]})
+        return _response(request_id, {"tools": [TOOL, STOP_HOOK_TOOL, INTERRUPT_TOOL, COMPLETION_TOOL]})
     if method == "tools/call":
-        if params.get("name") not in (TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"]):
+        if params.get("name") not in (TOOL["name"], STOP_HOOK_TOOL["name"], INTERRUPT_TOOL["name"], COMPLETION_TOOL["name"]):
             return _error(request_id, -32601, "unknown tool")
         arguments = params.get("arguments") or {}
         if not isinstance(arguments, dict):
@@ -249,12 +289,15 @@ def handle_message(
         if params.get("name") == INTERRUPT_TOOL["name"]:
             return _hook_response(request_id, _interrupt_stop(arguments))
         try:
-            result = commit_fn(
-                arguments.get("cwd"),
-                arguments.get("message"),
-                arguments.get("review_token"),
-                cancel_event=cancel_event,
-            )
+            if params.get("name") == COMPLETION_TOOL["name"]:
+                result = _review_completion(arguments, cancel_event)
+            else:
+                result = commit_fn(
+                    arguments.get("cwd"),
+                    arguments.get("message"),
+                    arguments.get("review_token"),
+                    cancel_event=cancel_event,
+                )
         except Exception as error:
             result = {"status": "error", "message": "reviewer tool failed: {}".format(error)}
         return _response(
@@ -281,7 +324,7 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
                 output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
                 output_stream.flush()
 
-    def run_call(message, cancelled, commit_owner):
+    def run_call(message, cancelled, commit_owner, completion_key):
         request_id = message.get("id")
         try:
             response = handle_message(
@@ -299,6 +342,13 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
                         tokens.discard(cancelled)
                         if not tokens:
                             _active_commits.pop(commit_owner, None)
+            if completion_key is not None:
+                with _active_stops_lock:
+                    tokens = _active_stops.get(completion_key)
+                    if tokens is not None:
+                        tokens.discard(cancelled)
+                        if not tokens:
+                            _active_stops.pop(completion_key, None)
         completed, _unused = cancelled.complete()
         if completed:
             send(response)
@@ -322,6 +372,7 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
             if message.get("method") == "tools/call" and message.get("id") is not None:
                 cancelled = Cancellation()
                 commit_owner = None
+                completion_key = None
                 params = message.get("params") or {}
                 if params.get("name") == TOOL["name"]:
                     arguments = params.get("arguments") or {}
@@ -335,8 +386,15 @@ def serve(input_stream=None, output_stream=None, commit_fn=reviewed_commit):
                     # subsequent Interrupt must also reach a not-yet-started call.
                     with _active_stops_lock:
                         _active_commits.setdefault(commit_owner, set()).add(cancelled)
+                elif params.get("name") == COMPLETION_TOOL["name"]:
+                    arguments = params.get("arguments") or {}
+                    if isinstance(arguments, dict):
+                        completion_key = _completion_key(arguments)
+                    if completion_key is not None:
+                        with _active_stops_lock:
+                            _active_stops.setdefault(completion_key, set()).add(cancelled)
                 worker = threading.Thread(
-                    target=run_call, args=(message, cancelled, commit_owner), daemon=True
+                    target=run_call, args=(message, cancelled, commit_owner, completion_key), daemon=True
                 )
                 with active_lock:
                     active[message["id"]] = (cancelled, worker)

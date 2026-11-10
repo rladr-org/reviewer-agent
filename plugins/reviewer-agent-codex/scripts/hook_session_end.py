@@ -13,7 +13,7 @@ def main():
     data = json.loads(sys.stdin.read() or "{}")
     session_id = state.session_key(data)
     liveness.clear_session(session_id)
-    state.clear_session_artifacts(session_id)
+    state.clear_session_artifacts(session_id, preserve_context=True)
     return 0
 
 

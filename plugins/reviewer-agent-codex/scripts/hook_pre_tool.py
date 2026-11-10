@@ -10,7 +10,7 @@ def main():
     # Imports belong inside the entrypoint's failure boundary too: a broken or
     # evicted plugin must not turn a commit interception into an empty response.
     import _bootstrap  # noqa: F401
-    from reviewer_codex import gate, liveness, state
+    from reviewer_codex import completion, gate, liveness, state
 
     data = json.loads(sys.stdin.read() or "{}")
     if not isinstance(data, dict):
@@ -28,6 +28,10 @@ def main():
             command = (tool_input or {}).get("command")
             if command is not None and not isinstance(command, str):
                 raise ValueError("command must be a string")
+    binding = completion.bind_review(data)
+    if binding is not None:
+        print(json.dumps(binding))
+        return 0
     try:
         state.invalidate_stop_permits(data.get("cwd") or ".", state.session_key(data), work=True)
     except OSError:

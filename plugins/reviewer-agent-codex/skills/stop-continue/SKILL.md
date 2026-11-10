@@ -19,6 +19,12 @@ manually.
 Never add `acceptRisk` for the operator. Only the trusted exact user prompt may record acceptance.
 The stop supervisor is independent of the commit reviewer.
 
+When enabled, check the complete final draft through the blocking `review_completion` tool
+before publishing. A rejection returns during the active turn; finish the authorized remaining
+work and check the revised draft. Publish the exact approved draft without further tools.
+Native Stop remains the fallback for omitted or invalidated checks. This avoids a desktop
+continuation path that can hide resumed output; it cannot guarantee desktop rendering.
+
 The Codex reading delay has been removed. Completion reviews start immediately; old delay
 configuration/environment values are ignored. The trusted hook catches legacy exact
 `$reviewer-agent-codex:stop-continue delay` commands and reports removal without changing settings.
