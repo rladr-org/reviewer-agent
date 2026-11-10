@@ -101,6 +101,25 @@ def test_both_canonical_suites_run_in_ci():
     )
 
 
+def test_both_suites_also_run_under_a_long_temporary_directory():
+    # Every test repository lives under TMPDIR, and state file names carry the repository
+    # path. A reviewer whose scratch TMPDIR was long hit ENAMETOOLONG in seven tests that the
+    # default short TMPDIR never exercised (docs/plans/state_name_length_bound.md).
+    job = load("python.yml")["jobs"]["long-path"]
+    systems = {entry["os"] for entry in job["strategy"]["matrix"]["include"]}
+    steps = job["steps"]
+    commands = " ".join(str(step.get("run", "")) for step in steps)
+
+    assert any(name.startswith("ubuntu") for name in systems), systems
+    assert any(name.startswith("macos") for name in systems), systems
+    assert "TMPDIR=" in commands and "GITHUB_ENV" in commands
+    assert ">= 200" in commands  # the job checks the length it promises
+    assert commands.count("python -m pytest -p no:cacheprovider") >= 2
+    assert any(
+        step.get("working-directory") == "plugins/reviewer-agent-codex" for step in steps
+    )
+
+
 def test_ci_fails_when_the_suites_leave_artifacts_behind():
     text = (WORKFLOWS / "python.yml").read_text(encoding="utf-8")
 

@@ -72,6 +72,11 @@ before the 1.4.8 release. The update carries no migration.
    `liveness.py:45` and `state.py:285` in the Codex package. Uniqueness comes from the random
    part, and no reader or sweep matches temporary names. A target of up to 255 bytes can then be
    written, which covers every root name (244 bytes at most) and fixes the seven failures.
+   The first failing test for a long-path repository showed a second crash of the same kind.
+   `reviewer_transcript.resolve_transcript_path` falls back to the conventional transcript
+   location, whose folder is named after the whole working directory; for a long one that
+   name is over the limit and asking whether it exists raises `ENAMETOOLONG`. Required
+   change: the fallback catches `OSError` and answers "no transcript there".
 2. **Bounded Codex project stem.** `_project_stem` (`state.py:362`) trims the readable folder name
    to 165 UTF-8 bytes, the same way the root `_state_stem` trims its readable part. 165 is
    255 minus the `-` and 20-character digest (21) and the longest suffix appended to the stem,
@@ -112,9 +117,11 @@ Left out:
 
 ## Tests
 
-Written first; each fails before the change.
+Written first; each fails before the change, except the root size test, which passes today
+(root names reach 244 bytes) and guards the bound from here on.
 
 - `_atomic_write_text` and `_publish_if_absent` write targets of 228 and 255 bytes.
+- The transcript lookup for a long working directory answers "no transcript".
 - The commit gate in a repository whose sanitized path exceeds 200 bytes: an approving review
   allows the commit, and the reviewer session id and retry records are written and read back.
 - Root size test: every state path builder returns a name of at most 255 bytes for the largest
