@@ -39,9 +39,8 @@ publishing it.
 - **Idle watchdog ticks no longer cost a model call (Claude Code).** Every tick was a full turn
   that re-sent the whole conversation, about 300K tokens in a long session just to reply `ok`. The
   prompt hook now answers the tick itself while you have the turn or the session waits on
-  background work. You see a one-line notice instead (`UserPromptSubmit operation blocked by
-  hook: [stopContinueWatchdog] tick answered without a model call ...`), at most about once per
-  idle period. A tick reaches the model only to resume unfinished work, to delete the cron, or
+  background work. You see a short notice instead (`UserPromptSubmit operation blocked by hook:
+  Watchdog: no API failure detected`), at most about once per idle period. A tick reaches the model only to resume unfinished work, to delete the cron, or
   when the hook cannot decide.
 - **A message that mentions the watchdog tick is no longer mistaken for one (Claude Code).**
   Pasting or quoting the tick text used to make a dead cron look alive, which delayed its re-arm.

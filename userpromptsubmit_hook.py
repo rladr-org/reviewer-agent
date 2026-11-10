@@ -169,9 +169,10 @@ def _tick_block(data, cwd):
     rl.log("[userpromptsubmit] key={} watchdog tick blocked, no model call ({})".format(
         rl.canonical_project_key(cwd), why))
     # Without suppressOriginalPrompt the host appends the whole tick, a paragraph the operator
-    # never typed, to the notice.
+    # never typed, to the notice. Without a reason it prints "Blocked by hook"; `why` stays in
+    # the log.
     return {"decision": "block",
-            "reason": "[stopContinueWatchdog] tick answered without a model call: {}.".format(why),
+            "reason": "Watchdog: no API failure detected",
             "hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                    "suppressOriginalPrompt": True}}
 
