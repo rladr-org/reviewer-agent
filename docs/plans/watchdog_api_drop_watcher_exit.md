@@ -86,3 +86,38 @@ way a resumed handoff does.
 - The registry switches while the watcher runs: it exits.
 - The registry names this session: it keeps waiting.
 - No entry, an unparseable entry, or an entry without `sessionId`: it keeps waiting.
+
+## Addendum (2026-11-09): end watchers left behind by earlier versions
+
+The exits above only help watchers that run this code. Watchers started by 1.4.5 have no exit
+check at all, and 1.4.6 ones miss in-process session switches. After an update they keep polling
+until someone kills them; on 2026-11-09 twelve were running, five of them orphans whose Claude
+Code process had exited days earlier. Asking operators to find and kill them by hand is not an
+acceptable upgrade step.
+
+### Change
+
+When a watcher starts, it first ends every **orphaned** watcher: another `api_drop_watch.py`
+process whose Claude Code process has exited. A watcher's Claude Code process is the `CLAUDE_PID`
+in its environment (read from `/proc/<pid>/environ`, or with `ps eww` where there is no `/proc`).
+Without one, a watcher whose shell has been reparented to pid 1 counts as orphaned. It is sent
+`SIGTERM`, and each one ended is logged.
+
+Nothing listens to an orphan, so ending it starts no turn anywhere. A watcher inside a running
+Claude Code process is left alone even when that process has moved to another session: ending it
+would deliver a failed-task notice into that live session. It becomes an orphan when its process
+exits, and the next watcher to start ends it then. Watchers that run this release's code stop by
+themselves in that case, so the case only arises for watchers from earlier versions.
+
+Only `python` processes running `api_drop_watch.py` with `--session` count; the shell wrapper
+around a watcher, a `grep`, or an editor showing the file never does. The watcher never ends
+itself, and processes owned by another user are skipped. Any error leaves the other processes
+alone and the watch starts as usual.
+
+### Tests
+
+- A watcher whose `CLAUDE_PID` is not running is selected; one whose `CLAUDE_PID` runs is not.
+- Without `CLAUDE_PID`, a watcher whose shell's parent is pid 1 is selected; otherwise not.
+- The shell wrapper, a process that only mentions the script, and the watcher itself are never
+  selected.
+- Starting a watcher ends a live orphaned watcher process and leaves a live non-orphan running.
