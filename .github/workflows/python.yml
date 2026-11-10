@@ -21,8 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Ubuntu spans the floor and the current interpreters.
-          - {os: ubuntu-latest, python: "3.9"}
+          # Ubuntu spans the floor and the current interpreters. The floor names its image:
+          # `ubuntu-latest` is Ubuntu 26.04, for which setup-python publishes no 3.9.
+          - {os: ubuntu-24.04, python: "3.9"}
           - {os: ubuntu-latest, python: "3.12"}
           - {os: ubuntu-latest, python: "3.14"}
           # macOS gets a current interpreter here; its 3.9 floor is covered by the
