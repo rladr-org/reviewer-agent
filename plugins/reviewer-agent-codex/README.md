@@ -1,9 +1,9 @@
 # reviewer-agent-codex
 
 
-> **Nothing here is supported, and nothing is guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has daily private use on macOS Tahoe, and 1.4.3 was verified with the Codex CLI on Ubuntu 20.04. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
+> **No part of this project is supported or guaranteed to work.** This is a personal project published as-is, with no undertaking that it is maintained or monitored, that any issue or security report will be read or acted upon, or that any fix will ever appear. It has daily private use on macOS Tahoe, and 1.4.3 was verified with the Codex CLI on Ubuntu 20.04. Use it entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md).
 
-> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. Nothing in it is a representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
+> **Informational only — not a warranty, and not to be relied upon.** This document describes intent, not guaranteed behaviour. It may be incomplete, inaccurate, or out of date, and the software may behave differently from anything written here. It makes no representation, guarantee, or commitment of any kind. Use of this software is entirely at your own risk: see [`DISCLAIMER.md`](DISCLAIMER.md) and [`LICENSE`](LICENSE).
 
 A Codex-native autonomous reviewer with two independent, per-repository capabilities:
 

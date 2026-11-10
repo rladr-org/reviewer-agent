@@ -103,7 +103,7 @@ The Fable 5.1 developer agent had declared the rehearsal clean while its own com
 
 # Features
 
-Everything below is optional, enabled **per repository** and **per feature**; nothing acts until you turn it on, and it is easy to remove.
+Everything below is optional, enabled **per repository** and **per feature**; no feature acts until you turn it on, and it is easy to remove.
 
 **Two gates you control independently**
 
@@ -201,7 +201,7 @@ Along with this, I find it useful to let the coding agents have four .MD files:
 **The intended execution boundary** In the current implementation, a Codex commit
 reviewer is configured to run commands in a `workspace-write` sandbox with approvals disabled and
 `.git` read-only. The Pi and Claude reviewer configurations are intended to provide repository-read
-tools without a shell or edit tool. These describe the implementation and guarantee nothing;
+tools without a shell or edit tool. These describe the implementation and provide no security guarantees;
 verify the source and the behavior of the installed host versions before relying on them. Read
 [`SECURITY.md`](SECURITY.md) and [`PRIVACY.md`](PRIVACY.md) before enabling the software.
 
@@ -287,7 +287,7 @@ also mentions a commit as text is still refused. It cannot see:
 These are the limits of reading a command's text. Keep them in mind when writing
 `reviewerAgent.md`.
 
-**Status: public beta. Nothing here is supported, and nothing is guaranteed to work.** There is
+**Status: public beta. No part of this project is supported or guaranteed to work.** There is
 no supported configuration, no supported platform, and no supported host version — "supported"
 would imply an undertaking, and there is none.
 
@@ -303,7 +303,7 @@ What can be said is how much use each combination has actually had:
 The `pi` and `claude` backends pass the same automated live matrix as the other two — commit
 audits, rejections and approvals, stop supervision, cancellation, process cleanup — but neither
 has had sustained use. Neither option is automatically selected: `codex` is the fallback when
-nothing is configured.
+no backend is configured.
 
 On native Ubuntu 20.04, 1.4.3 was verified with Claude Code (`codex` backend) and the Codex CLI:
 commit review, Stop supervision, and update, uninstall and reinstall by the guides. Earlier
@@ -312,8 +312,8 @@ coverage, including Git 2.25. WSL2 has had neither installation nor CI coverage;
 other macOS versions have not been tried. **Even the top two rows are not guaranteed to
 work** — they worked on my machine but may not work on yours.
 
-**No maintenance or response is promised.** This is a personal project published as-is. Nothing
-here undertakes that it is maintained or monitored, that an issue, pull request or security report
+**No maintenance or response is promised.** This is a personal project published as-is. It makes
+no undertaking that it is maintained or monitored, that an issue, pull request or security report
 will be read, answered or acted upon, that any defect or vulnerability will ever be fixed, or that
 any further release will appear. Reports are welcome and may be ignored; the project may be
 archived at any time without notice. See [`DISCLAIMER.md`](DISCLAIMER.md).
@@ -412,8 +412,7 @@ restart and hook-trust actions that an agent cannot perform for them.
 
 1. Install and authenticate Claude Code, or install and authenticate both the Codex GUI and Codex
    CLI. For Claude Code, also install and authenticate the chosen reviewer backend (`codex` or
-   `pi`); the `claude` backend needs nothing beyond the authenticated Claude Code you are already
-   running.
+   `pi`); the `claude` backend needs only the authenticated Claude Code you are already running.
 2. Confirm that Git can read the reviewer-agent repository; authentication is needed only when
    installing from a private fork or mirror.
 3. Start the developer host in the repository you want to protect.
@@ -612,11 +611,11 @@ Codex-native host, and testing an update across every supported backend — see
 claude plugin disable reviewer-agent
 ```
 
-**Uninstall**, in the order that leaves nothing dangling:
+**Uninstall**, in the order that leaves no leftovers:
 
 ```bash
 claude plugin uninstall reviewer-agent
-claude plugin marketplace remove reviewer-agent      # optional: only if nothing else uses it
+claude plugin marketplace remove reviewer-agent      # optional: only if no other plugin uses it
 ```
 
 Then, optionally and in your own time:
@@ -633,15 +632,15 @@ Then, optionally and in your own time:
   `/reviewer-agent:reviewerHistory clear` before uninstalling. If you relocated state with `REVIEWER_STATE_DIR`
   (or the legacy `REVIEWER_HOME` alias), remove that path instead.
 - **The Pi extension**, if you installed it: `rm -rf ~/.pi/agent/extensions/git-read-only`.
-  Nothing else uses it.
+  No other tool uses it.
 
 ## Claude Code backends
 
 The Claude Code plugin resolves one backend per repository, from three: `codex`, `pi` and
 `claude`. Whichever it resolves handles all three Claude Code capabilities — commit audits,
-the `AskUserQuestion` reroute, and stop supervision. Nothing is selected for you beyond the
-`codex` fallback, and `claude` in particular is never selected implicitly: it spends your own
-subscription quota, so it is chosen explicitly or not at all.
+the `AskUserQuestion` reroute, and stop supervision. Only the `codex` fallback is automatically
+selected; `claude` in particular is never selected implicitly: it spends your own subscription
+quota, so it must be chosen explicitly.
 
 ### Codex backend
 
@@ -699,7 +698,7 @@ error, or a truncated staged diff overrides any model approval with a fail-close
 
 ### Claude backend
 
-The reviewer is a second `claude` process, so this backend installs nothing: it uses the CLI and
+The reviewer is a second `claude` process, so this backend needs no installation: it uses the CLI and
 authentication already selected by the user. It is **opt-in and never the default**. Its usage,
 quota, billing, availability and account consequences are controlled by Anthropic and the terms
 applicable to the user's account, which may change.
@@ -791,7 +790,7 @@ convention for namespaced commands).
 | `/reviewer-agent:reviewerAgent on [acceptRisk]\|off` | Enable or disable commit review. First enablement requires the operator's exact `acceptRisk` invocation. |
 | `/reviewer-agent:stopContinue on [acceptRisk]\|off` | Enable or disable stop supervision independently. The current risk receipt is shared with reviewerAgent. |
 | `/reviewer-agent:stopContinue delay [<0..300>\|status\|clear]` | Show or set how long each stop waits before its review (default 60 seconds, every project). Replying during the wait skips the review. |
-| `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. A tick does not start work while you have the turn: after an approved stop or your interrupt it replies `ok` until your next message. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. While the watchdog is on, your first prompt in a session also asks the agent to start an **API-drop watcher**: a background command that reads the session transcript, makes no model calls, and exits about 20 seconds after a turn ends on a dropped API connection (`Connection lost mid-response`, `The response stopped arriving`, `No response from API`, 500, 529) with nothing since. Its exit starts the resume turn, so recovery takes seconds instead of up to a tick. It leaves login, limit, safeguard and proxy or gateway configuration errors alone, lets Claude Code's own "Waiting for API response · will retry" loop run (resuming only if that loop gives up), waits while background work is outstanding or you have the turn, and backs off to one resume per five minutes during an outage. It exits by itself once its Claude Code process exits or the conversation continues under a new session id. Outside auto mode, Claude Code may ask you to approve the command once. `REVIEWER_API_DROP_WATCH=0` turns it off. |
+| `/reviewer-agent:stopContinueWatchdog on [interval]\|off\|status` | Arm/disarm a `CronCreate` recovery loop that re-prompts a stalled session — e.g. when a Claude Code API failure makes the agent stop dead until it gets another prompt — so the Stop hook can resume supervision. A tick does not start work while you have the turn: after an approved stop or your interrupt it replies `ok` until your next message. Interval 1–59 min (default 7). Requires `stopContinue` active. The cron auto-shuts-off after a couple of idle intervals (so a finished session stops ticking within a few ticks rather than forever) and auto-rearms on your next prompt; the flag stays on across that. While the watchdog is on, your first prompt in a session also asks the agent to start an **API-drop watcher**: a background command that reads the session transcript, makes no model calls, and exits about 20 seconds after a turn ends on a dropped API connection (`Connection lost mid-response`, `The response stopped arriving`, `No response from API`, 500, 529) with no activity since. Its exit starts the resume turn, so recovery takes seconds instead of up to a tick. It leaves login, limit, safeguard and proxy or gateway configuration errors alone, lets Claude Code's own "Waiting for API response · will retry" loop run (resuming only if that loop gives up), waits while background work is outstanding or you have the turn, and backs off to one resume per five minutes during an outage. It exits by itself once its Claude Code process exits or the conversation continues under a new session id. Outside auto mode, Claude Code may ask you to approve the command once. `REVIEWER_API_DROP_WATCH=0` turns it off. |
 | `/reviewer-agent:reviewerDirective <text>` | Add a persistent fact or authorization to every reviewer prompt. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:stopContinueDirective <text>` | Add a persistent rule about when the agent may stop or must keep working. Only the stop supervisor receives it, on every stop review; commit audits never do. Supports `list`, `remove <n>`, and `clear`. |
 | `/reviewer-agent:reviewerModel` | Show the selected backend’s model, effort, and commit timeout. |
@@ -948,7 +947,7 @@ Two delivery channels:
 
 Confirming it skimmed: each gated commit writes one line to
 `~/.claude/reviewer-agent/logs/reviewer.log`. When an ignore file excluded staged paths, that line
-carries `ignore_matched_files=N ignore_matched_lines=M` (both `0` when nothing matched — a quick
+carries `ignore_matched_files=N ignore_matched_lines=M` (both `0` when no pattern matched — a quick
 way to catch a pattern that isn't hitting, or an ignore file that hasn't taken effect yet):
 
 ```bash
@@ -1004,7 +1003,7 @@ anything. The Codex package exposes the same two actions as
 The stop hook allows a turn to end without a supervisor call when the transcript shows a live
 harness-managed background shell, subagent, or monitor. The host is expected to resume the session
 when that work completes. Staleness windows prevent abandoned markers from suppressing supervision
-indefinitely. A watchdog tick that replies `ok` during such a wait found nothing unfinished, so the
+indefinitely. A watchdog tick that replies `ok` during such a wait found no unfinished work, so the
 watchdog pauses and then removes its cron as it does for any idle session, even while a shell that
 never exits (a webhook forwarder, a log follower) is still running. The turn a completion starts
 clears the pause and re-arms the cron.
@@ -1230,7 +1229,7 @@ These are the oldest versions this release was *exercised* on. Nobody undertakes
 and older versions may also work. Below these floors, a successful
 `/reviewer-agent:reviewerAgent on` and the Codex installer print a warning and continue. Newer
 versions are equally untested: a host that changes underneath this project can break it at any
-time, and nothing here promises otherwise.
+time.
 The native Codex installer uses the 0.154.0 baseline; the independent Claude package's Codex
 reviewer backend keeps its 0.147.0 baseline. Native Codex reviewed commits use ordinary Git with
 the repository's configured hooks and signing. See the
@@ -1255,7 +1254,7 @@ every one of them the answer is "not much".
   Earlier installations there reported installation, command-detection, launcher and filesystem
   issues; the fixes have CI coverage (Ubuntu, Python 3.9/3.12/3.14 and Git 2.25). Other
   distributions have not been tried.
-- **WSL2** — no CI, no manual run, nothing.
+- **WSL2** — never tried: no CI and no manual run.
 - **Native Windows and WSL1** — the code is not written for them. The Claude Code package's
   Bash-oriented commands and both packages' POSIX process control have not been ported to native
   Windows. Claude Code can run in WSL1, although its sandbox is unavailable there, but current
@@ -1264,8 +1263,8 @@ every one of them the answer is "not much".
   WSL1; nobody has tried it.
 
 Other Linux distributions and WSL2 are expected to work, because the runtime and process control
-use POSIX interfaces, but nobody has tried them. The host's own platform coverage says nothing about whether this project has ever
-been run there.
+use POSIX interfaces, but nobody has tried them. The host's own platform coverage does not show whether this project has
+ever been run there.
 
 ### Native Linux
 
