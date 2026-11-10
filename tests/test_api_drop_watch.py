@@ -894,7 +894,18 @@ def _fake_watcher(tmp_path, sid, claude_pid):
         env=env)
 
 
+def _ps_runs():
+    """Codex's macOS sandbox refuses to run `ps` ("execvp() of 'ps' failed: Operation not
+    permitted", 2026-11-10); the cleanup then skips itself, so there is no process to end."""
+    try:
+        return subprocess.run(["ps", "-A", "-o", "pid="], capture_output=True,
+                              timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process cleanup is POSIX-only")
+@pytest.mark.skipif(not _ps_runs(), reason="`ps` cannot run here, so the cleanup skips itself")
 def test_a_starting_watcher_ends_an_orphaned_watcher_and_leaves_a_live_one(tmp_path, watchers):
     repo = make_repo(tmp_path)
     _effective(repo)
