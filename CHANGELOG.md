@@ -51,7 +51,9 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 - Claude Code: a stopContinue watchdog tick with nothing to do no longer costs a model call. Every
   tick is a full turn that re-sends the whole conversation, about 300K tokens in a long session
   for an idle `ok`. The `UserPromptSubmit` hook now answers the tick itself, by blocking it, when
-  the operator has the turn or the session is waiting on background work. Every other tick still
+  the operator has the turn or the session is waiting on background work. Claude Code shows a
+  one-line notice for each blocked tick (`UserPromptSubmit operation blocked by hook: ...`), at
+  most about once per idle period; no hook output can hide it. Every other tick still
   reaches the model as before. That includes the tick that deletes the cron (after a full idle
   interval, or once stopContinue or the watchdog is off), a tick that resumes unfinished work, and
   any tick the hook cannot decide, such as when the transcript cannot be read. Only the exact

@@ -39,7 +39,9 @@ publishing it.
 - **Idle watchdog ticks no longer cost a model call (Claude Code).** Every tick was a full turn
   that re-sent the whole conversation, about 300K tokens in a long session just to reply `ok`. The
   prompt hook now answers the tick itself while you have the turn or the session waits on
-  background work. A tick reaches the model only to resume unfinished work, to delete the cron, or
+  background work. You see a one-line notice instead (`UserPromptSubmit operation blocked by
+  hook: [stopContinueWatchdog] tick answered without a model call ...`), at most about once per
+  idle period. A tick reaches the model only to resume unfinished work, to delete the cron, or
   when the hook cannot decide.
 - **A message that mentions the watchdog tick is no longer mistaken for one (Claude Code).**
   Pasting or quoting the tick text used to make a dead cron look alive, which delayed its re-arm.
@@ -77,7 +79,9 @@ commit; the absence of an error does not prove a review ran.
 ## Known limitations
 
 The watchdog's tick answer relies on Claude Code honouring a `UserPromptSubmit` block for a
-prompt fired by a cron. If it does not, ticks reach the model as they did before.
+prompt fired by a cron, verified with Claude Code 2.1.322. If a version does not, ticks reach the
+model as they did before. Claude Code offers no way for a hook to block a prompt silently, so the
+one-line notice stays.
 
 The watcher's session-switch check reads Claude Code's internal session registry. If the format
 changes, the watcher keeps waiting as it did in 1.4.6.
