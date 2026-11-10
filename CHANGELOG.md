@@ -7,6 +7,30 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude Code: the commit gate works in a repository with a long path. State files are written
+  through a temporary file beside the target, and that file's name embedded the target's name
+  plus 38 bytes. For a repository whose path exceeded about 139 bytes the temporary name passed
+  the 255-byte file name limit, the write failed with `File name too long`, and the gate blocked
+  every commit with "commit gate crashed". Temporary files are now named `.<32 hex>.tmp`
+  whatever the target is called. Existing state files keep their names.
+- Claude Code: the fallback lookup of the session transcript answers "no transcript" for a long
+  working directory, where it used to raise the same error.
+- Claude Code: when a state file name or path does exceed the filesystem's limit, the gate's
+  message says so and names the file. The gate still blocks the commit.
+- Codex: the same fixed-length temporary names. The project part of a Codex state file name is
+  trimmed to 165 bytes of the repository folder name (`_STEM_READABLE_BYTES` in the plugin's
+  `reviewer_codex/state.py`), so every Codex state name fits the limit. A
+  repository whose own folder name is longer than 165 bytes gets new state names: turn the
+  reviewer and stop features on again and accept the risk notice again there. Its earlier
+  review history stays on disk under the old name and is left unread.
+
+### Changed
+
+- CI runs both suites a second time under a temporary directory whose path is at least 200
+  bytes, on Linux and macOS, so long-path failures show up before a release.
+
 ## [1.4.7]
 
 ### Added
