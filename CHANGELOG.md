@@ -7,6 +7,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.7] — unreleased
+
 ### Added
 
 - Claude Code: `/reviewer-agent:stopContinueDirective <text>` records a standing rule for the stop
