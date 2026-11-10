@@ -84,7 +84,11 @@ model as they did before. Claude Code offers no way for a hook to block a prompt
 one-line notice stays.
 
 The watcher's session-switch check reads Claude Code's internal session registry. If the format
-changes, the watcher keeps waiting as it did in 1.4.6.
+changes, the watcher keeps waiting as it did in 1.4.6. It recognizes its Claude Code process by
+the `CLAUDE_PID` variable Claude Code exports; without it, only the session-handoff exit applies.
+
+The hook launcher checks that a `python3` exists, not its version; a Python older than 3.9 first
+on the PATH Claude Code starts with is not rejected. The install and update guides check it.
 
 In Codex, interruption currently requires Escape. Typing or submitting a reply does not interrupt
 the completion review. If the native fallback rejects an answer, that answer may already be
