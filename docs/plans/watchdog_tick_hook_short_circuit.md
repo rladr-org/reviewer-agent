@@ -59,8 +59,16 @@ changes again, the previous wording must stay recognized for at least seven days
 unrecognized tick counts as an operator prompt, which clears the pause, so the model could resume
 work the operator had paused.
 
-A block shows its reason to the operator, so it is one short line. It happens at most once per
-idle period after an approved stop, since the next tick is the teardown.
+A block shows its reason to the operator. It happens at most once per idle period after an
+approved stop, since the next tick is the teardown. Claude Code also appends the blocked prompt
+("Original prompt: ..."), which for a tick is a paragraph of instructions the operator never
+typed. The block therefore sets `hookSpecificOutput.suppressOriginalPrompt: true`, which Claude
+Code's hook schema describes as "When decision is "block", omit the original prompt from the block
+message". The operator then sees one line. No hook output hides the notice entirely: in Claude
+Code 2.1.322, every way a UserPromptSubmit hook can stop a prompt (a block, `continue: false`,
+exit code 2) shows a warning, and `suppressOutput` is accepted but has no effect. A host that does
+not know the field ignores it or treats the output as invalid. Either way the tick is not lost: it
+shows the full notice, or reaches the model as before.
 
 Fail-safe direction: any error in the hook lets the tick through, which is today's behaviour. If
 the host did not honour a block for a cron-enqueued prompt, the model would get the tick and
@@ -73,9 +81,15 @@ After install, in a session with the watchdog armed: approve a stop, wait for on
 confirm the transcript has no assistant turn for it and `reviewer.log` has the block line. Then
 the next tick after one interval tears the cron down.
 
+Done 2026-11-09 with Claude Code 2.1.322: the tick was blocked with no model call, and the log had
+`watchdog tick blocked, no model call (you have the turn)`. The notice echoed the whole tick
+prompt, which led to `suppressOriginalPrompt`. Repeat the check after that change and confirm the
+notice is the reason line only.
+
 ## Tests
 
 - Disarm fresh: a tick is blocked, the disarm `ts` is unchanged, and no `teardown_ready` exists.
+- Every block sets `hookSpecificOutput.suppressOriginalPrompt` for `UserPromptSubmit`.
 - Disarm aged past the interval: a tick is not blocked and `teardown_ready` is written.
 - `teardown_ready` present: a tick is not blocked.
 - No disarm, transcript parked on a background sub-agent: a tick is blocked and sets the disarm.
