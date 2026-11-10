@@ -168,8 +168,12 @@ def _tick_block(data, cwd):
         why = "the session is waiting on background work, whose completion resumes it"
     rl.log("[userpromptsubmit] key={} watchdog tick blocked, no model call ({})".format(
         rl.canonical_project_key(cwd), why))
+    # Without suppressOriginalPrompt the host appends the whole tick, a paragraph the operator
+    # never typed, to the notice.
     return {"decision": "block",
-            "reason": "[stopContinueWatchdog] tick answered without a model call: {}.".format(why)}
+            "reason": "[stopContinueWatchdog] tick answered without a model call: {}.".format(why),
+            "hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                   "suppressOriginalPrompt": True}}
 
 
 def _api_drop_watch_context(data, cwd):
