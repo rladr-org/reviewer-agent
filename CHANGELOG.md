@@ -25,6 +25,15 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
   resume an old dropped turn into the session that replaced it. The watcher reads the process's
   own entry in Claude Code's session registry (`sessions/<pid>.json` under `$CLAUDE_CONFIG_DIR`,
   by default `~/.claude`). If that entry is missing or unreadable, the watcher keeps waiting.
+- Claude Code: a stopContinue watchdog tick with nothing to do no longer costs a model call. Every
+  tick is a full turn that re-sends the whole conversation, about 300K tokens in a long session
+  for an idle `ok`. The `UserPromptSubmit` hook now answers the tick itself, by blocking it, when
+  the operator has the turn or the session is waiting on background work. Every other tick still
+  reaches the model as before. That includes the tick that deletes the cron (after a full idle
+  interval, or once stopContinue or the watchdog is off), a tick that resumes unfinished work, and
+  any tick the hook cannot decide, such as when the transcript cannot be read. Only the exact
+  armed tick counts. A message that mentions or quotes the tick used to stamp watchdog liveness,
+  which held off the re-arm of a dead cron; now it is treated as the operator's prompt.
 
 ## [1.4.6]
 
