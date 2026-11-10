@@ -1198,3 +1198,116 @@ def test_a_background_completion_turn_re_arms_a_torn_down_watchdog(tmp_path, mon
     assert p.returncode == 0, p.stderr
     assert rl.WATCHDOG_MARKER in p.stdout
     assert rl.is_watchdog_teardown_ready(repo, "claude-ups") is False
+
+
+# --------------------------------------------------------------------------
+# The prompt hook answers a tick that has nothing to do, so it costs no model call: every tick is
+# a full turn re-sending the whole conversation (2026-11-09: ~300K tokens for an idle `ok`).
+# docs/plans/watchdog_tick_hook_short_circuit.md
+# --------------------------------------------------------------------------
+def _blocked(p):
+    out = p.stdout.strip()
+    return bool(out) and json.loads(out).get("decision") == "block"
+
+
+def test_a_tick_while_the_operator_has_the_turn_is_blocked_before_the_model(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)                                          # interval 1 min
+    written = _write_disarm_age(repo, "claude-ups", 5)
+    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert _blocked(p)
+    assert json.loads(p.stdout)["reason"].strip()
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert _disarm_ts(repo, "claude-ups") == written          # not refreshed: it ages to teardown
+    assert rl.is_watchdog_teardown_ready(repo, "claude-ups") is False
+    assert rl.watchdog_ticks_presumed_dead(repo, "claude-ups") is False   # liveness still stamped
+
+
+def test_the_first_tick_after_a_full_idle_interval_goes_through_to_tear_down(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    _write_disarm_age(repo, "claude-ups", 120)                # 2 min old >= 1 min interval
+    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""                             # the model deletes the cron
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_teardown_ready(repo, "claude-ups") is True
+
+
+def test_a_tick_parked_on_background_work_is_paused_and_blocked(tmp_path, monkeypatch):
+    # The completion starts a turn by itself; until then the tick has nothing to do. The model's
+    # "ok, still waiting on X" was not a bare `ok`, so 1.4.6's pause never took (2026-11-09).
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _bg_wait_transcript(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert _blocked(p)
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is True
+
+
+def test_a_tick_kept_open_only_by_a_listening_server_goes_through(tmp_path, monkeypatch, capsys):
+    from test_background_wait_server import _server_launch
+    from test_reviewer_lib import _asst, _human, _transcript
+    import importlib.util
+    import io
+    import reviewer_manifest
+    monkeypatch.setattr(reviewer_manifest, "_listening_shell_task_ids",
+                        lambda outputs: {t for t in outputs if t == "bserver"}, raising=False)
+    monkeypatch.setenv("REVIEWER_HOME", str(tmp_path / "rh"))
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _transcript(tmp_path, _human("restart the review desk"), *_server_launch(minutes_ago=0),
+                     _asst("The review desk is back up."))
+    assert reviewer_manifest.background_wait_state(tr)[0] is False   # the premise
+    spec = importlib.util.spec_from_file_location("ups_under_test", UPS)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"cwd": repo, "session_id": "claude-ups", "prompt": _TICK_BODY, "transcript_path": tr,
+         "hook_event_name": "UserPromptSubmit"})))
+    assert hook.main() == 0
+    assert capsys.readouterr().out.strip() == ""
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
+
+
+def test_a_tick_with_nothing_holding_the_session_goes_through_to_resume(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    tr = _real_turn_transcript(tmp_path, "fix the table", "Editing the table now.")
+    p = _ups_with_transcript(repo, _TICK_BODY, home, tr)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    assert rl.is_watchdog_disarm_set(repo, "claude-ups") is False
+    assert rl.is_watchdog_teardown_ready(repo, "claude-ups") is False
+
+
+def test_a_tick_with_the_watchdog_not_effective_goes_through_to_tear_down(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    rl.set_stopcontinue_active(repo)                          # watchdog OFF
+    rl.set_watchdog_disarm(repo, "claude-ups")
+    p = run_ups(repo, _TICK_BODY, home, "claude-ups")
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == ""
+
+
+def test_the_tick_right_after_an_interrupt_is_blocked(tmp_path, monkeypatch):
+    home = str(tmp_path / "rh")
+    monkeypatch.setenv("REVIEWER_HOME", home)
+    repo = make_repo(tmp_path)
+    _effective(repo)
+    p = _ups_with_transcript(repo, _TICK_BODY, home, _interrupted_transcript(tmp_path))
+    assert p.returncode == 0, p.stderr
+    assert _blocked(p)
