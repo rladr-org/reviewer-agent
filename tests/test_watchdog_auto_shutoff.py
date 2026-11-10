@@ -1213,6 +1213,8 @@ def _blocked(p):
     # Claude Code omits it when the block sets suppressOriginalPrompt.
     assert json.loads(out).get("hookSpecificOutput") == {
         "hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
+    # The operator's wording (2026-11-10). Without a reason Claude Code prints "Blocked by hook".
+    assert json.loads(out).get("reason") == "No API timeout detected"
     return True
 
 
