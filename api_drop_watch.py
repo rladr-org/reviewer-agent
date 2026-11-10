@@ -13,6 +13,9 @@ happened since. See docs/plans/watchdog_api_drop_watcher.md.
 import argparse
 import json
 import os
+import re
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -89,6 +92,94 @@ def _launcher_session(pid):
     return sid if isinstance(sid, str) and sid else None
 
 
+# A watcher's command line as `ps` prints it: the script, then (after any options) --session.
+_WATCHER_ARGS = re.compile(r"(?:^|[\s/])api_drop_watch\.py\s(?:.*\s)?--session\s")
+_CLAUDE_PID_IN_ENV = re.compile(r"(?:^|\s)CLAUDE_PID=(\d+)(?=\s|$)")
+
+
+def _is_watcher(command):
+    """A python process running api_drop_watch.py with --session: never the shell wrapper around
+    one, a grep, or an editor showing the file."""
+    parts = command.split(None, 1)
+    return (len(parts) == 2 and os.path.basename(parts[0]).lower().startswith("python")
+            and bool(_WATCHER_ARGS.search(parts[1])))
+
+
+def orphaned_watchers(rows, me, claude_pid_of, running):
+    """The watcher pids in `rows` ((pid, ppid, command) per process) whose Claude Code process has
+    exited: the CLAUDE_PID in their environment no longer runs, or, without one, their shell (or
+    the watcher itself) was reparented to pid 1. Never `me`. A watcher inside a running Claude
+    Code process is not selected even if that process moved to another session: ending it would
+    start a failed-task turn there (docs/plans/watchdog_api_drop_watcher_exit.md)."""
+    parent = {pid: ppid for pid, ppid, _ in rows}
+    found = []
+    for pid, ppid, command in rows:
+        if pid == me or not _is_watcher(command):
+            continue
+        launcher = claude_pid_of(pid)
+        if launcher is not None:
+            orphaned = not running(launcher)
+        else:
+            orphaned = ppid == 1 or parent.get(ppid) == 1
+        if orphaned:
+            found.append(pid)
+    return found
+
+
+def _claude_pid_of(pid):
+    """The CLAUDE_PID another process started with: /proc/<pid>/environ where there is one, else
+    `ps eww`, which prints the environment after the command. None when it cannot tell."""
+    try:
+        with open("/proc/{}/environ".format(pid), "rb") as fh:
+            env = fh.read().decode("utf-8", "replace").split("\0")
+    except OSError:
+        out = subprocess.run(["ps", "eww", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout
+        found = _CLAUDE_PID_IN_ENV.findall(out)
+        value = found[-1] if found else ""  # the environment follows the arguments
+    else:
+        value = next((e[len("CLAUDE_PID="):] for e in env if e.startswith("CLAUDE_PID=")), "")
+    return int(value) if value.isdigit() and int(value) > 1 else None
+
+
+def _own_processes():
+    """(pid, ppid, command) for every process this user owns."""
+    out = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,uid=,command="],
+                         capture_output=True, text=True, timeout=10, check=True).stdout
+    uid = os.getuid()
+    rows = []
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and all(p.isdigit() for p in parts[:3]) and int(parts[2]) == uid:
+            rows.append((int(parts[0]), int(parts[1]), parts[3]))
+    return rows
+
+
+def _end_orphaned_watchers(me):
+    """End the watchers whose Claude Code process has exited. Watchers from 1.4.5 have no exit of
+    their own and would otherwise poll until someone kills them. Nothing listens to an orphan, so
+    ending one starts no turn anywhere. Any error leaves the other processes alone.
+    REVIEWER_API_DROP_REAP=0 turns this off."""
+    if os.name != "posix" or os.environ.get("REVIEWER_API_DROP_REAP") == "0":
+        return
+    try:
+        rows = _own_processes()
+        commands = {pid: command for pid, _, command in rows}
+        for pid in orphaned_watchers(rows, me, _claude_pid_of, reviewer_state._pid_running):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                continue
+            rl.log("[api-drop-watch] ended orphaned watcher pid {}: {}".format(
+                pid, commands[pid][:300]))
+    except Exception as e:
+        try:
+            rl.log("[api-drop-watch] orphaned-watcher cleanup skipped ({}: {})".format(
+                type(e).__name__, e))
+        except Exception:
+            pass
+
+
 class _Tail:
     """Feeds the transcript's complete lines to the drop scan as they are appended, and notes a
     handoff: a `continued-in` record with no message after it means the conversation now lives
@@ -130,6 +221,7 @@ def _held_by_another(lease, me):
 
 def watch(cwd, sid, transcript):
     me = os.getpid()
+    _end_orphaned_watchers(me)
     lease = rl.read_api_drop_lease(cwd, sid)
     if _held_by_another(lease, me):
         print("The API-drop watcher is already running for this session (pid {}); nothing to "
