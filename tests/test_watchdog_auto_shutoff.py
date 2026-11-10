@@ -1207,7 +1207,13 @@ def test_a_background_completion_turn_re_arms_a_torn_down_watchdog(tmp_path, mon
 # --------------------------------------------------------------------------
 def _blocked(p):
     out = p.stdout.strip()
-    return bool(out) and json.loads(out).get("decision") == "block"
+    if not out or json.loads(out).get("decision") != "block":
+        return False
+    # Live, 2026-11-09: the notice echoed the whole tick prompt, which the operator never typed.
+    # Claude Code omits it when the block sets suppressOriginalPrompt.
+    assert json.loads(out).get("hookSpecificOutput") == {
+        "hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}
+    return True
 
 
 def _armed_tick(repo, sid="claude-ups"):
