@@ -181,6 +181,117 @@ def test_no_replies_in_the_window_produces_no_block(tmp_path):
     assert rl.agent_replies_block(path) == ""
 
 
+# --------------------------------------------------------------------------
+# replies to watchdog ticks (docs/plans/tick_replies_not_operator_words.md)
+# --------------------------------------------------------------------------
+TICK = ("stopContinueWatchdog tick -- Check these three paths INDIVIDUALLY (Read each, not one "
+        "batched `ls`) ... otherwise reply `ok` and stop.")
+
+
+def _tick(ts):
+    # A fired tick is a main-session user event the host injected.
+    return {"type": "user", "isSidechain": False, "isMeta": True, "timestamp": ts,
+            "uuid": "k" + ts, "message": {"role": "user", "content": TICK}}
+
+
+def _reply_lines(block):
+    return [line.strip() for line in block.splitlines() if line.startswith("  [")]
+
+
+def test_tick_acknowledgements_are_not_listed_after_a_request_for_approval(tmp_path):
+    # 2026-11-09: the agent asked for "go", two ticks were each answered "ok", and the
+    # supervisor directed the work, saying the operator's "ok" replies had approved it.
+    path = _transcript(
+        tmp_path,
+        _human("show me the first page first", "2026-11-09T07:30:00Z"),
+        _reply('Say "go" and I\'ll redo the other three pages.', "2026-11-09T07:38:42Z"),
+        _tick("2026-11-09T07:42:00Z"),
+        _reply("ok", "2026-11-09T07:42:09Z"),
+        _tick("2026-11-09T07:49:00Z"),
+        _reply("ok", "2026-11-09T07:49:10Z"),
+        _human("fix the importer", "2026-11-10T04:10:13Z"),
+        _reply("The importer is fixed.", "2026-11-10T04:30:00Z"),
+    )
+    block = rl.agent_replies_block(path)
+    assert 'Say "go"' in block
+    assert not [line for line in _reply_lines(block) if line.endswith("] ok")], block
+
+
+@pytest.mark.parametrize("ack", ["Ok.", "OK!", " ok \n"])
+def test_other_spellings_of_a_tick_acknowledgement_are_left_out_too(tmp_path, ack):
+    path = _transcript(
+        tmp_path,
+        _human("go", "2026-11-09T07:30:00Z"),
+        _reply("Working.", "2026-11-09T07:31:00Z"),
+        _tick("2026-11-09T07:42:00Z"),
+        _reply(ack, "2026-11-09T07:42:09Z"),
+        _human("next", "2026-11-09T08:00:00Z"),
+        _reply("current", "2026-11-09T08:01:00Z"),
+    )
+    assert len(_reply_lines(rl.agent_replies_block(path))) == 1  # only "Working."
+
+
+def test_an_ok_in_a_turn_the_operator_started_is_kept(tmp_path):
+    path = _transcript(
+        tmp_path,
+        _human("reply ok when you have read this", "2026-11-09T07:30:00Z"),
+        _reply("ok", "2026-11-09T07:31:00Z"),
+        _human("next", "2026-11-09T08:00:00Z"),
+        _reply("current", "2026-11-09T08:01:00Z"),
+    )
+    assert [line for line in _reply_lines(rl.agent_replies_block(path)) if line.endswith("] ok")]
+
+
+def test_a_tick_turn_with_real_text_is_kept_and_labelled(tmp_path):
+    path = _transcript(
+        tmp_path,
+        _human("go", "2026-11-09T07:30:00Z"),
+        _reply("Working.", "2026-11-09T07:31:00Z"),
+        _tick("2026-11-09T07:56:00Z"),
+        _tool_call("2026-11-09T07:56:05Z"),
+        _tool_result("2026-11-09T07:56:06Z"),
+        _reply("I removed the watchdog cron.", "2026-11-09T07:56:13Z"),
+        _human("next", "2026-11-09T08:00:00Z"),
+        _reply("current", "2026-11-09T08:01:00Z"),
+    )
+    lines = _reply_lines(rl.agent_replies_block(path))
+    labelled = [line for line in lines if "I removed the watchdog cron." in line]
+    assert len(labelled) == 1
+    assert "automatic watchdog check" in labelled[0]
+    assert "automatic watchdog check" not in [line for line in lines if "Working." in line][0]
+
+
+def test_tick_acknowledgements_do_not_hide_the_approved_message(tmp_path):
+    # With only acknowledgements after the last approval, the window is empty in substance, so
+    # the block still shows the approved message the operator's next message replies to.
+    path = _transcript(
+        tmp_path,
+        _human("revise the plan", "2026-10-08T21:30:00Z"),
+        _reply("Plan revised. Shall I start step 1?", "2026-10-08T21:34:54Z"),
+        _tick("2026-10-08T21:42:00Z"),
+        _reply("ok", "2026-10-08T21:42:09Z"),
+        _human("commit the plan first", "2026-10-08T21:50:00Z"),
+        _reply("Committed.", "2026-10-08T21:55:00Z"),
+    )
+    block = rl.agent_replies_block(path, since_epoch=_epoch("2026-10-08T21:35:03Z"))
+    assert "Shall I start step 1?" in block
+    assert "the operator's next message replies to it" in block
+    assert not [line for line in _reply_lines(block) if line.endswith("] ok")], block
+
+
+def test_the_header_says_where_operator_approval_appears(tmp_path):
+    path = _transcript(
+        tmp_path,
+        _human("go", "2026-11-09T07:30:00Z"),
+        _reply("Working.", "2026-11-09T07:31:00Z"),
+        _human("next", "2026-11-09T08:00:00Z"),
+        _reply("current", "2026-11-09T08:01:00Z"),
+    )
+    header = " ".join(rl.agent_replies_block(path).split())
+    assert "Operator approval appears only under OPERATOR MESSAGES" in header
+    assert 'A short "ok" or "yes" listed here is the agent\'s' in header
+
+
 def test_only_the_stop_supervisors_prompt_carries_the_replies(tmp_path):
     path = _transcript(
         tmp_path,
