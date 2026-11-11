@@ -46,6 +46,11 @@ In `agent_replies_block`, track for each reply whether its turn was started by a
 Replies in turns started by the operator, by hook feedback or by a task notification are
 unchanged.
 
+A message the operator types while a tick turn is running is delivered into that turn as a
+`queued_command` attachment, and the agent then answers the operator (seen in the 2026-11-09
+transcript when the fix was run over it). From that attachment on, the turn's replies are
+treated as replies to the operator: they are neither labelled nor left out.
+
 ## Tests
 
 Written first; each fails before the change.
@@ -58,3 +63,6 @@ Written first; each fails before the change.
 - When the only replies after the last approval are tick acknowledgements, the block falls
   back to the approved message the operator answered, as it does today for an empty window.
 - The header states that approval appears only under OPERATOR MESSAGES.
+- Added with the fix, to pin the queued-message case: a reply that follows an operator message
+  delivered inside a tick turn carries no label, and a later `ok` in that turn is kept. This
+  test passes before the change, since the label and the filter do not exist yet.

@@ -7,6 +7,15 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude Code: the stop supervisor no longer sees the agent's `ok` answers to watchdog ticks as
+  part of the conversation. Its context lists the agent's earlier replies, and a bare `ok`
+  listed right after the agent's request for approval read like the operator's answer; the
+  supervisor then directed work the operator had not approved. Those acknowledgements are left
+  out. Any other reply to a tick is marked as a reply to an automatic check, and the section
+  states that operator approval appears only under OPERATOR MESSAGES.
+
 ## [1.4.8]
 
 ### Fixed

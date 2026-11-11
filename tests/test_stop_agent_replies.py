@@ -261,6 +261,36 @@ def test_a_tick_turn_with_real_text_is_kept_and_labelled(tmp_path):
     assert "automatic watchdog check" not in [line for line in lines if "Working." in line][0]
 
 
+def _queued(text, ts):
+    # What the operator types while a turn is running arrives as an attachment, not a user event.
+    return {"type": "attachment", "isSidechain": False, "timestamp": ts, "uuid": "q" + ts,
+            "attachment": {"type": "queued_command", "prompt": text, "commandMode": "prompt",
+                           "origin": {"kind": "human"}, "timestamp": ts}}
+
+
+def test_a_reply_to_the_operator_inside_a_tick_turn_is_not_labelled(tmp_path):
+    # Seen in the 2026-11-09 transcript: the operator typed while a tick turn was running, the
+    # message was delivered into that turn, and the agent answered the operator.
+    path = _transcript(
+        tmp_path,
+        _human("go", "2026-11-08T23:27:27Z"),
+        _reply("Working.", "2026-11-08T23:28:40Z"),
+        _tick("2026-11-08T23:30:26Z"),
+        _tool_call("2026-11-08T23:30:29Z"),
+        _tool_result("2026-11-08T23:30:30Z"),
+        _queued("sample report is here", "2026-11-08T23:30:32Z"),
+        _reply("You've sent the sample report, so I'll read it.", "2026-11-08T23:30:37Z"),
+        _reply("ok", "2026-11-08T23:30:50Z"),
+        _human("next", "2026-11-09T08:00:00Z"),
+        _reply("current", "2026-11-09T08:01:00Z"),
+    )
+    lines = _reply_lines(rl.agent_replies_block(path))
+    answer = [line for line in lines if "sample report" in line]
+    assert len(answer) == 1 and "automatic watchdog check" not in answer[0]
+    # From here the turn answers the operator, so a later "ok" is the agent's word to them.
+    assert [line for line in lines if line.endswith("] ok")]
+
+
 def test_tick_acknowledgements_do_not_hide_the_approved_message(tmp_path):
     # With only acknowledgements after the last approval, the window is empty in substance, so
     # the block still shows the approved message the operator's next message replies to.
