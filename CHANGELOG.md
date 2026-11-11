@@ -7,6 +7,8 @@ plugin spells the same version in [PEP 440](https://peps.python.org/pep-0440/) f
 
 ## [Unreleased]
 
+## [1.4.9] — unreleased
+
 ### Fixed
 
 - Claude Code: the stop supervisor no longer sees the agent's `ok` answers to watchdog ticks as
